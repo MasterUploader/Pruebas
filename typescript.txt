@@ -1,36 +1,13 @@
-generarVistaPreviaImpresion(tarjeta: any): string {
-  // Asumiendo que tarjeta.nombre contiene el nombre completo en el formato "primerNombre segundoNombre primerApellido segundoApellido"
-  const nombres = tarjeta.nombre.split(' ');
-  const primerNombre = nombres[0];
-  const segundoNombre = nombres[1] || ''; // En caso de que no todos tengan segundo nombre
-  const primerApellido = nombres[2];
-  const segundoApellido = nombres.length > 3 ? nombres.slice(3).join(' ') : ''; // Asume el último elemento como segundo apellido
+mostrarVistaPreviaYImprimir(tarjeta: any): void {
+  const vistaPreviaHtml = this.generarVistaPreviaImpresion(tarjeta);
+  const ventana = window.open('', 'PRINT', 'width=600,height=400');
+  ventana.document.write(vistaPreviaHtml);
+  ventana.document.close(); // Necesario para algunos navegadores
+  ventana.focus();
 
-  const estilo = `
-    <style>
-      .tarjeta-vista-previa {
-        position: relative;
-        width: 14.9411cm;
-        height: 8.759cm;
-        background-image: url('ruta/a/tu/imagen-de-fondo.jpg');
-        background-size: cover;
-        font-family: 'Arial', sans-serif;
-      }
-      .dato {
-        position: absolute;
-        white-space: nowrap;
-      }
-      .nombre { top: 9.0312cm; left: 86.649cm; font-size: 9pt; }
-      .fecha { top: 7.9512cm; left: 87.1975cm; font-size: 7pt; }
-    </style>
-  `;
-
-  const html = `
-    <div class="tarjeta-vista-previa">
-      <div class="dato nombre">${primerNombre} ${segundoNombre}<br>${primerApellido} ${segundoApellido}</div>
-      <div class="dato fecha">Emisión: ${tarjeta.fechaEmision}<br>Vencimiento: ${tarjeta.fechaVencimiento}</div>
-    </div>
-  `;
-
-  return estilo + html;
+  // Opcional: Desencadenar la impresión automáticamente después de mostrar la vista previa
+  ventana.onload = () => {
+    ventana.print();
+    ventana.close();
+  };
 }
