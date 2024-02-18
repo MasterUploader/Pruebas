@@ -22,3 +22,27 @@ export class DatosTarjetaService {
     return this.http.get<TarjetaResponse>(url);
   }
 }
+
+
+  consultarMicroservicio(): Observable<any> {
+    // Datos de prueba simulados
+    const datosSimulados = {
+      agenciaAperturaNombre: 'Agencia Central',
+      agenciaAperturaCodigo: '001',
+      agenciaImprimeNombre: 'Agencia de Impresión',
+      agenciaImprimeCodigo: '002',
+      tarjetas: [
+        {
+          nombre: 'Juan Perez',
+          numero: '1234 5678 9012 3456',
+          fechaEmision: '01/01/2022',
+          fechaVencimiento: '01/01/2027',
+          numeroCuenta: '1234567890'
+        },
+        // Más tarjetas si es necesario
+      ]
+    };
+
+    // Devolver los datos simulados como un Observable
+    return of(datosSimulados);
+  }
