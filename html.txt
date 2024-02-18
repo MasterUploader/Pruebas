@@ -1,3 +1,4 @@
+<!-- Título y Datos de Agencia -->
 <h1>Consulta de Tarjeta</h1>
 <div class="card">
   <div class="card-body">
@@ -9,6 +10,8 @@
     <p>{{ agenciaImprimeCodigo }}</p>
   </div>
 </div>
+
+<!-- Tabla de Tarjetas -->
 <div class="table-responsive">
   <table class="table">
     <thead>
@@ -31,17 +34,20 @@
     </tbody>
   </table>
 </div>
+
+<!-- Modal para Vista Previa de Impresión -->
 <div class="modal" [ngClass]="{'modal-visible': modalVisible}">
   <div class="modal-content">
     <div class="modal-header">
       <span class="modal-title">Vista Previa Impresión</span>
-      <button type="button" class="close" (click)="modalVisible = false">×</button>
+      <button type="button" class="close" (click)="cerrarModal()">&times;</button>
     </div>
     <div class="modal-body">
-      <div [innerHTML]="vistaPrevia"></div>
+      <!-- Aquí se generaría el HTML para la impresión basado en la tarjeta seleccionada -->
+      <div [innerHTML]="generarVistaPreviaImpresion(tarjetaSeleccionada)"></div>
     </div>
     <div class="modal-footer">
-      <button type="button" class="btn btn-primary">Imprimir</button>
+      <button type="button" class="btn btn-primary" (click)="imprimir()">Imprimir</button>
     </div>
   </div>
 </div>
