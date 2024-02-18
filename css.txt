@@ -1,24 +1,57 @@
-body {
-  font-family: sans-serif;
+/* Estilos Generales */
+body, html {
+  margin: 0;
+  padding: 0;
+  font-family: 'Arial', sans-serif;
+  background-color: #f4f4f4;
+  color: #333;
 }
 
-.card {
-  border: 1px solid #ddd;
-  padding: 20px;
+h1, h2, h3, h4, h5, h6 {
+  color: #333;
 }
 
-.card-body {
-  margin-bottom: 20px;
+p {
+  margin: 0 0 1em;
 }
 
+/* Tablas */
 .table {
   width: 100%;
   border-collapse: collapse;
 }
 
-th, td {
-  border: 1px solid #ddd;
+.table th, .table td {
   padding: 8px;
+  border: 1px solid #ddd;
+  text-align: left;
+}
+
+.table th {
+  background-color: #f2f2f2;
+}
+
+/* Botones */
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.btn-primary {
+  background-color: #007bff;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #0056b3;
+}
+
+/* Modal */
+.modal-visible {
+  display: block;
 }
 
 .modal {
@@ -34,43 +67,35 @@ th, td {
 }
 
 .modal-content {
+  background-color: #fefefe;
   margin: 15% auto;
   padding: 20px;
   border: 1px solid #888;
   width: 80%;
 }
 
-.modal-header {
-  padding-bottom: 10px;
-  border-bottom: 1px solid #e7e7e7;
-}
-
-.modal-title {
-  font-size: 16px;
-}
-
-.modal-close {
+.close {
   color: #aaa;
   float: right;
   font-size: 28px;
   font-weight: bold;
 }
 
-.modal-close:hover,
-.modal-close:focus {
+.close:hover,
+.close:focus {
   color: black;
   text-decoration: none;
   cursor: pointer;
 }
 
-.modal-body {
-  padding: 20px;
-}
+/* Ajustes Responsivos */
+@media (max-width: 768px) {
+  .btn {
+    width: 100%;
+    margin-top: 10px;
+  }
 
-.modal-footer {
-  padding: 10px 20px 20px 20px;
-  text-align: right;
+  .modal-content {
+    width: 90%;
+  }
 }
-
-.btn-primary {
-  background-color: #007
