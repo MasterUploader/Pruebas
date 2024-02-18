@@ -1,0 +1,24 @@
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+
+interface TarjetaResponse {
+  agenciaApertura: string;
+  agenciaImprime: string;
+  tarjeta: {
+    detalles: any[];
+  };
+}
+
+@Injectable({
+  providedIn: 'root'
+})
+export class DatosTarjetaService {
+
+  constructor(private http: HttpClient) { }
+
+  consultarMicroservicio(): Observable<TarjetaResponse> {
+    const url = `https://api.ejemplo.com/tarjeta?bin=1234567890&codigoAgenciaApertura=123&codigoAgenciaImprime=456`;
+    return this.http.get<TarjetaResponse>(url);
+  }
+}
