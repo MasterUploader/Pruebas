@@ -1,0 +1,52 @@
+import { Injectable } from '@angular/core';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class ImpresionService {
+
+  imprimirDatosSeleccionados(datosSeleccionados: any): void {
+    const printWindow = window.open('', 'PRINT', 'height=600,width=800');
+
+    if (!printWindow) {
+      console.error('Failed to open print window');
+      return;
+    }
+
+    printWindow.document.write('<html><head><title>Impresión de Datos Seleccionados</title>');
+    // Agrega aquí las fuentes si tienes acceso a versiones web
+    printWindow.document.write('</head><body>');
+    printWindow.document.write(this.generarHtmlParaImpresion(datosSeleccionados));
+    printWindow.document.write('</body></html>');
+
+    printWindow.document.close();
+    printWindow.focus();
+
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.print();
+        printWindow.close();
+      }, 1000); // Ajuste para asegurar que la ventana esté completamente cargada
+    };
+  }
+
+  private generarHtmlParaImpresion(datos: any): string {
+    // Convertimos las medidas de cm a px, asumiendo 96px = 2.54cm (1 inch)
+    // Ejemplo: 86.649cm * (96px / 2.54cm) para la conversión a pixeles
+    const nombrePosX = 86.649 * (96 / 2.54);
+    const nombrePosY = 9.0312 * (96 / 2.54);
+    const fechaPosX = 87.1975 * (96 / 2.54);
+    const fechaPosY = 7.9512 * (96 / 2.54);
+
+    return `
+      <div style="position: absolute; left: ${nombrePosX}px; top: ${nombrePosY}px; font-size: 9pt; font-family: 'Myriad Pro';">
+        <div>${datos.nombreDueño.split(' ')[0]} ${datos.nombreDueño.split(' ')[1]}</div>
+        <div>${datos.nombreDueño.split(' ')[2] ? datos.nombreDueño.split(' ')[2] : ''} ${datos.nombreDueño.split(' ')[3] ? datos.nombreDueño.split(' ')[3] : ''}</div>
+      </div>
+      <div style="position: absolute; left: ${fechaPosX}px; top: ${fechaPosY}px; font-size: 7pt; font-family: 'Forza Medium';">
+        <div>Emisión: ${datos.fechaEmision}</div>
+        <div>Vencimiento: ${datos.fechaVencimiento}</div>
+      </div>
+    `;
+  }
+}
