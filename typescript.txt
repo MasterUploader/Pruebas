@@ -1,13 +1,21 @@
-mostrarVistaPreviaYImprimir(tarjeta: any): void {
+imprimirDatosSeleccionados(tarjeta: any): void {
   const vistaPreviaHtml = this.generarVistaPreviaImpresion(tarjeta);
-  const ventana = window.open('', 'PRINT', 'width=600,height=400');
-  ventana.document.write(vistaPreviaHtml);
-  ventana.document.close(); // Necesario para algunos navegadores
-  ventana.focus();
+  const ventanaImpresion = window.open('', 'PRINT', 'width=600,height=400');
+  
+  ventanaImpresion.document.write('<html><head><title>Vista Previa de Impresión</title>');
+  ventanaImpresion.document.write('<style>body { margin: 0; padding: 0; } .tarjeta-vista-previa { display: flex; justify-content: center; align-items: center; height: 100vh; }</style>');
+  ventanaImpresion.document.write('</head><body>');
+  ventanaImpresion.document.write(vistaPreviaHtml);
+  ventanaImpresion.document.write('</body></html>');
+  
+  ventanaImpresion.document.close(); // Necesario para algunos navegadores para completar el proceso de carga de la página.
+  ventanaImpresion.focus();
 
-  // Opcional: Desencadenar la impresión automáticamente después de mostrar la vista previa
-  ventana.onload = () => {
-    ventana.print();
-    ventana.close();
+  // Espera a que el contenido se cargue antes de imprimir.
+  ventanaImpresion.onload = function() {
+    setTimeout(() => {
+      ventanaImpresion.print(); // Desencadena la impresión
+      ventanaImpresion.close(); // Cierra la ventana después de imprimir
+    }, 1000); // Ajusta este tiempo según sea necesario para asegurar que la página se haya cargado completamente.
   };
 }
