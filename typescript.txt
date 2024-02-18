@@ -1,0 +1,90 @@
+import { Component, OnInit } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+
+@Component({
+  selector: 'app-consulta-tarjeta',
+  templateUrl: './consulta-tarjeta.component.html',
+  styleUrls: ['./consulta-tarjeta.component.css']
+})
+export class ConsultaTarjetaComponent implements OnInit {
+
+  constructor(private http: HttpClient) { }
+
+  // Propiedades para almacenar los datos
+  agenciaAperturaNombre: string;
+  agenciaAperturaCodigo: number;
+  agenciaImprimeNombre: string;
+  agenciaImprimeCodigo: number;
+  tarjeta: Tarjeta;
+  tarjetas: Tarjeta[];
+  cargando: boolean;
+  modalVisible: boolean;
+  vistaPrevia: string;
+
+  ngOnInit(): void {
+    this.cargando = true;
+    this.consultarTarjetas();
+  }
+
+  // Función para consultar el microservicio
+  consultarTarjetas(): void {
+    const bin = '123456'; // Reemplazar con el valor real
+    const codigoAgenciaApertura = 123; // Reemplazar con el valor real
+    const codigoAgenciaImprime = 456; // Reemplazar con el valor real
+
+    const url = `https://api.ejemplo.com/tarjetas?bin=<span class="math-inline">\{bin\}&codigoAgenciaApertura\=</span>{codigoAgenciaApertura}&codigoAgenciaImprime=${codigoAgenciaImprime}`;
+
+    this.http.get<Tarjeta[]>(url).subscribe(
+      (response) => {
+        this.cargando = false;
+        this.tarjetas = response;
+
+        if (this.tarjetas.length === 0) {
+          this.mensajeSinDatos();
+        } else {
+          this.agenciaAperturaNombre = this.tarjetas[0].agenciaAperturaNombre;
+          this.agenciaAperturaCodigo = this.tarjetas[0].agenciaAperturaCodigo;
+          this.agenciaImprimeNombre = this.tarjetas[0].agenciaImprimeNombre;
+          this.agenciaImprimeCodigo = this.tarjetas[0].agenciaImprimeCodigo;
+        }
+      },
+      (error) => {
+        this.cargando = false;
+        console.error(error);
+      }
+    );
+  }
+
+  // Función para mostrar mensaje de no hay datos
+  mensajeSinDatos(): void {
+    this.tarjetas = [];
+    this.agenciaAperturaNombre = '';
+    this.agenciaAperturaCodigo = null;
+    this.agenciaImprimeNombre = '';
+    this.agenciaImprimeCodigo = null;
+  }
+
+  // Función para seleccionar una fila de la tabla
+  seleccionarFila(tarjeta: Tarjeta): void {
+    this.tarjeta = tarjeta;
+    this.modalVisible = true;
+    this.generarVistaPrevia();
+  }
+
+  // Función para generar la vista previa de la impresión
+  generarVistaPrevia(): void {
+    const imagenFondo = 'https://imagen-fondo-tarjeta.jpg'; // Reemplazar con la ruta real de la imagen
+    const textoNombre = this.tarjeta.nombre;
+    const textoNumero = this.tarjeta.numero;
+    const textoFechaEmision = this.tarjeta.fechaEmision;
+    const textoFechaVencimiento = this.tarjeta.fechaVencimiento;
+    const textoNumeroCuenta = this.tarjeta.numeroCuenta;
+
+    // Plantilla para la vista previa
+    this.vistaPrevia = `
+      <div style="background-image: url(<span class="math-inline">\{imagenFondo\}\);"\>
+<p style\="position\: absolute; top\: 10px; left\: 10px; font\-size\: 16px; font\-weight\: bold;"\></span>{textoNombre}</p>
+        <p style="position: absolute; top: 30px; left: 10px; font-size: 14px;"><span class="math-inline">\{textoNumero\}</p\>
+<p style\="position\: absolute; bottom\: 10px; left\: 10px; font\-size\: 12px;"\></span>{textoFechaEmision}</p>
+        <p style="position: absolute; bottom: 10px; right: 10px; font-size: 12px;">${textoFechaVencimiento}</p>
+        <p style="position: absolute
