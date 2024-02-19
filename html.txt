@@ -1,36 +1,10 @@
-imprimirDatosSeleccionados(tarjeta: any): void {
-  // Prepara el contenido HTML solo con el texto necesario
-  const contenidoHtml = `
-    <div style="font-family: 'Arial', sans-serif; width: 14.9411cm; height: 8.759cm;">
-      <div style="position: absolute; top: 9.0312cm; left: 86.649cm; font-size: 9pt;">
-        ${tarjeta.primerNombre} ${tarjeta.segundoNombre}<br>${tarjeta.primerApellido} ${tarjeta.segundoApellido}
+const contenidoHtml = `
+      <div style="font-family: 'Arial', sans-serif; width: 8.759cm; height: 14.9411cm;">
+        <div style="font-size: 9pt; font-family: 'Myriad Pro', sans-serif; margin-top: 9.0312cm; margin-left: 0.5cm;">
+          ${primerNombre} ${segundoNombre}<br>${primerApellido} ${segundoApellido}
+        </div>
+        <div style="font-size: 4pt; font-family: 'Forza Medium', sans-serif; margin-top: 1cm; margin-left: 0.5cm;">
+          Vigencia: ${tarjeta.fechaVencimiento}
+        </div>
       </div>
-      <div style="position: absolute; top: 7.9512cm; left: 87.1975cm; font-size: 7pt;">
-        Emisión: ${tarjeta.fechaEmision}<br>Vencimiento: ${tarjeta.fechaVencimiento}
-      </div>
-    </div>
-  `;
-
-  const ventanaImpresion = window.open('', '_blank', 'width=800,height=600');
-  if (ventanaImpresion) {
-    ventanaImpresion.document.write(`
-      <html>
-        <head>
-          <title>Impresión de Tarjeta</title>
-        </head>
-        <body>
-          ${contenidoHtml}
-        </body>
-      </html>
-    `);
-    ventanaImpresion.document.close();
-    ventanaImpresion.focus();
-
-    setTimeout(() => {
-      ventanaImpresion.print();
-      ventanaImpresion.close();
-    }, 1000);
-  } else {
-    alert('No se pudo abrir la ventana de impresión. Por favor, habilita las ventanas emergentes para este sitio.');
-  }
-}
+    `;
