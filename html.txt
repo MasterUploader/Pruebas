@@ -1,15 +1,36 @@
-<!-- Dentro de tu archivo de plantilla del componente Angular -->
-<div class="modal" [ngClass]="{'modal-visible': modalVisible}">
-  <div class="modal-content">
-    <div class="modal-header">
-      <span class="modal-title">Vista Previa Impresión</span>
-      <button type="button" class="close" (click)="cerrarModal()">&times;</button>
+imprimirDatosSeleccionados(tarjeta: any): void {
+  // Prepara el contenido HTML solo con el texto necesario
+  const contenidoHtml = `
+    <div style="font-family: 'Arial', sans-serif; width: 14.9411cm; height: 8.759cm;">
+      <div style="position: absolute; top: 9.0312cm; left: 86.649cm; font-size: 9pt;">
+        ${tarjeta.primerNombre} ${tarjeta.segundoNombre}<br>${tarjeta.primerApellido} ${tarjeta.segundoApellido}
+      </div>
+      <div style="position: absolute; top: 7.9512cm; left: 87.1975cm; font-size: 7pt;">
+        Emisión: ${tarjeta.fechaEmision}<br>Vencimiento: ${tarjeta.fechaVencimiento}
+      </div>
     </div>
-    <div class="modal-body" style="position: relative;">
-      <div [innerHTML]="vistaPreviaHtml"></div>
-    </div>
-    <div class="modal-footer">
-      <button type="button" class="btn btn-primary" (click)="imprimir()">Imprimir</button>
-    </div>
-  </div>
-</div>
+  `;
+
+  const ventanaImpresion = window.open('', '_blank', 'width=800,height=600');
+  if (ventanaImpresion) {
+    ventanaImpresion.document.write(`
+      <html>
+        <head>
+          <title>Impresión de Tarjeta</title>
+        </head>
+        <body>
+          ${contenidoHtml}
+        </body>
+      </html>
+    `);
+    ventanaImpresion.document.close();
+    ventanaImpresion.focus();
+
+    setTimeout(() => {
+      ventanaImpresion.print();
+      ventanaImpresion.close();
+    }, 1000);
+  } else {
+    alert('No se pudo abrir la ventana de impresión. Por favor, habilita las ventanas emergentes para este sitio.');
+  }
+}
