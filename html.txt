@@ -1,29 +1,10 @@
-<div class="agencia-info">
-  <div class="fila">
-    <span class="titulo">Agencia Imprime:</span>
-    <span class="codigo-agencia">{{ agencia.codigoAgenciaImprime }}</span>
-    <span class="nombre-agencia">{{ agencia.nombreAgenciaImprime }}</span>
-  </div>
-  <div class="fila">
-    <span class="titulo">Agencia Apertura:</span>
-    <span class="codigo-agencia">{{ agencia.codigoAgenciaApertura }}</span>
-    <span class="nombre-agencia">{{ agencia.nombreAgenciaApertura }}</span>
-  </div>
-</div>
-
-
-.agencia-info .fila {
-  display: flex; /* Alinea los elementos de la fila horizontalmente */
-  align-items: center; /* Centra los elementos verticalmente en la fila */
-  margin-bottom: 10px; /* Espacio entre filas para mejor legibilidad */
-}
-
-.agencia-info .titulo {
-  font-weight: bold; /* Títulos en negrita para destacar */
-  margin-right: 5px; /* Espacio después del título */
-}
-
-.agencia-info .codigo-agencia, .agencia-info .nombre-agencia {
-  margin-right: 5px; /* Espacio entre el código y el nombre */
-}
-
+  const contenidoHtml = `
+    <div style="position: relative; width: 8.759cm; height: 14.9411cm; font-family: 'Arial', sans-serif; margin: 10px; border: 2px solid black; box-sizing: border-box; background-image: url('ruta/a/tu/imagen-de-fondo.png'); background-size: cover;">
+      <div style="position: absolute; top: 9.0312cm; left: 0.5cm; font-size: 9pt; font-family: 'Myriad Pro', sans-serif;">
+        ${primerNombre} ${segundoNombre}<br>${primerApellido} ${segundoApellido}
+      </div>
+      <div style="position: absolute; top: 7.9512cm; left: 0.5cm; font-size: 4pt; font-family: 'Forza Medium', sans-serif;">
+        Vigencia: ${tarjeta.fechaVencimiento}
+      </div>
+    </div>
+  `;
