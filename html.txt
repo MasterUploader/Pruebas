@@ -1,1 +1,1 @@
-npm install --save --offline --no-package-lock --no-save ./ruta/al/archivo/angular-material-archivo-comprimido.zip --no-optional --no-audit --no-fund --no-bin-links --prefer-offline
+npm install --save --offline --no-package-lock --no-audit --no-fund --no-bin-links ./ruta/al/archivo/angular-material-archivo-comprimido.zip
