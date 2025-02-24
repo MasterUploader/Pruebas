@@ -1,24 +1,39 @@
 using System;
-using System.Linq;
+using System.Threading;
 
-namespace Logging.Extensions
+namespace Logging.Helpers
 {
     /// <summary>
-    /// Provee métodos de extensión para trabajar con cadenas.
+    /// Permite crear un scope de logging anidado para mantener la jerarquía del flujo de ejecución.
+    /// Utiliza AsyncLocal para mantener el nivel de indentación en operaciones asíncronas.
     /// </summary>
-    public static class StringExtensions
+    public sealed class LogScope : IDisposable
     {
+        private static readonly AsyncLocal<int> _currentLevel = new AsyncLocal<int>();
+
         /// <summary>
-        /// Aplica indentación (4 espacios por nivel) a cada línea del texto.
+        /// Obtiene el nivel actual de indentación.
         /// </summary>
-        /// <param name="text">Texto a indentar.</param>
-        /// <param name="indentLevel">Nivel de indentación.</param>
-        /// <returns>Texto con indentación aplicada.</returns>
-        public static string Indent(this string text, int indentLevel)
+        public static int CurrentLevel
         {
-            string indent = new(' ', indentLevel * 4);
-            var lines = text.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-            return string.Join(Environment.NewLine, lines.Select(line => indent + line));
+            get => _currentLevel.Value;
+            private set => _currentLevel.Value = value;
+        }
+
+        /// <summary>
+        /// Al instanciar un LogScope se incrementa el nivel actual.
+        /// </summary>
+        public LogScope()
+        {
+            CurrentLevel += 1;
+        }
+
+        /// <summary>
+        /// Al finalizar el scope se decrementa el nivel actual.
+        /// </summary>
+        public void Dispose()
+        {
+            CurrentLevel -= 1;
         }
     }
 }
