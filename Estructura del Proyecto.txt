@@ -1,280 +1,206 @@
+using Logging.Abstractions;
+using Logging.Helpers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
 using System;
+using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
-namespace Logging.Helpers
+namespace Logging.Middleware
 {
     /// <summary>
-    /// Clase que proporciona métodos para formatear secciones del log.
+    /// Middleware que intercepta la solicitud (request) y la respuesta (response) para generar un log completo
+    /// de la petición actual. El log se escribe en un archivo único ubicado en la ruta:
+    /// [BaseLogDirectory]\[NombreApi]\, donde BaseLogDirectory se configura desde el appsettings.json 
+    /// y el NombreApi se obtiene dinámicamente del entorno (IHostEnvironment).
     /// </summary>
-    public static class LogFormatter
+    public class LoggingMiddleware
     {
+        private readonly RequestDelegate _next;
+        private readonly ILoggingService _loggingService;
+        private readonly IHostEnvironment _hostEnvironment;
+
         /// <summary>
-        /// Genera el bloque de texto que indica el inicio del log.
+        /// Constructor del middleware que inyecta el RequestDelegate, el servicio de logging y la información del entorno.
         /// </summary>
-        /// <returns>Texto formateado para el inicio del log.</returns>
-        public static string FormatBeginLog()
+        /// <param name="next">Siguiente middleware en el pipeline.</param>
+        /// <param name="loggingService">Servicio para registrar logs.</param>
+        /// <param name="hostEnvironment">Información del entorno de la aplicación.</param>
+        public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService, IHostEnvironment hostEnvironment)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("---------------------------Inicio de Log---------------------------");
-            sb.AppendLine($"{DateTime.Now}");
-            sb.AppendLine("---------------------------Inicio de Log---------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-        
-        /// <summary>
-        /// Genera el bloque de texto que inicia la sección de información del entorno.
-        /// </summary>
-        /// <param name="application">Nombre de la aplicación.</param>
-        /// <param name="env">Ambiente de ejecución (por ejemplo, Development, Production).</param>
-        /// <param name="contentRoot">Directorio raíz del contenido.</param>
-        /// <param name="executionId">Identificador de la ejecución.</param>
-        /// <param name="clientIp">Dirección IP del cliente.</param>
-        /// <param name="userAgent">Información del agente de usuario.</param>
-        /// <param name="machineName">Nombre de la máquina.</param>
-        /// <param name="os">Información del sistema operativo.</param>
-        /// <param name="host">Host de la petición.</param>
-        /// <param name="distribution">Información de distribución.</param>
-        /// <returns>Texto formateado con la información del entorno.</returns>
-        public static string FormatEnvironmentInfoStart(
-            string application,
-            string env,
-            string contentRoot,
-            string executionId,
-            string clientIp,
-            string userAgent,
-            string machineName,
-            string os,
-            string host,
-            string distribution)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("---------------------------Enviroment Info-------------------------");
-            sb.AppendLine($"       Inicio: {DateTime.Now}");
-            sb.AppendLine("-------------------------------------------------------------------");
-            sb.AppendLine($"Application: {application}");
-            sb.AppendLine($"Environment: {env}");
-            sb.AppendLine($"ContentRoot: {contentRoot}");
-            sb.AppendLine($"Execution ID: {executionId}");
-            sb.AppendLine($"Client IP: {clientIp}");
-            sb.AppendLine($"User Agent: {userAgent}");
-            sb.AppendLine($"Machine Name: {machineName}");
-            sb.AppendLine($"OS: {os}");
-            sb.AppendLine($"Host: {host}");
-            sb.AppendLine($"Distribución: {distribution}");
-            sb.AppendLine();
-            return sb.ToString();
+            _next = next;
+            _loggingService = loggingService;
+            _hostEnvironment = hostEnvironment;
         }
 
         /// <summary>
-        /// Genera el bloque de texto que finaliza la sección de información del entorno.
+        /// Método principal del middleware que se invoca para cada solicitud.
+        /// Genera un log completo que incluye información del entorno, endpoint, request, response y excepciones.
         /// </summary>
-        /// <returns>Texto formateado indicando el fin de la sección de entorno.</returns>
-        public static string FormatEnvironmentInfoEnd()
+        /// <param name="context">El contexto HTTP de la petición actual.</param>
+        /// <returns>Una tarea asincrónica.</returns>
+        public async Task InvokeAsync(HttpContext context)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("----------------------------Enviroment Info-------------------------");
-            sb.AppendLine($"       Fin: {DateTime.Now}");
-            sb.AppendLine("-------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
+            try
+            {
+                // Obtiene la ruta de logs basada en el nombre de la API (definida en el entorno)
+                var logFileName = Path.Combine(GetLogDirectory(), $"Log_{context.TraceIdentifier}.txt");
+                // Almacena el nombre del archivo de log en el HttpContext para que otros métodos lo puedan utilizar
+                context.Items["LogFileName"] = logFileName;
+
+                var logBuilder = new StringBuilder();
+
+                // Genera el bloque de inicio del log
+                logBuilder.AppendLine(LogFormatter.FormatBeginLog());
+
+                // Recupera datos dinámicos del entorno: ApplicationName, EnvironmentName y ContentRootPath.
+                string application = !string.IsNullOrWhiteSpace(_hostEnvironment.ApplicationName) ? _hostEnvironment.ApplicationName : "Desconocido";
+                string env = !string.IsNullOrWhiteSpace(_hostEnvironment.EnvironmentName) ? _hostEnvironment.EnvironmentName : "Desconocido";
+                string contentRoot = !string.IsNullOrWhiteSpace(_hostEnvironment.ContentRootPath) ? _hostEnvironment.ContentRootPath : "Desconocido";
+
+                // Genera el bloque de información del entorno con datos como la IP del cliente, User-Agent, etc.
+                logBuilder.AppendLine(LogFormatter.FormatEnvironmentInfoStart(
+                    application: application,
+                    env: env,
+                    contentRoot: contentRoot,
+                    executionId: context.TraceIdentifier,
+                    clientIp: context.Connection.RemoteIpAddress?.ToString() ?? "Desconocido",
+                    userAgent: context.Request.Headers["User-Agent"].FirstOrDefault() ?? "Desconocido",
+                    machineName: Environment.MachineName,
+                    os: Environment.OSVersion.ToString(),
+                    host: context.Request.Host.ToString() ?? "Desconocido",
+                    distribution: "Desconocido"
+                ));
+                logBuilder.AppendLine(LogFormatter.FormatEnvironmentInfoEnd());
+
+                // Registra el endpoint (ruta) que se está procesando
+                string endpointName = context.Request.Path;
+                logBuilder.AppendLine(LogFormatter.FormatEndpoint(endpointName));
+
+                // Captura y registra la información de la solicitud (request)
+                logBuilder.AppendLine(LogFormatter.FormatRequestInfoStart());
+                logBuilder.AppendLine(await CaptureRequestInfoAsync(context));
+                logBuilder.AppendLine(LogFormatter.FormatRequestInfoEnd());
+
+                // Invoca el siguiente middleware en el pipeline (o la acción del controlador)
+                await _next(context);
+
+                // Captura y registra la información de la respuesta (response)
+                logBuilder.AppendLine(LogFormatter.FormatResponseInfo(CaptureResponseInfo(context)));
+
+                // Registra nuevamente el endpoint para marcar el fin del procesamiento de ese endpoint
+                logBuilder.AppendLine(LogFormatter.FormatEndpoint(endpointName));
+
+                // Registra el bloque de excepciones; en este caso, se indica "Sin excepciones" si todo fue correcto.
+                logBuilder.AppendLine(LogFormatter.FormatExceptionDetails("Sin excepciones"));
+
+                // Agrega el bloque final de cierre del log
+                logBuilder.AppendLine(LogFormatter.FormatEndLog());
+
+                // Escribe todo el contenido generado en el archivo único para esta petición.
+                File.AppendAllText(logFileName, logBuilder.ToString());
+            }
+            catch (Exception ex)
+            {
+                // Si ocurre alguna excepción en el middleware, se registra en el log de excepciones utilizando el servicio.
+                _loggingService.AddExceptionLog(ex);
+            }
         }
 
         /// <summary>
-        /// Genera el bloque de texto que indica el endpoint procesado.
+        /// Obtiene la ruta de directorio para guardar los logs en función del nombre de la API.
+        /// La ruta se forma como "C:\Logs\[NombreApi]\".
         /// </summary>
-        /// <param name="endpointName">El nombre o la ruta del endpoint.</param>
-        /// <returns>Texto formateado con el endpoint.</returns>
-        public static string FormatEndpoint(string endpointName)
+        /// <returns>La ruta completa del directorio de logs.</returns>
+        private string GetLogDirectory()
         {
-            var sb = new StringBuilder();
-            sb.AppendLine($"---------------------------Endpoint: {endpointName}---------------------------");
-            sb.AppendLine($"{DateTime.Now}");
-            sb.AppendLine($"---------------------------Endpoint: {endpointName}---------------------------");
-            sb.AppendLine();
-            return sb.ToString();
+            // Obtiene el nombre de la API desde el entorno; usa "Desconocido" si no está definido.
+            string apiName = !string.IsNullOrWhiteSpace(_hostEnvironment.ApplicationName)
+                                ? _hostEnvironment.ApplicationName
+                                : "Desconocido";
+            // Combina la ruta base fija con el nombre de la API.
+            string directory = Path.Combine(@"C:\Logs\", apiName);
+            try
+            {
+                // Crea el directorio si no existe.
+                if (!Directory.Exists(directory))
+                    Directory.CreateDirectory(directory);
+            }
+            catch (Exception ex)
+            {
+                // Registra cualquier error al crear el directorio.
+                _loggingService.AddExceptionLog(ex);
+            }
+            return directory;
         }
 
         /// <summary>
-        /// Genera el bloque de texto que inicia la sección de información de la solicitud.
+        /// Captura la información relevante de la solicitud (request), incluyendo:
+        /// IP, método, query string, headers y body.
+        /// Si ocurre un error, retorna un mensaje predeterminado.
         /// </summary>
-        /// <returns>Texto formateado indicando el inicio de la información de la solicitud.</returns>
-        public static string FormatRequestInfoStart()
+        /// <param name="context">El HttpContext de la solicitud.</param>
+        /// <returns>Una cadena con la información de la solicitud.</returns>
+        private async Task<string> CaptureRequestInfoAsync(HttpContext context)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("----------------------------------Request Info---------------------------------");
-            sb.AppendLine($"       Inicio: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
+            try
+            {
+                var request = context.Request;
+                // Combina todos los headers en una cadena, separándolos por salto de línea.
+                string headers = string.Join(Environment.NewLine, request.Headers.Select(h => $"{h.Key}: {h.Value}"));
+                // Obtiene la query string
+                string query = request.QueryString.ToString();
+                // Obtiene la dirección IP del cliente
+                string ip = context.Connection.RemoteIpAddress?.ToString() ?? "Desconocido";
+                // Obtiene el método HTTP (GET, POST, etc.)
+                string method = request.Method;
+                string body = string.Empty;
+
+                // Habilita el buffer para poder leer el body sin consumirlo
+                request.EnableBuffering();
+                using (var reader = new StreamReader(request.Body, leaveOpen: true))
+                {
+                    body = await reader.ReadToEndAsync();
+                    // Restaura la posición del stream para que otros componentes puedan leerlo
+                    request.Body.Position = 0;
+                }
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"IP: {ip}");
+                sb.AppendLine($"Method: {method}");
+                sb.AppendLine($"Query: {query}");
+                sb.AppendLine($"Headers: {headers}");
+                sb.AppendLine("Body: ");
+                sb.AppendLine(body);
+                return sb.ToString();
+            }
+            catch
+            {
+                return "No se pudo capturar la información de la solicitud.";
+            }
         }
 
         /// <summary>
-        /// Genera el bloque de texto que finaliza la sección de información de la solicitud.
+        /// Captura la información de la respuesta (response), incluyendo el código de estado y headers.
+        /// Si ocurre un error, retorna un mensaje predeterminado.
         /// </summary>
-        /// <returns>Texto formateado indicando el fin de la información de la solicitud.</returns>
-        public static string FormatRequestInfoEnd()
+        /// <param name="context">El HttpContext de la respuesta.</param>
+        /// <returns>Una cadena con la información de la respuesta.</returns>
+        private string CaptureResponseInfo(HttpContext context)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("----------------------------------Request Info---------------------------------");
-            sb.AppendLine($"       Fin: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera un bloque de texto para un log simple.
-        /// </summary>
-        /// <param name="message">El mensaje a registrar.</param>
-        /// <returns>Texto formateado para un log simple.</returns>
-        public static string FormatSingleLog(string message)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("----------------------------------Single Log---------------------------------");
-            sb.AppendLine($"       Inicio: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine(message);
-            sb.AppendLine();
-            sb.AppendLine("----------------------------------Single Log---------------------------------");
-            sb.AppendLine($"       Fin: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera un bloque de texto para registrar un objeto, serializado a JSON.
-        /// </summary>
-        /// <param name="objectName">El nombre identificador del objeto.</param>
-        /// <param name="message">El contenido del objeto en formato de texto.</param>
-        /// <returns>Texto formateado para el log del objeto.</returns>
-        public static string FormatObjectLog(string objectName, string message)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
-            sb.AppendLine($"       Inicio: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine(message);
-            sb.AppendLine();
-            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
-            sb.AppendLine($"       Fin: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera un bloque de texto que marca el inicio de un método o función.
-        /// </summary>
-        /// <param name="methodName">El nombre del método o función.</param>
-        /// <returns>Texto formateado indicando el inicio del método o función.</returns>
-        public static string FormatMethodFunctionStart(string methodName)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine($"----------------------------------Método/Funcion : {methodName}---------------------------------");
-            sb.AppendLine($"       Inicio: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera un bloque de texto para registrar los parámetros de entrada.
-        /// </summary>
-        /// <param name="parameters">Una cadena que representa los parámetros de entrada.</param>
-        /// <returns>Texto formateado con los parámetros de entrada.</returns>
-        public static string FormatInputParameters(string parameters)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------------------");
-            sb.AppendLine(parameters);
-            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera un bloque de texto para registrar los parámetros de salida.
-        /// </summary>
-        /// <param name="parameters">Una cadena que representa los parámetros de salida.</param>
-        /// <returns>Texto formateado con los parámetros de salida.</returns>
-        public static string FormatOutputParameters(string parameters)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("-----------------------Parámetros de Salida-----------------------------------");
-            sb.AppendLine(parameters);
-            sb.AppendLine("-----------------------Parámetros de Salida-----------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera un bloque de texto que marca el final de un método o función.
-        /// </summary>
-        /// <param name="methodName">El nombre del método o función.</param>
-        /// <returns>Texto formateado indicando el final del método o función.</returns>
-        public static string FormatMethodFunctionEnd(string methodName)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine($"----------------------------------Método/Funcion : {methodName}---------------------------------");
-            sb.AppendLine($"       Fin: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera un bloque de texto para registrar la información de la respuesta.
-        /// </summary>
-        /// <param name="message">El mensaje o datos de la respuesta.</param>
-        /// <returns>Texto formateado para el log de la respuesta.</returns>
-        public static string FormatResponseInfo(string message)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("----------------------------------Response Info---------------------------------");
-            sb.AppendLine($"       Inicio: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine(message);
-            sb.AppendLine();
-            sb.AppendLine("----------------------------------Response Info---------------------------------");
-            sb.AppendLine($"       Fin: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera un bloque de texto para registrar los detalles de una excepción.
-        /// </summary>
-        /// <param name="message">El mensaje de la excepción.</param>
-        /// <returns>Texto formateado para el log de excepciones.</returns>
-        public static string FormatExceptionDetails(string message)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("----------------------------------Exception Details---------------------------------");
-            sb.AppendLine($"       Inicio: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine(message);
-            sb.AppendLine();
-            sb.AppendLine("----------------------------------Exception Details---------------------------------");
-            sb.AppendLine($"       Fin: {DateTime.Now}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine();
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Genera el bloque de texto final que indica el cierre del log.
-        /// </summary>
-        /// <returns>Texto formateado indicando el fin del log.</returns>
-        public static string FormatEndLog()
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("---------------------------Fin de Log---------------------------");
-            sb.AppendLine($"{DateTime.Now}");
-            sb.AppendLine("---------------------------Fin de Log---------------------------");
-            return sb.ToString();
+            try
+            {
+                var response = context.Response;
+                // Combina todos los headers de la respuesta en una cadena.
+                string headers = string.Join(Environment.NewLine, response.Headers.Select(h => $"{h.Key}: {h.Value}"));
+                return $"StatusCode: {response.StatusCode}{Environment.NewLine}Headers: {headers}";
+            }
+            catch
+            {
+                return "No se pudo capturar la información de la respuesta.";
+            }
         }
     }
 }
