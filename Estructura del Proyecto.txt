@@ -1,267 +1,100 @@
 using Logging.Abstractions;
-using Logging.Extensions;
 using Logging.Helpers;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
-using System;
-using System.IO;
-using System.Text;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
 
-namespace Logging.Services
+namespace Logging.Filters
 {
     /// <summary>
-    /// Implementación del servicio de logging.
-    /// Se encarga de escribir logs en archivos únicos por petición utilizando la ruta:
-    /// [BaseLogDirectory]\[NombreApi]\, donde BaseLogDirectory se configura desde el appsettings.json.
-    /// Si ocurre un error interno, se registra en "InternalErrorLog.txt" sin afectar la API.
+    /// Filtro de acción que se ejecuta antes y después de la acción de un controlador.
+    /// Captura parámetros de entrada y salida, y mide el tiempo de ejecución.
+    /// Utiliza scopes anidados para reflejar la jerarquía del flujo de ejecución.
     /// </summary>
-    public class LoggingService : ILoggingService
+    public class LoggingActionFilter : IActionFilter
     {
-        private readonly string _logDirectory;
-        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly ILoggingService _loggingService;
+        private readonly string _controllerName;
+        private readonly string _actionName;
+        private Stopwatch _stopwatch;
+
+        // Reutiliza una instancia estática para las opciones de serialización, evitando crear nuevas instancias en cada uso.
+        private static readonly JsonSerializerOptions SerializerOptions = new JsonSerializerOptions { WriteIndented = true };
 
         /// <summary>
-        /// Versión de la librería para control de versionamiento.
+        /// Constructor que inicializa el filtro con el servicio de logging y extrae los nombres del controlador y de la acción.
         /// </summary>
-        public const string LibraryVersion = "1.0.0";
+        /// <param name="loggingService">Servicio de logging inyectado.</param>
+        /// <param name="actionDescriptor">Descriptor de la acción, del cual se extraen el controlador y la acción.</param>
+        public LoggingActionFilter(ILoggingService loggingService, ActionDescriptor actionDescriptor)
+            => (_loggingService, _controllerName, _actionName) =
+                (loggingService, actionDescriptor.RouteValues["controller"], actionDescriptor.RouteValues["action"]);
 
         /// <summary>
-        /// Constructor que inicializa el servicio de logging.
-        /// Se inyectan IHttpContextAccessor, IHostEnvironment y IOptions de LoggingOptions para obtener la ruta base.
-        /// La ruta final se forma combinando la BaseLogDirectory con el ApplicationName.
+        /// Se ejecuta antes de que se invoque la acción del controlador.
+        /// Inicia el cronómetro, registra los parámetros de entrada y envía un log indicando el inicio de la ejecución.
         /// </summary>
-        /// <param name="httpContextAccessor">Provee acceso al contexto HTTP.</param>
-        /// <param name="hostEnvironment">Información del entorno de la aplicación.</param>
-        /// <param name="options">Opciones de configuración para logging (definidas en appsettings.json).</param>
-        public LoggingService(IHttpContextAccessor httpContextAccessor, IHostEnvironment hostEnvironment, IOptions<Logging.Configuration.LoggingOptions> options)
+        /// <param name="context">Contexto de ejecución de la acción.</param>
+        public void OnActionExecuting(ActionExecutingContext context)
         {
-            _httpContextAccessor = httpContextAccessor;
-            string baseLogDir = options.Value.BaseLogDirectory;
-            string apiName = !string.IsNullOrWhiteSpace(hostEnvironment.ApplicationName) ? hostEnvironment.ApplicationName : "Desconocido";
-            _logDirectory = Path.Combine(baseLogDir, apiName);
             try
             {
-                if (!Directory.Exists(_logDirectory))
-                    Directory.CreateDirectory(_logDirectory);
+                // Se crea un scope para aumentar la indentación y reflejar el inicio de un bloque de ejecución.
+                using var scope = new LogScope();
+
+                // Inicia el cronómetro para medir el tiempo de ejecución.
+                _stopwatch = Stopwatch.StartNew();
+
+                // Serializa los parámetros de entrada, reutilizando las opciones definidas.
+                var inputParams = string.Join(System.Environment.NewLine,
+                    context.ActionArguments.Select(arg =>
+                        $"{arg.Key} = {(arg.Value != null ? JsonSerializer.Serialize(arg.Value, SerializerOptions) : "Desconocido") }"));
+
+                // Registra los parámetros de entrada.
+                _loggingService.AddInputParameters(inputParams);
+                // Registra un log indicando el inicio de la ejecución en el controlador y acción correspondientes.
+                _loggingService.AddSingleLog($"Inicio de ejecución en Controller: {_controllerName}, Action: {_actionName}");
             }
-            catch (Exception ex)
+            catch (System.Exception ex)
             {
-                LogInternalError(ex);
+                // Si ocurre alguna excepción, se registra usando el servicio de logging.
+                _loggingService.AddExceptionLog(ex);
             }
         }
 
         /// <summary>
-        /// Obtiene el archivo de log actual asociado a la petición o retorna un archivo global de logs manuales.
+        /// Se ejecuta después de que se ha invocado la acción del controlador.
+        /// Detiene el cronómetro, registra los parámetros de salida y envía un log final indicando el tiempo de ejecución.
         /// </summary>
-        /// <returns>Ruta del archivo de log.</returns>
-        private string GetCurrentLogFile()
+        /// <param name="context">Contexto de ejecución de la acción, incluyendo el resultado.</param>
+        public void OnActionExecuted(ActionExecutedContext context)
         {
             try
             {
-                var context = _httpContextAccessor.HttpContext;
-                if (context != null && context.Items.ContainsKey("LogFileName"))
+                using var scope = new LogScope();
+
+                // Detiene el cronómetro y obtiene el tiempo transcurrido.
+                _stopwatch.Stop();
+
+                // Intenta capturar el resultado de la acción; si es un ObjectResult, se serializa el valor.
+                string outputParams = "Sin datos de salida";
+                if (context.Result is ObjectResult objectResult && objectResult.Value != null)
                 {
-                    return context.Items["LogFileName"] as string;
+                    outputParams = JsonSerializer.Serialize(objectResult.Value, SerializerOptions);
                 }
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-            return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
-        }
 
-        /// <summary>
-        /// Registra errores internos en el archivo "InternalErrorLog.txt".
-        /// </summary>
-        /// <param name="ex">La excepción a registrar.</param>
-        private void LogInternalError(Exception ex)
-        {
-            try
-            {
-                var errorLogPath = Path.Combine(_logDirectory, "InternalErrorLog.txt");
-                var errorMessage = $"[{DateTime.Now}] Error en LoggingService: {ex}{Environment.NewLine}";
-                File.AppendAllText(errorLogPath, errorMessage);
+                // Registra los parámetros de salida.
+                _loggingService.AddOutputParameters(outputParams);
+                // Registra un log indicando el fin de la ejecución, junto con el tiempo transcurrido.
+                _loggingService.AddSingleLog($"Fin de ejecución en Controller: {_controllerName}, Action: {_actionName} en {_stopwatch.ElapsedMilliseconds} ms");
             }
-            catch
+            catch (System.Exception ex)
             {
-                // Si falla, se ignora para evitar ciclos de error.
-            }
-        }
-
-        /// <summary>
-        /// Escribe el contenido del log en un archivo único para la petición actual.
-        /// </summary>
-        /// <param name="context">El contexto HTTP de la petición.</param>
-        /// <param name="logContent">El contenido del log a escribir.</param>
-        public void WriteLog(HttpContext context, string logContent)
-        {
-            try
-            {
-                var fileName = Path.Combine(_logDirectory, $"Log_{context.TraceIdentifier}.txt");
-                File.AppendAllText(fileName, logContent.Indent(LogScope.CurrentLevel) + Environment.NewLine + Environment.NewLine);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        /// <summary>
-        /// Agrega un log simple al archivo de log actual.
-        /// </summary>
-        /// <param name="logMessage">El mensaje a registrar.</param>
-        public void AddSingleLog(string logMessage)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatSingleLog(logMessage).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        /// <summary>
-        /// Agrega un log de objeto serializado a JSON al archivo de log actual.
-        /// </summary>
-        /// <param name="objectName">Nombre identificador del objeto.</param>
-        /// <param name="logObject">El objeto a registrar.</param>
-        public void AddObjLog(string objectName, object logObject)
-        {
-            try
-            {
-                string logContent = JsonSerializer.Serialize(logObject, new JsonSerializerOptions { WriteIndented = true });
-                var formatted = LogFormatter.FormatObjectLog(objectName, logContent).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        /// <summary>
-        /// Agrega un log con la información de la respuesta HTTP.
-        /// </summary>
-        /// <param name="logMessage">El mensaje de respuesta a registrar.</param>
-        public void AddResponseLog(string logMessage)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatResponseInfo(logMessage).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        /// <summary>
-        /// Agrega un log con información del entorno.
-        /// Se construye un bloque con datos del host y del HttpContext.
-        /// </summary>
-        /// <param name="logMessage">Mensaje adicional para el bloque de entorno.</param>
-        public void AddEnvironmentLog(string logMessage)
-        {
-            try
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine(LogFormatter.FormatEnvironmentInfoStart(
-                    application: GetValueOrDefault(() => _httpContextAccessor.HttpContext.RequestServices.GetService(typeof(IHostEnvironment)) as IHostEnvironment)?.ApplicationName ?? "Desconocido",
-                    env: GetValueOrDefault(() => _httpContextAccessor.HttpContext.RequestServices.GetService(typeof(IHostEnvironment)) as IHostEnvironment)?.EnvironmentName ?? "Desconocido",
-                    contentRoot: GetValueOrDefault(() => _httpContextAccessor.HttpContext.RequestServices.GetService(typeof(IHostEnvironment)) as IHostEnvironment)?.ContentRootPath ?? "Desconocido",
-                    executionId: _httpContextAccessor.HttpContext?.TraceIdentifier ?? "Desconocido",
-                    clientIp: _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString() ?? "Desconocido",
-                    userAgent: _httpContextAccessor.HttpContext?.Request.Headers["User-Agent"].ToString() ?? "Desconocido",
-                    machineName: Environment.MachineName,
-                    os: Environment.OSVersion.ToString(),
-                    host: _httpContextAccessor.HttpContext?.Request.Host.ToString() ?? "Desconocido",
-                    distribution: "Desconocido"
-                ));
-                sb.AppendLine(logMessage);
-                sb.AppendLine(LogFormatter.FormatEnvironmentInfoEnd());
-                File.AppendAllText(GetCurrentLogFile(), sb.ToString().Indent(LogScope.CurrentLevel));
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        /// <summary>
-        /// Agrega un log con la información de una excepción.
-        /// </summary>
-        /// <param name="ex">La excepción a registrar.</param>
-        public void AddExceptionLog(Exception ex)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatExceptionDetails(ex?.ToString() ?? "Sin excepciones").Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception e)
-            {
-                LogInternalError(e);
-            }
-        }
-
-        /// <summary>
-        /// Agrega un log con los parámetros de entrada.
-        /// </summary>
-        /// <param name="parameters">Cadena que representa los parámetros de entrada.</param>
-        public void AddInputParameters(string parameters)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatInputParameters(parameters).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        /// <summary>
-        /// Agrega un log con los parámetros de salida.
-        /// </summary>
-        /// <param name="parameters">Cadena que representa los parámetros de salida.</param>
-        public void AddOutputParameters(string parameters)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatOutputParameters(parameters).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        /// <summary>
-        /// Función auxiliar para obtener un valor mediante un getter.
-        /// Si ocurre algún error, se registra la excepción y se retorna el valor por defecto.
-        /// </summary>
-        /// <typeparam name="T">El tipo del valor a obtener.</typeparam>
-        /// <param name="getter">Función que obtiene el valor.</param>
-        /// <returns>El valor obtenido o el valor por defecto si ocurre un error.</returns>
-        private T GetValueOrDefault<T>(Func<T> getter)
-        {
-            try
-            {
-                return getter();
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-                return default;
+                // En caso de error, se registra la excepción.
+                _loggingService.AddExceptionLog(ex);
             }
         }
     }
