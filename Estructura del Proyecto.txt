@@ -1,117 +1,280 @@
-using Logging.Abstractions;
-using Logging.Helpers;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Controllers;
-using System.Diagnostics;
-using System.Linq;
-using System.Text.Json;
+using System;
+using System.Text;
 
-namespace Logging.Filters
+namespace Logging.Helpers
 {
     /// <summary>
-    /// Filtro de acción que se ejecuta antes y después de la acción de un controlador.
-    /// Se encarga de capturar y registrar los parámetros de entrada, la salida y el tiempo de ejecución.
-    /// Además, utiliza scopes anidados para mantener la jerarquía del flujo de ejecución.
+    /// Clase que proporciona métodos para formatear secciones del log.
     /// </summary>
-    public class LoggingActionFilter : IActionFilter
+    public static class LogFormatter
     {
-        // Servicio de logging para registrar la información en los logs.
-        private readonly ILoggingService _loggingService;
-        // Nombre del controlador, obtenido del descriptor de acción.
-        private readonly string _controllerName;
-        // Nombre de la acción (método) del controlador.
-        private readonly string _actionName;
-        // Objeto para medir el tiempo de ejecución de la acción.
-        private Stopwatch _stopwatch;
-
         /// <summary>
-        /// Constructor que inicializa el filtro de acción con el servicio de logging y obtiene
-        /// el nombre del controlador y de la acción a partir del ActionDescriptor.
+        /// Genera el bloque de texto que indica el inicio del log.
         /// </summary>
-        /// <param name="loggingService">Servicio de logging inyectado.</param>
-        /// <param name="actionDescriptor">Descriptor de la acción, que contiene información sobre el controlador y la acción.</param>
-        public LoggingActionFilter(ILoggingService loggingService, ActionDescriptor actionDescriptor)
+        /// <returns>Texto formateado para el inicio del log.</returns>
+        public static string FormatBeginLog()
         {
-            _loggingService = loggingService;
-            // Extrae el nombre del controlador del diccionario RouteValues.
-            _controllerName = actionDescriptor.RouteValues["controller"];
-            // Extrae el nombre de la acción del diccionario RouteValues.
-            _actionName = actionDescriptor.RouteValues["action"];
+            var sb = new StringBuilder();
+            sb.AppendLine("---------------------------Inicio de Log---------------------------");
+            sb.AppendLine($"{DateTime.Now}");
+            sb.AppendLine("---------------------------Inicio de Log---------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+        
+        /// <summary>
+        /// Genera el bloque de texto que inicia la sección de información del entorno.
+        /// </summary>
+        /// <param name="application">Nombre de la aplicación.</param>
+        /// <param name="env">Ambiente de ejecución (por ejemplo, Development, Production).</param>
+        /// <param name="contentRoot">Directorio raíz del contenido.</param>
+        /// <param name="executionId">Identificador de la ejecución.</param>
+        /// <param name="clientIp">Dirección IP del cliente.</param>
+        /// <param name="userAgent">Información del agente de usuario.</param>
+        /// <param name="machineName">Nombre de la máquina.</param>
+        /// <param name="os">Información del sistema operativo.</param>
+        /// <param name="host">Host de la petición.</param>
+        /// <param name="distribution">Información de distribución.</param>
+        /// <returns>Texto formateado con la información del entorno.</returns>
+        public static string FormatEnvironmentInfoStart(
+            string application,
+            string env,
+            string contentRoot,
+            string executionId,
+            string clientIp,
+            string userAgent,
+            string machineName,
+            string os,
+            string host,
+            string distribution)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("---------------------------Enviroment Info-------------------------");
+            sb.AppendLine($"       Inicio: {DateTime.Now}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine($"Application: {application}");
+            sb.AppendLine($"Environment: {env}");
+            sb.AppendLine($"ContentRoot: {contentRoot}");
+            sb.AppendLine($"Execution ID: {executionId}");
+            sb.AppendLine($"Client IP: {clientIp}");
+            sb.AppendLine($"User Agent: {userAgent}");
+            sb.AppendLine($"Machine Name: {machineName}");
+            sb.AppendLine($"OS: {os}");
+            sb.AppendLine($"Host: {host}");
+            sb.AppendLine($"Distribución: {distribution}");
+            sb.AppendLine();
+            return sb.ToString();
         }
 
         /// <summary>
-        /// Se ejecuta antes de que se invoque la acción del controlador.
-        /// Aquí se inicia la medición del tiempo, se capturan y registran los parámetros de entrada,
-        /// y se registra un log indicando el inicio de la ejecución.
+        /// Genera el bloque de texto que finaliza la sección de información del entorno.
         /// </summary>
-        /// <param name="context">Contexto de ejecución de la acción.</param>
-        public void OnActionExecuting(ActionExecutingContext context)
+        /// <returns>Texto formateado indicando el fin de la sección de entorno.</returns>
+        public static string FormatEnvironmentInfoEnd()
         {
-            try
-            {
-                // Se crea un nuevo scope para este método, aumentando la indentación para reflejar la jerarquía.
-                using (new LogScope())
-                {
-                    // Se inicia el cronómetro para medir el tiempo de ejecución de la acción.
-                    _stopwatch = Stopwatch.StartNew();
-
-                    // Se registran los parámetros de entrada.
-                    // Se recorre cada argumento y se serializa a JSON si no es nulo, de lo contrario se marca como "Desconocido".
-                    var inputParams = string.Join(System.Environment.NewLine,
-                        context.ActionArguments.Select(arg =>
-                            $"{arg.Key} = {(arg.Value != null ? JsonSerializer.Serialize(arg.Value, new JsonSerializerOptions { WriteIndented = true }) : "Desconocido") }"));
-                    
-                    // Se agrega un log con los parámetros de entrada.
-                    _loggingService.AddInputParameters(inputParams);
-
-                    // Se registra un log indicando el inicio de la ejecución de la acción.
-                    _loggingService.AddSingleLog($"Inicio de ejecución en Controller: {_controllerName}, Action: {_actionName}");
-                }
-            }
-            catch (System.Exception ex)
-            {
-                // Si ocurre alguna excepción durante la captura o el registro, se registra la excepción en el log.
-                _loggingService.AddExceptionLog(ex);
-            }
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------Enviroment Info-------------------------");
+            sb.AppendLine($"       Fin: {DateTime.Now}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
         }
 
         /// <summary>
-        /// Se ejecuta después de que se ha invocado la acción del controlador.
-        /// Aquí se detiene el cronómetro, se capturan y registran los parámetros de salida, y se registra un log
-        /// indicando el fin de la ejecución y el tiempo transcurrido.
+        /// Genera el bloque de texto que indica el endpoint procesado.
         /// </summary>
-        /// <param name="context">Contexto de ejecución de la acción, que incluye el resultado de la acción.</param>
-        public void OnActionExecuted(ActionExecutedContext context)
+        /// <param name="endpointName">El nombre o la ruta del endpoint.</param>
+        /// <returns>Texto formateado con el endpoint.</returns>
+        public static string FormatEndpoint(string endpointName)
         {
-            try
-            {
-                // Se crea un nuevo scope para este método, lo que aumenta la indentación.
-                using (new LogScope())
-                {
-                    // Se detiene el cronómetro y se obtiene el tiempo transcurrido.
-                    _stopwatch.Stop();
+            var sb = new StringBuilder();
+            sb.AppendLine($"---------------------------Endpoint: {endpointName}---------------------------");
+            sb.AppendLine($"{DateTime.Now}");
+            sb.AppendLine($"---------------------------Endpoint: {endpointName}---------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
 
-                    // Se intenta capturar el resultado de la acción.
-                    // Si el resultado es un ObjectResult, se serializa su valor a JSON para tener un registro legible.
-                    string outputParams = "Sin datos de salida";
-                    if (context.Result is ObjectResult objectResult && objectResult.Value != null)
-                    {
-                        outputParams = JsonSerializer.Serialize(objectResult.Value, new JsonSerializerOptions { WriteIndented = true });
-                    }
-                    
-                    // Se registra un log con los parámetros de salida.
-                    _loggingService.AddOutputParameters(outputParams);
+        /// <summary>
+        /// Genera el bloque de texto que inicia la sección de información de la solicitud.
+        /// </summary>
+        /// <returns>Texto formateado indicando el inicio de la información de la solicitud.</returns>
+        public static string FormatRequestInfoStart()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Request Info---------------------------------");
+            sb.AppendLine($"       Inicio: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
 
-                    // Se registra un log indicando el fin de la ejecución, junto con el tiempo transcurrido en milisegundos.
-                    _loggingService.AddSingleLog($"Fin de ejecución en Controller: {_controllerName}, Action: {_actionName} en {_stopwatch.ElapsedMilliseconds} ms");
-                }
-            }
-            catch (System.Exception ex)
-            {
-                // Si ocurre alguna excepción durante este proceso, se registra en el log.
-                _loggingService.AddExceptionLog(ex);
-            }
+        /// <summary>
+        /// Genera el bloque de texto que finaliza la sección de información de la solicitud.
+        /// </summary>
+        /// <returns>Texto formateado indicando el fin de la información de la solicitud.</returns>
+        public static string FormatRequestInfoEnd()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Request Info---------------------------------");
+            sb.AppendLine($"       Fin: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera un bloque de texto para un log simple.
+        /// </summary>
+        /// <param name="message">El mensaje a registrar.</param>
+        /// <returns>Texto formateado para un log simple.</returns>
+        public static string FormatSingleLog(string message)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Single Log---------------------------------");
+            sb.AppendLine($"       Inicio: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine(message);
+            sb.AppendLine();
+            sb.AppendLine("----------------------------------Single Log---------------------------------");
+            sb.AppendLine($"       Fin: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera un bloque de texto para registrar un objeto, serializado a JSON.
+        /// </summary>
+        /// <param name="objectName">El nombre identificador del objeto.</param>
+        /// <param name="message">El contenido del objeto en formato de texto.</param>
+        /// <returns>Texto formateado para el log del objeto.</returns>
+        public static string FormatObjectLog(string objectName, string message)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
+            sb.AppendLine($"       Inicio: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine(message);
+            sb.AppendLine();
+            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
+            sb.AppendLine($"       Fin: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera un bloque de texto que marca el inicio de un método o función.
+        /// </summary>
+        /// <param name="methodName">El nombre del método o función.</param>
+        /// <returns>Texto formateado indicando el inicio del método o función.</returns>
+        public static string FormatMethodFunctionStart(string methodName)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"----------------------------------Método/Funcion : {methodName}---------------------------------");
+            sb.AppendLine($"       Inicio: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera un bloque de texto para registrar los parámetros de entrada.
+        /// </summary>
+        /// <param name="parameters">Una cadena que representa los parámetros de entrada.</param>
+        /// <returns>Texto formateado con los parámetros de entrada.</returns>
+        public static string FormatInputParameters(string parameters)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------------------");
+            sb.AppendLine(parameters);
+            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera un bloque de texto para registrar los parámetros de salida.
+        /// </summary>
+        /// <param name="parameters">Una cadena que representa los parámetros de salida.</param>
+        /// <returns>Texto formateado con los parámetros de salida.</returns>
+        public static string FormatOutputParameters(string parameters)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("-----------------------Parámetros de Salida-----------------------------------");
+            sb.AppendLine(parameters);
+            sb.AppendLine("-----------------------Parámetros de Salida-----------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera un bloque de texto que marca el final de un método o función.
+        /// </summary>
+        /// <param name="methodName">El nombre del método o función.</param>
+        /// <returns>Texto formateado indicando el final del método o función.</returns>
+        public static string FormatMethodFunctionEnd(string methodName)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"----------------------------------Método/Funcion : {methodName}---------------------------------");
+            sb.AppendLine($"       Fin: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera un bloque de texto para registrar la información de la respuesta.
+        /// </summary>
+        /// <param name="message">El mensaje o datos de la respuesta.</param>
+        /// <returns>Texto formateado para el log de la respuesta.</returns>
+        public static string FormatResponseInfo(string message)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Response Info---------------------------------");
+            sb.AppendLine($"       Inicio: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine(message);
+            sb.AppendLine();
+            sb.AppendLine("----------------------------------Response Info---------------------------------");
+            sb.AppendLine($"       Fin: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera un bloque de texto para registrar los detalles de una excepción.
+        /// </summary>
+        /// <param name="message">El mensaje de la excepción.</param>
+        /// <returns>Texto formateado para el log de excepciones.</returns>
+        public static string FormatExceptionDetails(string message)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Exception Details---------------------------------");
+            sb.AppendLine($"       Inicio: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine(message);
+            sb.AppendLine();
+            sb.AppendLine("----------------------------------Exception Details---------------------------------");
+            sb.AppendLine($"       Fin: {DateTime.Now}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Genera el bloque de texto final que indica el cierre del log.
+        /// </summary>
+        /// <returns>Texto formateado indicando el fin del log.</returns>
+        public static string FormatEndLog()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("---------------------------Fin de Log---------------------------");
+            sb.AppendLine($"{DateTime.Now}");
+            sb.AppendLine("---------------------------Fin de Log---------------------------");
+            return sb.ToString();
         }
     }
 }
