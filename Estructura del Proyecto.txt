@@ -1,15 +1,46 @@
-RestUtilities.Logging/
-├── README.md                        // Documentación básica sobre la librería, sus características y cómo integrarla.
-├── Abstractions/                    // Carpeta que contiene interfaces y contratos públicos.
-│   └── ILoggingService.cs           // Define la interfaz para el servicio de logging, con métodos para registrar logs, excepciones, parámetros de entrada/salida, etc.
-├── Extensions/                      // Contiene métodos de extensión para facilitar operaciones comunes.
-│   └── StringExtensions.cs          // Provee un método para aplicar indentación a cadenas, utilizando target-typed new para simplificar la creación de cadenas.
-├── Helpers/                         // Agrupa utilidades y clases de soporte para el formateo de logs y manejo de scopes.
-│   ├── LogFormatter.cs              // Clase estática que contiene métodos para formatear bloques de texto para cada sección del log (inicio, entorno, request, response, etc.).
-│   └── LogScope.cs                  // Clase sealed que utiliza AsyncLocal para mantener un contador de indentación y así reflejar la jerarquía (scopes) en los logs.
-├── Middleware/                      // Contiene el middleware que intercepta la solicitud y respuesta para generar logs completos de cada petición.
-│   └── LoggingMiddleware.cs         // Middleware que combina la información del entorno, request, response y excepciones en un archivo de log único. La ruta base se obtiene mediante las opciones (appsettings.json) del API.
-├── Filters/                         // Carpeta para filtros de acción, que permiten registrar automáticamente el flujo de ejecución en controladores.
-│   └── LoggingActionFilter.cs       // Filtro que registra parámetros de entrada, salida y el tiempo de ejecución de las acciones de los controladores, utilizando scopes anidados.
-└── Services/                        // Implementación concreta de los servicios definidos en Abstractions.
-    └── LoggingService.cs            // Servicio de logging que escribe los logs en archivos. Maneja errores internos registrándolos en un archivo "InternalErrorLog.txt" y reutiliza instancias (por ejemplo, JsonSerializerOptions) para optimizar el rendimiento.
+using Logging.Abstractions;
+using Logging.Configuration;
+using Logging.Filters;
+using Logging.Middleware;
+using Logging.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Configura LoggingOptions a partir de la sección "LoggingOptions" en el appsettings.json.
+builder.Services.Configure<LoggingOptions>(builder.Configuration.GetSection("LoggingOptions"));
+
+// Registra IHttpContextAccessor para acceder al HttpContext en el servicio de logging.
+builder.Services.AddHttpContextAccessor();
+
+// Registra el servicio de logging. La implementación utilizará la configuración inyectada (IOptions<LoggingOptions>)
+// y la información del entorno (IHostEnvironment).
+builder.Services.AddSingleton<ILoggingService, LoggingService>();
+
+// Registra los controladores y añade el filtro de acción global para el logging (opcional).
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<LoggingActionFilter>();
+});
+
+var app = builder.Build();
+
+// Agrega el middleware de logging al pipeline.
+// Este middleware intercepta cada solicitud para generar un log completo.
+app.UseMiddleware<LoggingMiddleware>();
+
+app.UseRouting();
+
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapControllers();
+});
+
+app.Run();
+
+
+{
+  "LoggingOptions": {
+    "BaseLogDirectory": "C:\\Logs\\"
+  },
+  // Otras configuraciones...
+}
