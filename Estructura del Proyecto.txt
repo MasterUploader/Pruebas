@@ -1,7 +1,9 @@
 using Logging.Abstractions;
+using Logging.Configuration;
 using Logging.Helpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using System;
 using System.IO;
 using System.Linq;
@@ -12,47 +14,59 @@ namespace Logging.Middleware
 {
     /// <summary>
     /// Middleware que intercepta la solicitud (request) y la respuesta (response) para generar un log completo
-    /// de la petición actual. El log se escribe en un archivo único ubicado en la ruta:
-    /// [BaseLogDirectory]\[NombreApi]\, donde BaseLogDirectory se configura desde el appsettings.json 
-    /// y el NombreApi se obtiene dinámicamente del entorno (IHostEnvironment).
+    /// de la petición actual. La ruta base para almacenar los logs se obtiene desde la configuración proporcionada
+    /// por la API (LoggingOptions).
     /// </summary>
     public class LoggingMiddleware
     {
         private readonly RequestDelegate _next;
         private readonly ILoggingService _loggingService;
         private readonly IHostEnvironment _hostEnvironment;
+        // Ruta base para almacenar los logs, la cual se configura en appsettings.json en la sección LoggingOptions
+        private readonly string _baseLogDirectory;
 
         /// <summary>
-        /// Constructor del middleware que inyecta el RequestDelegate, el servicio de logging y la información del entorno.
+        /// Constructor del middleware.
+        /// Se inyectan el siguiente middleware, el servicio de logging, el entorno de la aplicación
+        /// y las opciones de configuración que contienen la ruta base para los logs.
         /// </summary>
-        /// <param name="next">Siguiente middleware en el pipeline.</param>
-        /// <param name="loggingService">Servicio para registrar logs.</param>
+        /// <param name="next">El siguiente middleware en el pipeline.</param>
+        /// <param name="loggingService">Servicio de logging para registrar la información.</param>
         /// <param name="hostEnvironment">Información del entorno de la aplicación.</param>
-        public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService, IHostEnvironment hostEnvironment)
+        /// <param name="options">Opciones de configuración (LoggingOptions) que contienen la ruta base.</param>
+        public LoggingMiddleware(
+            RequestDelegate next, 
+            ILoggingService loggingService, 
+            IHostEnvironment hostEnvironment,
+            IOptions<LoggingOptions> options)
         {
             _next = next;
             _loggingService = loggingService;
             _hostEnvironment = hostEnvironment;
+            // Se obtiene la ruta base desde las opciones. Si no se configura, se usará "C:\Logs\" por defecto.
+            _baseLogDirectory = !string.IsNullOrWhiteSpace(options.Value.BaseLogDirectory) 
+                                    ? options.Value.BaseLogDirectory 
+                                    : @"C:\Logs\";
         }
 
         /// <summary>
-        /// Método principal del middleware que se invoca para cada solicitud.
+        /// Método principal que se ejecuta para cada solicitud.
         /// Genera un log completo que incluye información del entorno, endpoint, request, response y excepciones.
         /// </summary>
-        /// <param name="context">El contexto HTTP de la petición actual.</param>
+        /// <param name="context">El contexto HTTP de la solicitud.</param>
         /// <returns>Una tarea asincrónica.</returns>
         public async Task InvokeAsync(HttpContext context)
         {
             try
             {
-                // Obtiene la ruta de logs basada en el nombre de la API (definida en el entorno)
+                // Obtiene el archivo único para la petición usando la ruta base configurada y el nombre de la API.
                 var logFileName = Path.Combine(GetLogDirectory(), $"Log_{context.TraceIdentifier}.txt");
-                // Almacena el nombre del archivo de log en el HttpContext para que otros métodos lo puedan utilizar
+                // Almacena el nombre del archivo de log en el HttpContext para que otros componentes lo puedan utilizar.
                 context.Items["LogFileName"] = logFileName;
 
                 var logBuilder = new StringBuilder();
 
-                // Genera el bloque de inicio del log
+                // Genera el bloque de inicio del log.
                 logBuilder.AppendLine(LogFormatter.FormatBeginLog());
 
                 // Recupera datos dinámicos del entorno: ApplicationName, EnvironmentName y ContentRootPath.
@@ -60,7 +74,7 @@ namespace Logging.Middleware
                 string env = !string.IsNullOrWhiteSpace(_hostEnvironment.EnvironmentName) ? _hostEnvironment.EnvironmentName : "Desconocido";
                 string contentRoot = !string.IsNullOrWhiteSpace(_hostEnvironment.ContentRootPath) ? _hostEnvironment.ContentRootPath : "Desconocido";
 
-                // Genera el bloque de información del entorno con datos como la IP del cliente, User-Agent, etc.
+                // Genera el bloque de información del entorno con datos relevantes.
                 logBuilder.AppendLine(LogFormatter.FormatEnvironmentInfoStart(
                     application: application,
                     env: env,
@@ -75,43 +89,42 @@ namespace Logging.Middleware
                 ));
                 logBuilder.AppendLine(LogFormatter.FormatEnvironmentInfoEnd());
 
-                // Registra el endpoint (ruta) que se está procesando
+                // Registra el endpoint (ruta) que se está procesando.
                 string endpointName = context.Request.Path;
                 logBuilder.AppendLine(LogFormatter.FormatEndpoint(endpointName));
 
-                // Captura y registra la información de la solicitud (request)
+                // Captura y registra la información de la solicitud.
                 logBuilder.AppendLine(LogFormatter.FormatRequestInfoStart());
                 logBuilder.AppendLine(await CaptureRequestInfoAsync(context));
                 logBuilder.AppendLine(LogFormatter.FormatRequestInfoEnd());
 
-                // Invoca el siguiente middleware en el pipeline (o la acción del controlador)
+                // Invoca el siguiente middleware en el pipeline.
                 await _next(context);
 
-                // Captura y registra la información de la respuesta (response)
+                // Captura y registra la información de la respuesta.
                 logBuilder.AppendLine(LogFormatter.FormatResponseInfo(CaptureResponseInfo(context)));
 
-                // Registra nuevamente el endpoint para marcar el fin del procesamiento de ese endpoint
+                // Registra nuevamente el endpoint para marcar el final del procesamiento.
                 logBuilder.AppendLine(LogFormatter.FormatEndpoint(endpointName));
 
-                // Registra el bloque de excepciones; en este caso, se indica "Sin excepciones" si todo fue correcto.
+                // Registra el bloque de excepciones; si no hubo, se indica "Sin excepciones".
                 logBuilder.AppendLine(LogFormatter.FormatExceptionDetails("Sin excepciones"));
 
-                // Agrega el bloque final de cierre del log
+                // Agrega el bloque final de cierre del log.
                 logBuilder.AppendLine(LogFormatter.FormatEndLog());
 
-                // Escribe todo el contenido generado en el archivo único para esta petición.
+                // Escribe todo el contenido generado en el archivo único de la petición.
                 File.AppendAllText(logFileName, logBuilder.ToString());
             }
             catch (Exception ex)
             {
-                // Si ocurre alguna excepción en el middleware, se registra en el log de excepciones utilizando el servicio.
+                // Si ocurre alguna excepción en el middleware, se registra mediante el servicio de logging.
                 _loggingService.AddExceptionLog(ex);
             }
         }
 
         /// <summary>
-        /// Obtiene la ruta de directorio para guardar los logs en función del nombre de la API.
-        /// La ruta se forma como "C:\Logs\[NombreApi]\".
+        /// Obtiene la ruta del directorio para almacenar los logs, combinando la ruta base configurada con el nombre de la API.
         /// </summary>
         /// <returns>La ruta completa del directorio de logs.</returns>
         private string GetLogDirectory()
@@ -120,8 +133,8 @@ namespace Logging.Middleware
             string apiName = !string.IsNullOrWhiteSpace(_hostEnvironment.ApplicationName)
                                 ? _hostEnvironment.ApplicationName
                                 : "Desconocido";
-            // Combina la ruta base fija con el nombre de la API.
-            string directory = Path.Combine(@"C:\Logs\", apiName);
+            // Combina la ruta base configurada (desde appsettings.json) con el nombre de la API.
+            string directory = Path.Combine(_baseLogDirectory, apiName);
             try
             {
                 // Crea el directorio si no existe.
@@ -137,33 +150,28 @@ namespace Logging.Middleware
         }
 
         /// <summary>
-        /// Captura la información relevante de la solicitud (request), incluyendo:
-        /// IP, método, query string, headers y body.
+        /// Captura la información relevante de la solicitud, incluyendo IP, método, query string, headers y body.
         /// Si ocurre un error, retorna un mensaje predeterminado.
         /// </summary>
-        /// <param name="context">El HttpContext de la solicitud.</param>
+        /// <param name="context">El contexto HTTP de la solicitud.</param>
         /// <returns>Una cadena con la información de la solicitud.</returns>
         private async Task<string> CaptureRequestInfoAsync(HttpContext context)
         {
             try
             {
                 var request = context.Request;
-                // Combina todos los headers en una cadena, separándolos por salto de línea.
                 string headers = string.Join(Environment.NewLine, request.Headers.Select(h => $"{h.Key}: {h.Value}"));
-                // Obtiene la query string
                 string query = request.QueryString.ToString();
-                // Obtiene la dirección IP del cliente
                 string ip = context.Connection.RemoteIpAddress?.ToString() ?? "Desconocido";
-                // Obtiene el método HTTP (GET, POST, etc.)
                 string method = request.Method;
                 string body = string.Empty;
 
-                // Habilita el buffer para poder leer el body sin consumirlo
+                // Habilita el buffer para poder leer el body sin consumirlo.
                 request.EnableBuffering();
                 using (var reader = new StreamReader(request.Body, leaveOpen: true))
                 {
                     body = await reader.ReadToEndAsync();
-                    // Restaura la posición del stream para que otros componentes puedan leerlo
+                    // Restaura la posición del stream para que otros componentes puedan leerlo.
                     request.Body.Position = 0;
                 }
 
@@ -183,17 +191,16 @@ namespace Logging.Middleware
         }
 
         /// <summary>
-        /// Captura la información de la respuesta (response), incluyendo el código de estado y headers.
+        /// Captura la información de la respuesta, incluyendo el código de estado y los headers.
         /// Si ocurre un error, retorna un mensaje predeterminado.
         /// </summary>
-        /// <param name="context">El HttpContext de la respuesta.</param>
+        /// <param name="context">El contexto HTTP de la respuesta.</param>
         /// <returns>Una cadena con la información de la respuesta.</returns>
         private string CaptureResponseInfo(HttpContext context)
         {
             try
             {
                 var response = context.Response;
-                // Combina todos los headers de la respuesta en una cadena.
                 string headers = string.Join(Environment.NewLine, response.Headers.Select(h => $"{h.Key}: {h.Value}"));
                 return $"StatusCode: {response.StatusCode}{Environment.NewLine}Headers: {headers}";
             }
