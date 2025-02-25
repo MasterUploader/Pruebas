@@ -1,48 +1,16 @@
-public static string FormatRequestInfo(string method, string path, string query, string body)
-{
-    return $@"
-----------------------------------Request Info---------------------------------
-Inicio: {DateTime.UtcNow}
--------------------------------------------------------------------------------
-Método: {method}
-URL: {path}{query}
-Cuerpo:
-{FormatJson(body)}
-----------------------------------Request Info---------------------------------
-Fin: {DateTime.UtcNow}
--------------------------------------------------------------------------------
-";
-}
-
-
-
-
-public static string FormatResponseInfo(int statusCode, string body)
-{
-    return $@"
-----------------------------------Response Info---------------------------------
-Inicio: {DateTime.UtcNow}
--------------------------------------------------------------------------------
-Código Estado: {statusCode}
-Cuerpo:
-{FormatJson(body)}
-----------------------------------Response Info---------------------------------
-Fin: {DateTime.UtcNow}
--------------------------------------------------------------------------------
-";
-}
-
-
-
 public static string FormatJson(string json)
 {
     try
     {
         using var jsonDoc = JsonDocument.Parse(json);
-        return JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions { WriteIndented = true });
+        return JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions
+        {
+            WriteIndented = true,   // Indentación para mejorar legibilidad
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping // Permite caracteres Unicode sin escape
+        });
     }
     catch
     {
-        return json; // Retorna sin formato si no es JSON válido
+        return json; // Si falla la conversión, devolver el JSON original
     }
 }
