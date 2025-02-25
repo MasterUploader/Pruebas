@@ -6,21 +6,33 @@ namespace Logging.Helpers
     using System.Text;
 
     /// <summary>
-    /// Clase estática para formatear los logs en un formato legible.
+    /// Clase estática para formatear los logs en un formato estructurado y legible.
     /// </summary>
     public static class LogFormatter
     {
         /// <summary>
         /// Formatea el inicio del log.
         /// </summary>
-        public static string FormatBeginLog() => 
+        public static string FormatBeginLog() =>
             $"---------------------------Inicio de Log---------------------------\n{DateTime.UtcNow}\n---------------------------Inicio de Log---------------------------\n";
 
         /// <summary>
         /// Formatea el final del log.
         /// </summary>
-        public static string FormatEndLog() => 
+        public static string FormatEndLog() =>
             $"---------------------------Fin de Log---------------------------\n{DateTime.UtcNow}\n---------------------------Fin de Log---------------------------\n";
+
+        /// <summary>
+        /// Formatea el inicio del log de información del entorno.
+        /// </summary>
+        public static string FormatEnvironmentInfoStart() =>
+            $"---------------------------Environment Info-------------------------\nInicio: {DateTime.UtcNow}\n-------------------------------------------------------------------\n";
+
+        /// <summary>
+        /// Formatea el final del log de información del entorno.
+        /// </summary>
+        public static string FormatEnvironmentInfoEnd() =>
+            $"----------------------------Environment Info-------------------------\nFin: {DateTime.UtcNow}\n-------------------------------------------------------------------\n";
 
         /// <summary>
         /// Formatea la información del entorno y la devuelve como string formateado.
@@ -30,9 +42,7 @@ namespace Logging.Helpers
             string clientIp, string userAgent, string machineName, string os, string host)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("---------------------------Environment Info-------------------------");
-            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(FormatEnvironmentInfoStart());
             sb.AppendLine($"Application: {application}");
             sb.AppendLine($"Environment: {environment}");
             sb.AppendLine($"ContentRoot: {contentRoot}");
@@ -42,7 +52,37 @@ namespace Logging.Helpers
             sb.AppendLine($"Machine Name: {machineName}");
             sb.AppendLine($"OS: {os}");
             sb.AppendLine($"Host: {host}");
-            sb.AppendLine("----------------------------Environment Info-------------------------");
+            sb.AppendLine(FormatEnvironmentInfoEnd());
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formatea los parámetros de entrada en una acción.
+        /// </summary>
+        public static string FormatInputParameters(string parameters)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(parameters);
+            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formatea los parámetros de salida en una acción.
+        /// </summary>
+        public static string FormatOutputParameters(string parameters)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("-----------------------Parámetros de Salida-----------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(parameters);
+            sb.AppendLine("-----------------------Parámetros de Salida-----------------------");
             sb.AppendLine($"Fin: {DateTime.UtcNow}");
             sb.AppendLine("-------------------------------------------------------------------");
             return sb.ToString();
@@ -95,7 +135,7 @@ namespace Logging.Helpers
         /// <summary>
         /// Formatea la información de una excepción capturada.
         /// </summary>
-        public static string FormatExceptionInfo(Exception ex)
+        public static string FormatExceptionDetails(Exception ex)
         {
             var sb = new StringBuilder();
             sb.AppendLine("----------------------------------Exception Details---------------------------------");
