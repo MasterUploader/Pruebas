@@ -1,199 +1,34 @@
-namespace Logging.Helpers
+/// <summary>
+/// Agrega un log con información del entorno de ejecución.
+/// Incluye detalles sobre la API, el entorno, la máquina y la solicitud HTTP.
+/// </summary>
+/// <param name="applicationName">Nombre de la aplicación o API en ejecución.</param>
+/// <param name="environment">Nombre del entorno de despliegue (Development, Staging, Production).</param>
+/// <param name="contentRootPath">Ruta raíz del contenido de la aplicación.</param>
+public void AddEnvironmentLog(string applicationName, string environment, string contentRootPath)
 {
-    using System;
-    using System.Text;
-    using System.Text.Json;
-    using System.Xml;
-    using System.Xml.Linq;
-
-    /// <summary>
-    /// Clase responsable de formatear diferentes tipos de logs antes de ser escritos en archivos.
-    /// Incluye formatos para logs generales, entorno, solicitudes, respuestas, parámetros, objetos y excepciones.
-    /// </summary>
-    public static class LogFormatter
+    try
     {
-        // ======================== FORMATO GENERAL DEL LOG ========================
+        // Obtiene información del entorno de ejecución y la solicitud HTTP
+        string executionId = _httpContextAccessor.HttpContext?.TraceIdentifier ?? "Desconocido";
+        string clientIp = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString() ?? "Desconocido";
+        string userAgent = _httpContextAccessor.HttpContext?.Request.Headers["User-Agent"].ToString() ?? "Desconocido";
+        string machineName = Environment.MachineName;
+        string os = Environment.OSVersion.ToString();
+        string host = _httpContextAccessor.HttpContext?.Request.Host.ToString() ?? "Desconocido";
 
-        /// <summary>
-        /// Genera el encabezado de inicio del log.
-        /// </summary>
-        public static string FormatBeginLog() =>
-            $"---------------------------Inicio de Log---------------------------\n{DateTime.Now}\n---------------------------Inicio de Log---------------------------\n";
+        // Formatea la información del entorno para el log
+        var formatted = LogFormatter.FormatEnvironmentInfo(
+            applicationName, environment, contentRootPath,
+            executionId, clientIp, userAgent, machineName, os, host
+        ).Indent(LogScope.CurrentLevel);
 
-        /// <summary>
-        /// Genera el pie de fin del log.
-        /// </summary>
-        public static string FormatEndLog() =>
-            $"---------------------------Fin de Log---------------------------\n{DateTime.Now}\n---------------------------Fin de Log---------------------------\n";
-
-        // ======================== FORMATO DE ENTORNO ========================
-
-        /// <summary>
-        /// Encabezado de información de entorno.
-        /// </summary>
-        public static string FormatEnvironmentInfoStart() =>
-            $"---------------------------Environment Info-------------------------\nInicio: {DateTime.Now}\n-------------------------------------------------------------------\n";
-
-        /// <summary>
-        /// Pie de información de entorno.
-        /// </summary>
-        public static string FormatEnvironmentInfoEnd() =>
-            $"---------------------------Environment Info-------------------------\nFin: {DateTime.Now}\n-------------------------------------------------------------------\n";
-
-        /// <summary>
-        /// Formatea los detalles del entorno del sistema y la API.
-        /// </summary>
-        public static string FormatEnvironmentInfo(string applicationName, string environment, string contentRootPath, 
-            string executionId, string clientIp, string userAgent, string machineName, string os, string host) =>
-            $"{FormatEnvironmentInfoStart()}" +
-            $"Application: {applicationName}\nEnvironment: {environment}\nContentRoot: {contentRootPath}\n" +
-            $"Execution ID: {executionId}\nClient IP: {clientIp}\nUser Agent: {userAgent}\nMachine Name: {machineName}\n" +
-            $"OS: {os}\nHost: {host}\n" +
-            $"{FormatEnvironmentInfoEnd()}";
-
-        // ======================== FORMATO DE SOLICITUDES ========================
-
-        /// <summary>
-        /// Formatea información de la solicitud HTTP.
-        /// </summary>
-        public static string FormatRequestInfo(string requestDetails) =>
-            $"----------------------------------Request Info---------------------------------\nInicio: {DateTime.Now}\n----------------------------------------------------------------------------- \n{requestDetails}\n" +
-            $"----------------------------------Request Info---------------------------------\nFin: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
-
-        // ======================== FORMATO DE RESPUESTAS ========================
-
-        /// <summary>
-        /// Formatea información de la respuesta HTTP.
-        /// </summary>
-        public static string FormatResponseInfo(string responseDetails) =>
-            $"----------------------------------Response Info---------------------------------\nInicio: {DateTime.Now}\n----------------------------------------------------------------------------- \n{responseDetails}\n" +
-            $"----------------------------------Response Info---------------------------------\nFin: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
-
-        // ======================== FORMATO DE PARÁMETROS ========================
-
-        /// <summary>
-        /// Encabezado de parámetros de entrada.
-        /// </summary>
-        public static string FormatInputParametersStart() =>
-            $"-----------------------Parámetros de Entrada-----------------------------------\nInicio: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
-
-        /// <summary>
-        /// Pie de parámetros de entrada.
-        /// </summary>
-        public static string FormatInputParametersEnd() =>
-            $"-----------------------Parámetros de Entrada-----------------------------------\nFin: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
-
-        /// <summary>
-        /// Formatea los parámetros de entrada de un método.
-        /// </summary>
-        public static string FormatInputParameters(string parameters) =>
-            $"{FormatInputParametersStart()}{parameters}\n{FormatInputParametersEnd()}";
-
-        /// <summary>
-        /// Encabezado de parámetros de salida.
-        /// </summary>
-        public static string FormatOutputParametersStart() =>
-            $"-----------------------Parámetros de Salida-----------------------------------\nInicio: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
-
-        /// <summary>
-        /// Pie de parámetros de salida.
-        /// </summary>
-        public static string FormatOutputParametersEnd() =>
-            $"-----------------------Parámetros de Salida-----------------------------------\nFin: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
-
-        /// <summary>
-        /// Formatea los parámetros de salida de un método.
-        /// </summary>
-        public static string FormatOutputParameters(string parameters) =>
-            $"{FormatOutputParametersStart()}{parameters}\n{FormatOutputParametersEnd()}";
-
-        // ======================== FORMATO DE LOGS MANUALES ========================
-
-        /// <summary>
-        /// Formatea un log manual de texto.
-        /// </summary>
-        public static string FormatSingleLog(string logMessage) =>
-            $"----------------------------------Single Log---------------------------------\nInicio: {DateTime.Now}\n----------------------------------------------------------------------------- \n{logMessage}\n" +
-            $"----------------------------------Single Log---------------------------------\nFin: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
-
-        /// <summary>
-        /// Formatea un log de un objeto, serializando su contenido.
-        /// </summary>
-        public static string FormatObjectLog(string objectName, object logObject)
-        {
-            string serializedObject = ConvertObjectToString(logObject);
-            return $"----------------------------------Object -> {objectName}---------------------------------\nInicio: {DateTime.Now}\n----------------------------------------------------------------------------- \n{serializedObject}\n" +
-                   $"----------------------------------Object -> {objectName}---------------------------------\nFin: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
-        }
-
-        // ======================== MANEJO DE FORMATO DE DATOS ========================
-
-        /// <summary>
-        /// Convierte un objeto a string en JSON o XML dependiendo de su formato.
-        /// </summary>
-        public static string ConvertObjectToString(object obj)
-        {
-            if (obj == null)
-                return "NULL";
-
-            string jsonString = JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
-
-            if (IsJson(jsonString))
-                return FormatJson(jsonString);
-            if (IsXml(jsonString))
-                return FormatXml(jsonString);
-
-            return jsonString;
-        }
-
-        /// <summary>
-        /// Verifica si una cadena es un JSON válido.
-        /// </summary>
-        public static bool IsJson(string input) =>
-            input.Trim().StartsWith("{") && input.Trim().EndsWith("}");
-
-        /// <summary>
-        /// Verifica si una cadena es un XML válido.
-        /// </summary>
-        public static bool IsXml(string input)
-        {
-            try
-            {
-                XDocument.Parse(input);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Formatea un string JSON para ser más legible.
-        /// </summary>
-        public static string FormatJson(string json) =>
-            JsonSerializer.Serialize(JsonDocument.Parse(json).RootElement, new JsonSerializerOptions { WriteIndented = true });
-
-        /// <summary>
-        /// Formatea un string XML para ser más legible.
-        /// </summary>
-        public static string FormatXml(string xml)
-        {
-            var xmlDoc = new XmlDocument();
-            xmlDoc.LoadXml(xml);
-            var stringWriter = new StringWriter();
-            using var xmlTextWriter = new XmlTextWriter(stringWriter) { Formatting = Formatting.Indented };
-            xmlDoc.WriteTo(xmlTextWriter);
-            return stringWriter.ToString();
-        }
-
-        // ======================== FORMATO DE EXCEPCIONES ========================
-
-        /// <summary>
-        /// Formatea los detalles de una excepción para el log.
-        /// </summary>
-        public static string FormatExceptionDetails(Exception ex) =>
-            $"----------------------------------Exception Details---------------------------------\nInicio: {DateTime.Now}\n----------------------------------------------------------------------------- \n{ex}\n" +
-            $"----------------------------------Exception Details---------------------------------\nFin: {DateTime.Now}\n----------------------------------------------------------------------------- \n";
+        // Escribe la información del entorno en el archivo de log actual
+        File.AppendAllText(GetCurrentLogFile(), formatted);
+    }
+    catch (Exception ex)
+    {
+        // Registra cualquier error interno sin interrumpir la ejecución
+        LogInternalError(ex);
     }
 }
