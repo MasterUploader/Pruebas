@@ -1,20 +1,28 @@
-/// <summary>
+
+
+    /// <summary>
     /// Filtro de acción que se ejecuta antes y después de la ejecución de una acción en un controlador.
     /// Captura información como parámetros de entrada y salida, tiempos de ejecución y errores.
     /// </summary>
     public class LoggingActionFilter(ILoggingService loggingService) : IActionFilter
     {
         /// <summary>
+        /// Servicio de logging inyectado desde la API.
+        /// Se almacena en una variable de solo lectura para evitar modificaciones.
+        /// </summary>
+        private readonly ILoggingService LoggingService = loggingService;
+
+        /// <summary>
         /// Nombre del controlador en ejecución.
         /// Se inicializa en el constructor y se actualiza en `OnActionExecuting()`.
         /// </summary>
-        private string ControllerName { get; set; }
+        private string ControllerName { get; set; } = "Desconocido";
 
         /// <summary>
         /// Nombre de la acción en ejecución.
         /// Se inicializa en el constructor y se actualiza en `OnActionExecuting()`.
         /// </summary>
-        private string ActionName { get; set; }
+        private string ActionName { get; set; } = "Desconocido";
 
         /// <summary>
         /// Cronómetro utilizado para medir el tiempo de ejecución de la acción.
@@ -29,24 +37,6 @@
         private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
 
         /// <summary>
-        /// Constructor principal que inicializa los nombres del controlador y la acción con valores predeterminados.
-        /// </summary>
-        /// <param name="loggingService">Servicio de logging utilizado para registrar la ejecución.</param>
-        public LoggingActionFilter(ILoggingService loggingService) : this(loggingService, "Desconocido", "Desconocido") { }
-
-        /// <summary>
-        /// Constructor privado que permite inicializar los valores del controlador y la acción.
-        /// </summary>
-        /// <param name="loggingService">Servicio de logging.</param>
-        /// <param name="controllerName">Nombre del controlador.</param>
-        /// <param name="actionName">Nombre de la acción.</param>
-        private LoggingActionFilter(ILoggingService loggingService, string controllerName, string actionName)
-        {
-            ControllerName = controllerName;
-            ActionName = actionName;
-        }
-
-        /// <summary>
         /// Se ejecuta antes de que la acción del controlador comience a ejecutarse.
         /// Registra los parámetros de entrada y la información de inicio.
         /// </summary>
@@ -55,10 +45,8 @@
         {
             try
             {
-                // Inicia un nuevo scope de log para reflejar la jerarquía de ejecución.
                 using var scope = new LogScope();
 
-                // Inicia el cronómetro para medir el tiempo de ejecución de la acción.
                 _stopwatch = Stopwatch.StartNew();
 
                 // Obtiene el nombre del controlador y la acción desde el contexto.
@@ -71,15 +59,14 @@
                         $"{arg.Key} = {(arg.Value != null ? JsonSerializer.Serialize(arg.Value, SerializerOptions) : "Desconocido") }"));
 
                 // Registra los parámetros de entrada en el log.
-                _loggingService.AddInputParameters(inputParams);
+                LoggingService.AddInputParameters(inputParams);
 
                 // Registra el inicio de ejecución de la acción en el log.
-                _loggingService.AddSingleLog($"Inicio de ejecución en Controller: {ControllerName}, Action: {ActionName}");
+                LoggingService.AddSingleLog($"Inicio de ejecución en Controller: {ControllerName}, Action: {ActionName}");
             }
             catch (System.Exception ex)
             {
-                // Si ocurre un error durante el proceso, se captura y se registra.
-                _loggingService.AddExceptionLog(ex);
+                LoggingService.AddExceptionLog(ex);
             }
         }
 
@@ -92,10 +79,8 @@
         {
             try
             {
-                // Inicia un nuevo scope de log para reflejar la jerarquía de ejecución.
                 using var scope = new LogScope();
 
-                // Si el cronómetro fue iniciado, lo detiene para calcular el tiempo de ejecución.
                 _stopwatch?.Stop();
 
                 // Captura el resultado de la acción si es un ObjectResult (respuesta con datos).
@@ -106,15 +91,14 @@
                 }
 
                 // Registra los parámetros de salida en el log.
-                _loggingService.AddOutputParameters(outputParams);
+                LoggingService.AddOutputParameters(outputParams);
 
                 // Registra el final de la ejecución de la acción con el tiempo transcurrido en milisegundos.
-                _loggingService.AddSingleLog($"Fin de ejecución en Controller: {ControllerName}, Action: {ActionName} en {_stopwatch?.ElapsedMilliseconds ?? 0} ms");
+                LoggingService.AddSingleLog($"Fin de ejecución en Controller: {ControllerName}, Action: {ActionName} en {_stopwatch?.ElapsedMilliseconds ?? 0} ms");
             }
             catch (System.Exception ex)
             {
-                // Si ocurre un error durante el proceso, se captura y se registra.
-                _loggingService.AddExceptionLog(ex);
+                LoggingService.AddExceptionLog(ex);
             }
         }
     }
