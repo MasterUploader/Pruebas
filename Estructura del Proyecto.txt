@@ -1,4 +1,4 @@
-}namespace Logging.Filters
+namespace Logging.Filters
 {
     using Logging.Abstractions;
     using Microsoft.AspNetCore.Mvc.Abstractions;
@@ -12,24 +12,14 @@
     /// Captura información sobre los parámetros de entrada y salida, registra el tiempo de ejecución
     /// y utiliza scopes anidados para reflejar la jerarquía del flujo de ejecución.
     /// </summary>
-    public class LoggingActionFilter : IActionFilter
+    public class LoggingActionFilter(ILoggingService _loggingService) : IActionFilter
     {
-        private readonly ILoggingService _loggingService;
-        private string _controllerName = "Desconocido"; // Inicialización para evitar CS8618
-        private string _actionName = "Desconocido"; // Inicialización para evitar CS8618
-        private Stopwatch? _stopwatch; // Permite valores nulos para evitar la advertencia S2933
+        private string _controllerName = "Desconocido"; // Evita error CS8618 inicializando con un valor predeterminado.
+        private string _actionName = "Desconocido"; // Evita error CS8618 inicializando con un valor predeterminado.
+        private Stopwatch? _stopwatch; // Inicializa en null para evitar advertencias.
 
         // Instancia estática de JsonSerializerOptions para evitar creaciones innecesarias.
         private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
-
-        /// <summary>
-        /// Constructor del filtro de logging.
-        /// </summary>
-        /// <param name="loggingService">Servicio de logging utilizado para registrar la ejecución.</param>
-        public LoggingActionFilter(ILoggingService loggingService)
-        {
-            _loggingService = loggingService;
-        }
 
         /// <summary>
         /// Se ejecuta antes de que se invoque la acción del controlador.
@@ -40,7 +30,6 @@
         {
             try
             {
-                // Crea un scope anidado para reflejar la jerarquía de ejecución en los logs.
                 using var scope = new LogScope();
 
                 // Inicia un cronómetro para medir el tiempo de ejecución de la acción.
@@ -77,14 +66,10 @@
         {
             try
             {
-                // Crea un scope anidado para reflejar la jerarquía en los logs.
                 using var scope = new LogScope();
 
                 // Detiene el cronómetro si fue iniciado.
-                if (_stopwatch is not null)
-                {
-                    _stopwatch.Stop();
-                }
+                _stopwatch?.Stop();
 
                 // Captura el resultado de la acción (si es un ObjectResult).
                 string outputParams = "Sin datos de salida";
