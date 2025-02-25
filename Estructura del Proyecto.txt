@@ -1,7 +1,23 @@
 <ItemGroup>
+    <!-- Interfaces -->
     <Compile Include="Abstractions\ILoggingService.cs" />
+
+    <!-- Configuración -->
     <Compile Include="Configuration\LoggingOptions.cs" />
+
+    <!-- Extensiones -->
+    <Compile Include="Extensions\StringExtensions.cs" />
+
+    <!-- Filtros -->
     <Compile Include="Filters\LoggingActionFilter.cs" />
+
+    <!-- Middleware -->
     <Compile Include="Middleware\LoggingMiddleware.cs" />
+
+    <!-- Servicios -->
     <Compile Include="Services\LoggingService.cs" />
+
+    <!-- Helpers -->
+    <Compile Include="Helpers\LogFormatter.cs" />
+    <Compile Include="Helpers\LogScope.cs" />
 </ItemGroup>
