@@ -1,13 +1,4 @@
-namespace Logging.Filters
-{
-    using Logging.Abstractions;
-    using Microsoft.AspNetCore.Mvc.Abstractions;
-    using Microsoft.AspNetCore.Mvc.Filters;
-    using System.Diagnostics;
-    using System.Linq;
-    using System.Text.Json;
-
-    /// <summary>
+/// <summary>
     /// Filtro de acción que se ejecuta antes y después de la ejecución de una acción en un controlador.
     /// Captura información como parámetros de entrada y salida, tiempos de ejecución y errores.
     /// </summary>
@@ -127,4 +118,4 @@ namespace Logging.Filters
             }
         }
     }
-}
+
