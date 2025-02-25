@@ -1,4 +1,4 @@
-public static string FormatJson(string json, int indentationLevel = 4)
+public static string FormatJson(string json, int indentationLevel = 8)
 {
     try
     {
@@ -10,10 +10,19 @@ public static string FormatJson(string json, int indentationLevel = 4)
         });
 
         string indent = new string(' ', indentationLevel); // Espacios de indentación
-        return indent + formattedJson.Replace(Environment.NewLine, Environment.NewLine + indent);
+        
+        // 🔹 Alinear la primera línea correctamente
+        string[] lines = formattedJson.Split(Environment.NewLine);
+        lines[0] = indent + lines[0]; // La primera línea lleva indentación manual
+        for (int i = 1; i < lines.Length; i++)
+        {
+            lines[i] = indent + lines[i]; // Las siguientes líneas se indentan normalmente
+        }
+
+        return Environment.NewLine + string.Join(Environment.NewLine, lines);
     }
     catch
     {
-        return json; // Si el JSON es inválido, devuelve el texto original
+        return json; // Si el JSON no es válido, devuelve el texto original
     }
 }
