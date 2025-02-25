@@ -9,12 +9,14 @@ public static string FormatJson(string json)
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         });
 
-        // 🔹 Asegurar correcta indentación en cada línea del JSON
-        string indent = "    "; // Define la cantidad de espacios para indentar
-        return string.Join(Environment.NewLine, formattedJson.Split(Environment.NewLine).Select(line => indent + line));
+        // 🔹 Agregar indentación a cada línea para que se vea correctamente alineado en los logs
+        string indent = "    "; // Cuatro espacios para alinear correctamente dentro del log
+        return Environment.NewLine + string.Join(Environment.NewLine, 
+            formattedJson.Split(Environment.NewLine)
+                         .Select(line => indent + line));
     }
     catch
     {
-        return json; // Devuelve el JSON original si hay un error
+        return json; // Si el JSON no es válido, devuelve el contenido original
     }
 }
