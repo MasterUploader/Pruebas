@@ -3,7 +3,6 @@ namespace Logging.Filters
     using Logging.Abstractions;
     using Microsoft.AspNetCore.Mvc.Abstractions;
     using Microsoft.AspNetCore.Mvc.Filters;
-    using Microsoft.AspNetCore.Mvc.Infrastructure;
     using System.Diagnostics;
     using System.Linq;
     using System.Text.Json;
@@ -16,24 +15,20 @@ namespace Logging.Filters
     public class LoggingActionFilter : IActionFilter
     {
         private readonly ILoggingService _loggingService;
-        private readonly IActionDescriptorCollectionProvider _actionDescriptorProvider;
-        private string _controllerName;
-        private string _actionName;
-        private Stopwatch _stopwatch;
+        private string _controllerName = "Desconocido"; // Evita error CS8618 inicializando con un valor predeterminado.
+        private string _actionName = "Desconocido"; // Evita error CS8618 inicializando con un valor predeterminado.
+        private Stopwatch _stopwatch = new(); // Se inicializa para evitar CS8618.
 
         // Instancia estática de JsonSerializerOptions para evitar creaciones innecesarias.
         private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
 
         /// <summary>
         /// Constructor del filtro de logging.
-        /// Utiliza `IActionDescriptorCollectionProvider` para obtener información de los controladores registrados.
         /// </summary>
         /// <param name="loggingService">Servicio de logging utilizado para registrar la ejecución.</param>
-        /// <param name="actionDescriptorProvider">Provee información sobre los controladores y acciones.</param>
-        public LoggingActionFilter(ILoggingService loggingService, IActionDescriptorCollectionProvider actionDescriptorProvider)
+        public LoggingActionFilter(ILoggingService loggingService)
         {
             _loggingService = loggingService;
-            _actionDescriptorProvider = actionDescriptorProvider;
         }
 
         /// <summary>
@@ -49,7 +44,7 @@ namespace Logging.Filters
                 using var scope = new LogScope();
 
                 // Inicia un cronómetro para medir el tiempo de ejecución de la acción.
-                _stopwatch = Stopwatch.StartNew();
+                _stopwatch.Restart();
 
                 // Obtiene el nombre del controlador y de la acción desde el contexto.
                 _controllerName = context.ActionDescriptor.RouteValues["controller"] ?? "Desconocido";
