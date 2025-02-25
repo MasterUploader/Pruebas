@@ -1,23 +1,111 @@
-<ItemGroup>
-    <!-- Interfaces -->
-    <Compile Include="Abstractions\ILoggingService.cs" />
+namespace Logging.Filters
+{
+    using Logging.Abstractions;
+    using Microsoft.AspNetCore.Mvc.Abstractions;
+    using Microsoft.AspNetCore.Mvc.Filters;
+    using Microsoft.AspNetCore.Mvc.Infrastructure;
+    using System.Diagnostics;
+    using System.Linq;
+    using System.Text.Json;
 
-    <!-- Configuración -->
-    <Compile Include="Configuration\LoggingOptions.cs" />
+    /// <summary>
+    /// Filtro de acción que se ejecuta antes y después de una acción en un controlador.
+    /// Captura información sobre los parámetros de entrada y salida, registra el tiempo de ejecución
+    /// y utiliza scopes anidados para reflejar la jerarquía del flujo de ejecución.
+    /// </summary>
+    public class LoggingActionFilter : IActionFilter
+    {
+        private readonly ILoggingService _loggingService;
+        private readonly IActionDescriptorCollectionProvider _actionDescriptorProvider;
+        private string _controllerName;
+        private string _actionName;
+        private Stopwatch _stopwatch;
 
-    <!-- Extensiones -->
-    <Compile Include="Extensions\StringExtensions.cs" />
+        // Instancia estática de JsonSerializerOptions para evitar creaciones innecesarias.
+        private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
 
-    <!-- Filtros -->
-    <Compile Include="Filters\LoggingActionFilter.cs" />
+        /// <summary>
+        /// Constructor del filtro de logging.
+        /// Utiliza `IActionDescriptorCollectionProvider` para obtener información de los controladores registrados.
+        /// </summary>
+        /// <param name="loggingService">Servicio de logging utilizado para registrar la ejecución.</param>
+        /// <param name="actionDescriptorProvider">Provee información sobre los controladores y acciones.</param>
+        public LoggingActionFilter(ILoggingService loggingService, IActionDescriptorCollectionProvider actionDescriptorProvider)
+        {
+            _loggingService = loggingService;
+            _actionDescriptorProvider = actionDescriptorProvider;
+        }
 
-    <!-- Middleware -->
-    <Compile Include="Middleware\LoggingMiddleware.cs" />
+        /// <summary>
+        /// Se ejecuta antes de que se invoque la acción del controlador.
+        /// Captura el nombre del controlador y de la acción, y registra los parámetros de entrada.
+        /// </summary>
+        /// <param name="context">Contexto de ejecución de la acción, que contiene información de la solicitud.</param>
+        public void OnActionExecuting(ActionExecutingContext context)
+        {
+            try
+            {
+                // Crea un scope anidado para reflejar la jerarquía de ejecución en los logs.
+                using var scope = new LogScope();
 
-    <!-- Servicios -->
-    <Compile Include="Services\LoggingService.cs" />
+                // Inicia un cronómetro para medir el tiempo de ejecución de la acción.
+                _stopwatch = Stopwatch.StartNew();
 
-    <!-- Helpers -->
-    <Compile Include="Helpers\LogFormatter.cs" />
-    <Compile Include="Helpers\LogScope.cs" />
-</ItemGroup>
+                // Obtiene el nombre del controlador y de la acción desde el contexto.
+                _controllerName = context.ActionDescriptor.RouteValues["controller"] ?? "Desconocido";
+                _actionName = context.ActionDescriptor.RouteValues["action"] ?? "Desconocido";
+
+                // Serializa los parámetros de entrada utilizando la instancia estática de SerializerOptions.
+                var inputParams = string.Join(System.Environment.NewLine,
+                    context.ActionArguments.Select(arg =>
+                        $"{arg.Key} = {(arg.Value != null ? JsonSerializer.Serialize(arg.Value, SerializerOptions) : "Desconocido") }"));
+
+                // Registra los parámetros de entrada.
+                _loggingService.AddInputParameters(inputParams);
+
+                // Registra el inicio de ejecución de la acción.
+                _loggingService.AddSingleLog($"Inicio de ejecución en Controller: {_controllerName}, Action: {_actionName}");
+            }
+            catch (System.Exception ex)
+            {
+                // En caso de error, se registra la excepción en el log.
+                _loggingService.AddExceptionLog(ex);
+            }
+        }
+
+        /// <summary>
+        /// Se ejecuta después de que se ha completado la ejecución de la acción.
+        /// Captura los parámetros de salida, el tiempo total de ejecución y registra la finalización de la acción.
+        /// </summary>
+        /// <param name="context">Contexto de ejecución de la acción, que contiene el resultado de la acción.</param>
+        public void OnActionExecuted(ActionExecutedContext context)
+        {
+            try
+            {
+                // Crea un scope anidado para reflejar la jerarquía en los logs.
+                using var scope = new LogScope();
+
+                // Detiene el cronómetro y obtiene el tiempo total de ejecución.
+                _stopwatch.Stop();
+
+                // Captura el resultado de la acción (si es un ObjectResult).
+                string outputParams = "Sin datos de salida";
+                if (context.Result is ObjectResult objectResult && objectResult.Value != null)
+                {
+                    outputParams = JsonSerializer.Serialize(objectResult.Value, SerializerOptions);
+                }
+
+                // Registra los parámetros de salida.
+                _loggingService.AddOutputParameters(outputParams);
+
+                // Registra el final de la ejecución con el tiempo transcurrido en milisegundos.
+                _loggingService.AddSingleLog($"Fin de ejecución en Controller: {_controllerName}, Action: {_actionName} en {_stopwatch.ElapsedMilliseconds} ms");
+            }
+            catch (System.Exception ex)
+            {
+                // Registra cualquier error ocurrido durante la ejecución de la acción.
+                _loggingService.AddExceptionLog(ex);
+            }
+        }
+    }
+}
