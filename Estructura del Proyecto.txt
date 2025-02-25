@@ -1,256 +1,64 @@
-namespace Logging.Services
+namespace Logging.Abstractions
 {
-    using Logging.Abstractions;
-    using Logging.Extensions;
-    using Logging.Helpers;
     using Microsoft.AspNetCore.Http;
-    using Microsoft.Extensions.Hosting;
-    using Microsoft.Extensions.Options;
     using System;
-    using System.IO;
-    using System.Text;
-    using System.Text.Json;
-    using System.Threading.Tasks;
 
     /// <summary>
-    /// Servicio de logging encargado de capturar eventos, solicitudes HTTP, respuestas y errores,
-    /// almacenándolos en archivos de log dentro de un directorio específico por API.
+    /// Define las operaciones de logging que pueden ser utilizadas para capturar eventos,
+    /// solicitudes HTTP, respuestas, excepciones y otros registros dentro de la API.
     /// </summary>
-    public class LoggingService : ILoggingService
+    public interface ILoggingService
     {
-        private readonly string _logDirectory;
-        private readonly IHttpContextAccessor _httpContextAccessor;
-
         /// <summary>
-        /// Versión de la librería de logging.
-        /// </summary>
-        public const string LibraryVersion = "1.0.0";
-
-        /// <summary>
-        /// Constructor del servicio de logging.
-        /// </summary>
-        /// <param name="httpContextAccessor">Proporciona acceso al contexto HTTP actual.</param>
-        /// <param name="hostEnvironment">Contiene información sobre el entorno de la aplicación.</param>
-        /// <param name="options">Opciones de configuración del logging definidas en `appsettings.json`.</param>
-        public LoggingService(IHttpContextAccessor httpContextAccessor, IHostEnvironment hostEnvironment, IOptions<Logging.Configuration.LoggingOptions> options)
-        {
-            _httpContextAccessor = httpContextAccessor;
-
-            // Obtiene la ruta base desde la configuración en appsettings.json
-            string baseLogDir = options.Value.BaseLogDirectory;
-            // Obtiene el nombre de la API desde el entorno de ejecución; si no existe, usa "Desconocido"
-            string apiName = !string.IsNullOrWhiteSpace(hostEnvironment.ApplicationName) ? hostEnvironment.ApplicationName : "Desconocido";
-            // Forma la ruta final de los logs combinando el directorio base y el nombre de la API
-            _logDirectory = Path.Combine(baseLogDir, apiName);
-            
-            try
-            {
-                // Crea el directorio si no existe
-                if (!Directory.Exists(_logDirectory))
-                    Directory.CreateDirectory(_logDirectory);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        /// <summary>
-        /// Obtiene la ruta del archivo de log asociado a la petición actual.
-        /// Si no existe un archivo asignado, retorna un archivo global de logs manuales.
-        /// </summary>
-        private string GetCurrentLogFile()
-        {
-            try
-            {
-                var context = _httpContextAccessor.HttpContext;
-                if (context != null && context.Items.ContainsKey("LogFileName"))
-                    return context.Items["LogFileName"] as string;
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-            return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
-        }
-
-        /// <summary>
-        /// Registra errores internos del servicio en "InternalErrorLog.txt".
-        /// Esto previene que fallos internos del sistema afecten la ejecución de la API.
-        /// </summary>
-        private void LogInternalError(Exception ex)
-        {
-            try
-            {
-                var errorLogPath = Path.Combine(_logDirectory, "InternalErrorLog.txt");
-                var errorMessage = $"[{DateTime.Now}] Error en LoggingService: {ex}{Environment.NewLine}";
-                File.AppendAllText(errorLogPath, errorMessage);
-            }
-            catch
-            {
-                // Evita un bucle infinito si la escritura del log interno falla.
-            }
-        }
-
-        /// <summary>
-        /// Escribe un log completo para la petición actual en un archivo único.
+        /// Escribe un log completo en un archivo único basado en la petición actual.
         /// </summary>
         /// <param name="context">El contexto HTTP de la petición.</param>
         /// <param name="logContent">El contenido del log a registrar.</param>
-        public void WriteLog(HttpContext context, string logContent)
-        {
-            try
-            {
-                var fileName = Path.Combine(_logDirectory, $"Log_{context.TraceIdentifier}.txt");
-                File.AppendAllText(fileName, logContent.Indent(LogScope.CurrentLevel) + Environment.NewLine + Environment.NewLine);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        // ====================== SECCIÓN: LOGS DE EVENTOS ======================
+        void WriteLog(HttpContext context, string logContent);
 
         /// <summary>
-        /// Agrega un log con un mensaje de texto simple.
+        /// Escribe un log con un mensaje de texto simple.
         /// </summary>
-        public void AddSingleLog(string logMessage)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatSingleLog(logMessage).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        // ====================== SECCIÓN: LOGS DE OBJETOS ======================
+        /// <param name="logMessage">Mensaje a registrar en el log.</param>
+        void AddSingleLog(string logMessage);
 
         /// <summary>
-        /// Registra un objeto en los logs, soportando JSON y XML.
+        /// Registra un objeto en el log, permitiendo serialización en JSON o XML.
         /// </summary>
-        public void AddObjLog(string objectName, object logObject)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        // ====================== SECCIÓN: LOGS DE RESPUESTA ======================
+        /// <param name="objectName">Nombre identificador del objeto.</param>
+        /// <param name="logObject">Objeto que se registrará en el log.</param>
+        void AddObjLog(string objectName, object logObject);
 
         /// <summary>
-        /// Agrega un log con la información de la respuesta HTTP.
+        /// Registra la información de una respuesta HTTP.
         /// </summary>
-        public void AddResponseLog(string logMessage)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatObjectLog("Response", logMessage).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        // ====================== SECCIÓN: LOGS DEL ENTORNO ======================
+        /// <param name="logMessage">Datos de la respuesta HTTP a registrar.</param>
+        void AddResponseLog(string logMessage);
 
         /// <summary>
-        /// Agrega un log con información del entorno de ejecución.
+        /// Registra información del entorno de ejecución, incluyendo detalles de la API y el sistema.
         /// </summary>
-        public void AddEnvironmentLog()
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatEnvironmentInfoStart().Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        // ====================== SECCIÓN: LOGS DE EXCEPCIONES ======================
+        /// <param name="applicationName">Nombre de la aplicación.</param>
+        /// <param name="environment">Nombre del entorno (Development, Staging, Production).</param>
+        /// <param name="contentRootPath">Ruta raíz del contenido de la aplicación.</param>
+        void AddEnvironmentLog(string applicationName, string environment, string contentRootPath);
 
         /// <summary>
         /// Registra la información de una excepción en los logs.
         /// </summary>
-        public void AddExceptionLog(Exception ex)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatExceptionDetails(ex).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception e)
-            {
-                LogInternalError(e);
-            }
-        }
-
-        // ====================== SECCIÓN: LOGS DE PARÁMETROS ======================
+        /// <param name="ex">Excepción a registrar.</param>
+        void AddExceptionLog(Exception ex);
 
         /// <summary>
-        /// Agrega un log con los parámetros de entrada de un método.
+        /// Registra los parámetros de entrada de un método.
         /// </summary>
-        public void AddInputParameters(string parameters)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatInputParameters(parameters).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
+        /// <param name="parameters">Lista de parámetros en formato string.</param>
+        void AddInputParameters(string parameters);
 
         /// <summary>
-        /// Agrega un log con los parámetros de salida de un método.
+        /// Registra los parámetros de salida de un método.
         /// </summary>
-        public void AddOutputParameters(string parameters)
-        {
-            try
-            {
-                var formatted = LogFormatter.FormatOutputParameters(parameters).Indent(LogScope.CurrentLevel);
-                File.AppendAllText(GetCurrentLogFile(), formatted);
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-        }
-
-        // ====================== SECCIÓN: MÉTODOS AUXILIARES ======================
-
-        /// <summary>
-        /// Función auxiliar que intenta obtener un valor ejecutando un `getter`.
-        /// Si ocurre un error, se captura y se retorna el valor por defecto del tipo `T`.
-        /// </summary>
-        private T GetValueOrDefault<T>(Func<T> getter)
-        {
-            try
-            {
-                return getter();
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-                return default;
-            }
-        }
+        /// <param name="parameters">Lista de parámetros de salida en formato string.</param>
+        void AddOutputParameters(string parameters);
     }
 }
