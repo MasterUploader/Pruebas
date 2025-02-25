@@ -3,14 +3,18 @@ public static string FormatJson(string json)
     try
     {
         using var jsonDoc = JsonDocument.Parse(json);
-        return JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions
+        string formattedJson = JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions
         {
-            WriteIndented = true,   // Indentación para mejorar legibilidad
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping // Permite caracteres Unicode sin escape
+            WriteIndented = true,  
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         });
+
+        // 🔹 Asegurar correcta indentación en cada línea del JSON
+        string indent = "    "; // Define la cantidad de espacios para indentar
+        return string.Join(Environment.NewLine, formattedJson.Split(Environment.NewLine).Select(line => indent + line));
     }
     catch
     {
-        return json; // Si falla la conversión, devolver el JSON original
+        return json; // Devuelve el JSON original si hay un error
     }
 }
