@@ -1,29 +1,37 @@
-public static string FormatJson(string json, int indentationLevel = 8)
+public static string FormatRequestInfo(string method, string url, string requestBody)
 {
-    try
-    {
-        using var jsonDoc = JsonDocument.Parse(json);
-        string formattedJson = JsonSerializer.Serialize(jsonDoc, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        });
+    string formattedJson = string.IsNullOrWhiteSpace(requestBody) 
+        ? "        (Sin cuerpo en la solicitud)"
+        : FormatJson(requestBody, 8); // Aplica indentación controlada
 
-        string indent = new string(' ', indentationLevel); // Espacios de indentación
+    return $@"
+----------------------------------Request Info---------------------------------
+Inicio: {DateTime.Now}
+-------------------------------------------------------------------------------
+Método: {method}
+URL: {url}
+Cuerpo:
+{formattedJson}
+----------------------------------Request Info---------------------------------
+Fin: {DateTime.Now}
+-------------------------------------------------------------------------------";
+}
 
-        // 🔹 Divide el JSON en líneas
-        string[] lines = formattedJson.Split(Environment.NewLine);
 
-        // 🔹 Primera línea queda sin espacios adicionales, solo se agregan a las siguientes líneas
-        for (int i = 1; i < lines.Length; i++)
-        {
-            lines[i] = indent + lines[i]; // Aplica la indentación en todas las líneas excepto la primera
-        }
+public static string FormatResponseInfo(int statusCode, string responseBody)
+{
+    string formattedJson = string.IsNullOrWhiteSpace(responseBody) 
+        ? "        (Sin cuerpo en la respuesta)"
+        : FormatJson(responseBody, 8); // Aplica indentación controlada
 
-        return Environment.NewLine + string.Join(Environment.NewLine, lines);
-    }
-    catch
-    {
-        return json; // Si el JSON no es válido, devuelve el texto original
-    }
+    return $@"
+----------------------------------Response Info---------------------------------
+Inicio: {DateTime.Now}
+-------------------------------------------------------------------------------
+Código Estado: {statusCode}
+Cuerpo:
+{formattedJson}
+----------------------------------Response Info---------------------------------
+Fin: {DateTime.Now}
+-------------------------------------------------------------------------------";
 }
