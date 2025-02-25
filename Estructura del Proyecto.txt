@@ -10,13 +10,14 @@ public static string FormatJson(string json, int indentationLevel = 8)
         });
 
         string indent = new string(' ', indentationLevel); // Espacios de indentación
-        
-        // 🔹 Alinear la primera línea correctamente
+
+        // 🔹 Divide el JSON en líneas
         string[] lines = formattedJson.Split(Environment.NewLine);
-        lines[0] = indent + lines[0]; // La primera línea lleva indentación manual
+
+        // 🔹 Primera línea queda sin espacios adicionales, solo se agregan a las siguientes líneas
         for (int i = 1; i < lines.Length; i++)
         {
-            lines[i] = indent + lines[i]; // Las siguientes líneas se indentan normalmente
+            lines[i] = indent + lines[i]; // Aplica la indentación en todas las líneas excepto la primera
         }
 
         return Environment.NewLine + string.Join(Environment.NewLine, lines);
