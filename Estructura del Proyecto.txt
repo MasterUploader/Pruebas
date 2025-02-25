@@ -12,8 +12,8 @@ namespace Logging.Middleware
     using System.Threading.Tasks;
 
     /// <summary>
-    /// Middleware para capturar y registrar toda la información de la solicitud HTTP.
-    /// Genera un archivo de log por cada petición, incluyendo información del entorno, request y response.
+    /// Middleware que captura información de cada solicitud HTTP, incluyendo su entorno, request y response.
+    /// Genera un archivo de log único para cada petición.
     /// </summary>
     public class LoggingMiddleware
     {
@@ -23,7 +23,7 @@ namespace Logging.Middleware
         private readonly string _baseLogDirectory;
 
         /// <summary>
-        /// Constructor que inicializa el middleware con sus dependencias.
+        /// Constructor del middleware que inicializa las dependencias.
         /// </summary>
         public LoggingMiddleware(
             RequestDelegate next,
@@ -40,7 +40,7 @@ namespace Logging.Middleware
         }
 
         /// <summary>
-        /// Método principal que intercepta cada solicitud HTTP y captura la información relevante.
+        /// Método que intercepta las solicitudes HTTP y captura información relevante.
         /// </summary>
         public async Task InvokeAsync(HttpContext context)
         {
@@ -51,13 +51,13 @@ namespace Logging.Middleware
 
             try
             {
-                // Generar Execution ID único para esta solicitud
+                // Generar un Execution ID único para esta petición
                 string executionId = Guid.NewGuid().ToString();
                 string endpoint = context.Request.Path.Value?.Replace("/", "_") ?? "UnknownEndpoint";
                 string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
                 string logFileName = Path.Combine(GetLogDirectory(), $"{executionId}_{endpoint}_{timestamp}.txt");
 
-                // Guardar el nombre del log en el contexto para que otros componentes puedan accederlo
+                // Guardar el nombre del log en el contexto para referencia en otros componentes
                 context.Items["LogFileName"] = logFileName;
 
                 var logBuilder = new StringBuilder();
@@ -72,12 +72,12 @@ namespace Logging.Middleware
                 // Pasar la solicitud al siguiente middleware
                 await _next(context);
 
-                // Capturar información del response
+                // Capturar información de la respuesta HTTP
                 logBuilder.AppendLine(await CaptureResponseInfoAsync(context.Response));
 
                 logBuilder.AppendLine(LogFormatter.FormatEndLog());
 
-                // Guardar el log en el archivo correspondiente
+                // Guardar el log en un archivo específico
                 await File.AppendAllTextAsync(logFileName, logBuilder.ToString());
             }
             catch (Exception ex)
@@ -87,7 +87,7 @@ namespace Logging.Middleware
         }
 
         /// <summary>
-        /// Obtiene el directorio donde se almacenarán los logs, asegurándose de que exista.
+        /// Obtiene el directorio donde se almacenarán los logs, asegurando que exista.
         /// </summary>
         private string GetLogDirectory()
         {
@@ -107,7 +107,7 @@ namespace Logging.Middleware
         /// </summary>
         private string CaptureEnvironmentInfo(HttpContext context, string executionId)
         {
-            return LogFormatter.FormatEnvironmentInfoStart(
+            return LogFormatter.FormatEnvironmentInfo(
                 _hostEnvironment.ApplicationName ?? "Desconocido",
                 _hostEnvironment.EnvironmentName ?? "Desconocido",
                 _hostEnvironment.ContentRootPath ?? "Desconocido",
@@ -116,27 +116,26 @@ namespace Logging.Middleware
                 context.Request.Headers["User-Agent"].FirstOrDefault() ?? "Desconocido",
                 Environment.MachineName,
                 Environment.OSVersion.ToString(),
-                context.Request.Host.ToString() ?? "Desconocido",
-                "Desconocido"
-            ) + LogFormatter.FormatEnvironmentInfoEnd();
+                context.Request.Host.ToString() ?? "Desconocido"
+            );
         }
 
         /// <summary>
-        /// Captura el request y lo devuelve como string formateado.
+        /// Captura la información del request HTTP.
         /// </summary>
         private async Task<string> CaptureRequestInfoAsync(HttpRequest request)
         {
             var requestBody = await ReadRequestBodyAsync(request);
-            return LogFormatter.FormatRequestInfoStart(request) + requestBody + LogFormatter.FormatRequestInfoEnd();
+            return LogFormatter.FormatRequestInfo(request) + requestBody;
         }
 
         /// <summary>
-        /// Captura el response y lo devuelve como string formateado.
+        /// Captura la información del response HTTP.
         /// </summary>
         private async Task<string> CaptureResponseInfoAsync(HttpResponse response)
         {
             var responseBody = await ReadResponseBodyAsync(response);
-            return LogFormatter.FormatResponseInfoStart(response) + responseBody + LogFormatter.FormatResponseInfoEnd();
+            return LogFormatter.FormatResponseInfo(response) + responseBody;
         }
 
         /// <summary>
