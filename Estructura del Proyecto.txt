@@ -57,38 +57,6 @@ namespace Logging.Helpers
         }
 
         /// <summary>
-        /// Formatea los parámetros de entrada en una acción.
-        /// </summary>
-        public static string FormatInputParameters(string parameters)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------");
-            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
-            sb.AppendLine(parameters);
-            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------");
-            sb.AppendLine($"Fin: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Formatea los parámetros de salida en una acción.
-        /// </summary>
-        public static string FormatOutputParameters(string parameters)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("-----------------------Parámetros de Salida-----------------------");
-            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
-            sb.AppendLine(parameters);
-            sb.AppendLine("-----------------------Parámetros de Salida-----------------------");
-            sb.AppendLine($"Fin: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
-            return sb.ToString();
-        }
-
-        /// <summary>
         /// Formatea la información de la solicitud HTTP.
         /// </summary>
         public static string FormatRequestInfo(HttpRequest request)
@@ -133,6 +101,38 @@ namespace Logging.Helpers
         }
 
         /// <summary>
+        /// Formatea los parámetros de entrada en una acción.
+        /// </summary>
+        public static string FormatInputParameters(string parameters)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(parameters);
+            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formatea los parámetros de salida en una acción.
+        /// </summary>
+        public static string FormatOutputParameters(string parameters)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("-----------------------Parámetros de Salida-----------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(parameters);
+            sb.AppendLine("-----------------------Parámetros de Salida-----------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            return sb.ToString();
+        }
+
+        /// <summary>
         /// Formatea la información de una excepción capturada.
         /// </summary>
         public static string FormatExceptionDetails(Exception ex)
@@ -145,38 +145,6 @@ namespace Logging.Helpers
             sb.AppendLine($"Message: {ex.Message}");
             sb.AppendLine($"StackTrace: {ex.StackTrace}");
             sb.AppendLine("----------------------------------Exception Details---------------------------------");
-            sb.AppendLine($"Fin: {DateTime.UtcNow}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Formatea los logs manuales agregados por el usuario.
-        /// </summary>
-        public static string FormatSingleLog(string logMessage)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("----------------------------------Single Log---------------------------------");
-            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine(logMessage);
-            sb.AppendLine("----------------------------------Single Log---------------------------------");
-            sb.AppendLine($"Fin: {DateTime.UtcNow}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Formatea la información de un objeto JSON para ser almacenado en los logs.
-        /// </summary>
-        public static string FormatObjectLog(string objectName, string objectData)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
-            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
-            sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine(objectData);
-            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
             sb.AppendLine($"Fin: {DateTime.UtcNow}");
             sb.AppendLine("-----------------------------------------------------------------------------");
             return sb.ToString();
