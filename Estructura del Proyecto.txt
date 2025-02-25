@@ -1,1 +1,119 @@
+namespace Logging.Middleware
+{
+    using Logging.Abstractions;
+    using Logging.Configuration;
+    using Microsoft.AspNetCore.Http;
+    using Microsoft.Extensions.Hosting;
+    using Microsoft.Extensions.Options;
+    using System;
+    using System.IO;
+    using System.Linq;
+    using System.Text;
+    using System.Threading.Tasks;
+
+    public class LoggingMiddleware
+    {
+        private readonly RequestDelegate _next;
+        private readonly ILoggingService _loggingService;
+        private readonly IHostEnvironment _hostEnvironment;
+        private readonly string _baseLogDirectory;
+
+        public LoggingMiddleware(
+            RequestDelegate next,
+            ILoggingService loggingService,
+            IHostEnvironment hostEnvironment,
+            IOptions<LoggingOptions> options)
+        {
+            _next = next;
+            _loggingService = loggingService;
+            _hostEnvironment = hostEnvironment;
+            _baseLogDirectory = !string.IsNullOrWhiteSpace(options.Value.BaseLogDirectory)
+                ? options.Value.BaseLogDirectory
+                : @"C:\Logs\";
+        }
+
+        public async Task InvokeAsync(HttpContext context)
+        {
+            try
+            {
+                // Generar Execution ID único
+                string executionId = Guid.NewGuid().ToString();
+                string endpoint = context.Request.Path.Value?.Replace("/", "_") ?? "UnknownEndpoint";
+                string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+                string logFileName = Path.Combine(GetLogDirectory(), $"{executionId}{endpoint}_{timestamp}.txt");
+
+                // Guardar el nombre del log en el contexto de la petición
+                context.Items["LogFileName"] = logFileName;
+
+                var logBuilder = new StringBuilder();
+                logBuilder.AppendLine(LogFormatter.FormatBeginLog());
+
+                // Capturar información del entorno
+                string application = _hostEnvironment.ApplicationName ?? "Desconocido";
+                string env = _hostEnvironment.EnvironmentName ?? "Desconocido";
+                string contentRoot = _hostEnvironment.ContentRootPath ?? "Desconocido";
+
+                logBuilder.AppendLine(LogFormatter.FormatEnvironmentInfoStart(
+                    application, env, contentRoot, executionId,
+                    context.Connection.RemoteIpAddress?.ToString() ?? "Desconocido",
+                    context.Request.Headers["User-Agent"].FirstOrDefault() ?? "Desconocido",
+                    Environment.MachineName, Environment.OSVersion.ToString(),
+                    context.Request.Host.ToString() ?? "Desconocido", "Desconocido"
+                ));
+                logBuilder.AppendLine(LogFormatter.FormatEnvironmentInfoEnd());
+
+                // Capturar información del request
+                logBuilder.AppendLine(LogFormatter.FormatRequestInfoStart(context.Request));
+                logBuilder.AppendLine(await CaptureRequestBodyAsync(context.Request));
+                logBuilder.AppendLine(LogFormatter.FormatRequestInfoEnd());
+
+                await _next(context);
+
+                // Capturar información de la respuesta HTTP
+                logBuilder.AppendLine(LogFormatter.FormatResponseInfoStart(context.Response));
+                logBuilder.AppendLine(await CaptureResponseBodyAsync(context.Response));
+                logBuilder.AppendLine(LogFormatter.FormatResponseInfoEnd());
+
+                logBuilder.AppendLine(LogFormatter.FormatEndLog());
+
+                // Guardar el log en el archivo específico
+                await File.AppendAllTextAsync(logFileName, logBuilder.ToString());
+            }
+            catch (Exception ex)
+            {
+                _loggingService.AddExceptionLog(ex);
+            }
+        }
+
+        private string GetLogDirectory()
+        {
+            string apiName = _hostEnvironment.ApplicationName ?? "Desconocido";
+            string directory = Path.Combine(_baseLogDirectory, apiName);
+            if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
+            return directory;
+        }
+
+        private async Task<string> CaptureRequestBodyAsync(HttpRequest request)
+        {
+            if (request.Body.CanSeek)
+            {
+                request.Body.Seek(0, SeekOrigin.Begin);
+                using var reader = new StreamReader(request.Body, leaveOpen: true);
+                string body = await reader.ReadToEndAsync();
+                request.Body.Seek(0, SeekOrigin.Begin);
+                return body;
+            }
+            return "No se pudo capturar el cuerpo de la solicitud.";
+        }
+
+        private async Task<string> CaptureResponseBodyAsync(HttpResponse response)
+        {
+            response.Body.Seek(0, SeekOrigin.Begin);
+            using var reader = new StreamReader(response.Body, leaveOpen: true);
+            string body = await reader.ReadToEndAsync();
+            response.Body.Seek(0, SeekOrigin.Begin);
+            return body;
+        }
+    }
+}
 
