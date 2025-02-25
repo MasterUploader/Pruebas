@@ -2,6 +2,7 @@ namespace Logging.Helpers
 {
     using Microsoft.AspNetCore.Http;
     using System;
+    using System.Linq;
     using System.Text;
 
     /// <summary>
@@ -9,58 +10,136 @@ namespace Logging.Helpers
     /// </summary>
     public static class LogFormatter
     {
+        /// <summary>
+        /// Formatea el inicio del log.
+        /// </summary>
         public static string FormatBeginLog() => 
             $"---------------------------Inicio de Log---------------------------\n{DateTime.UtcNow}\n---------------------------Inicio de Log---------------------------\n";
 
+        /// <summary>
+        /// Formatea el final del log.
+        /// </summary>
+        public static string FormatEndLog() => 
+            $"---------------------------Fin de Log---------------------------\n{DateTime.UtcNow}\n---------------------------Fin de Log---------------------------\n";
+
+        /// <summary>
+        /// Formatea la información del entorno y la devuelve como string formateado.
+        /// </summary>
         public static string FormatEnvironmentInfo(
             string application, string environment, string contentRoot, string executionId,
             string clientIp, string userAgent, string machineName, string os, string host)
         {
-            return $"""
-            ---------------------------Environment Info-------------------------
-            Inicio: {DateTime.UtcNow}
-            -------------------------------------------------------------------
-            Application: {application}
-            Environment: {environment}
-            ContentRoot: {contentRoot}
-            Execution ID: {executionId}
-            Client IP: {clientIp}
-            User Agent: {userAgent}
-            Machine Name: {machineName}
-            OS: {os}
-            Host: {host}
-            ----------------------------Environment Info-------------------------
-            Fin: {DateTime.UtcNow}
-            -------------------------------------------------------------------
-            """;
+            var sb = new StringBuilder();
+            sb.AppendLine("---------------------------Environment Info-------------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine($"Application: {application}");
+            sb.AppendLine($"Environment: {environment}");
+            sb.AppendLine($"ContentRoot: {contentRoot}");
+            sb.AppendLine($"Execution ID: {executionId}");
+            sb.AppendLine($"Client IP: {clientIp}");
+            sb.AppendLine($"User Agent: {userAgent}");
+            sb.AppendLine($"Machine Name: {machineName}");
+            sb.AppendLine($"OS: {os}");
+            sb.AppendLine($"Host: {host}");
+            sb.AppendLine("----------------------------Environment Info-------------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-------------------------------------------------------------------");
+            return sb.ToString();
         }
 
-        public static string FormatRequestInfo(HttpRequest request) =>
-            $"""
-            ----------------------------------Request Info---------------------------------
-            Inicio: {DateTime.UtcNow}
-            -----------------------------------------------------------------------------
-            IP: {request.HttpContext.Connection.RemoteIpAddress}
-            Method: {request.Method}
-            Query: {request.QueryString}
-            Headers:
-            {string.Join("\n", request.Headers.Select(h => $"{h.Key}: {h.Value}"))}
-            ----------------------------------Request Info---------------------------------
-            Fin: {DateTime.UtcNow}
-            -----------------------------------------------------------------------------
-            """;
+        /// <summary>
+        /// Formatea la información de la solicitud HTTP.
+        /// </summary>
+        public static string FormatRequestInfo(HttpRequest request)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Request Info---------------------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine($"IP: {request.HttpContext.Connection.RemoteIpAddress}");
+            sb.AppendLine($"Method: {request.Method}");
+            sb.AppendLine($"Query: {request.QueryString}");
+            sb.AppendLine("Headers:");
+            foreach (var header in request.Headers)
+            {
+                sb.AppendLine($"{header.Key}: {header.Value}");
+            }
+            sb.AppendLine("----------------------------------Request Info---------------------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            return sb.ToString();
+        }
 
-        public static string FormatResponseInfo(HttpResponse response) =>
-            $"""
-            ----------------------------------Response Info---------------------------------
-            Inicio: {DateTime.UtcNow}
-            -----------------------------------------------------------------------------
-            StatusCode: {response.StatusCode}
-            Headers:
-            {string.Join("\n", response.Headers.Select(h => $"{h.Key}: {h.Value}"))}
-            ----------------------------------Response Info---------------------------------
-            Fin: {DateTime.UtcNow}
-            -----------------------------------------------------------------------------
-            """;
+        /// <summary>
+        /// Formatea la información de la respuesta HTTP.
+        /// </summary>
+        public static string FormatResponseInfo(HttpResponse response)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Response Info---------------------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine($"StatusCode: {response.StatusCode}");
+            sb.AppendLine("Headers:");
+            foreach (var header in response.Headers)
+            {
+                sb.AppendLine($"{header.Key}: {header.Value}");
+            }
+            sb.AppendLine("----------------------------------Response Info---------------------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formatea la información de una excepción capturada.
+        /// </summary>
+        public static string FormatExceptionInfo(Exception ex)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Exception Details---------------------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine($"Exception Type: {ex.GetType().FullName}");
+            sb.AppendLine($"Message: {ex.Message}");
+            sb.AppendLine($"StackTrace: {ex.StackTrace}");
+            sb.AppendLine("----------------------------------Exception Details---------------------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formatea los logs manuales agregados por el usuario.
+        /// </summary>
+        public static string FormatSingleLog(string logMessage)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("----------------------------------Single Log---------------------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine(logMessage);
+            sb.AppendLine("----------------------------------Single Log---------------------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formatea la información de un objeto JSON para ser almacenado en los logs.
+        /// </summary>
+        public static string FormatObjectLog(string objectName, string objectData)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine(objectData);
+            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            return sb.ToString();
+        }
     }
 }
