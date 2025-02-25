@@ -10,6 +10,9 @@ public async Task InvokeAsync(HttpContext context)
     var logBuilder = new StringBuilder();
     logBuilder.AppendLine(LogFormatter.FormatBeginLog());
     logBuilder.AppendLine(CaptureEnvironmentInfo(context, executionId));
+
+    // Capturar la información del Request
+    context.Request.EnableBuffering(); // Habilitar lectura sin afectar el flujo
     logBuilder.AppendLine(await CaptureRequestInfoAsync(context.Request));
 
     var originalBodyStream = context.Response.Body;
@@ -19,6 +22,8 @@ public async Task InvokeAsync(HttpContext context)
     try
     {
         await _next(context);
+        
+        // Capturar la información del Response correctamente formateada
         logBuilder.AppendLine(await CaptureResponseInfoAsync(context.Response));
     }
     catch (Exception ex)
