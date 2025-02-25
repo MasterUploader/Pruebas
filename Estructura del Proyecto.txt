@@ -1,15 +1,31 @@
 namespace Logging.Helpers
 {
-    using Microsoft.AspNetCore.Http;
     using System;
     using System.Linq;
     using System.Text;
+    using System.Xml;
+    using System.Xml.Linq;
+    using System.Text.Json;
+    using System.Text.Encodings.Web;
+    using System.Text.Unicode;
+    using Microsoft.AspNetCore.Http;
 
     /// <summary>
     /// Clase estática para formatear los logs en un formato estructurado y legible.
     /// </summary>
     public static class LogFormatter
     {
+        /// <summary>
+        /// Configuración para serializar JSON con compatibilidad para caracteres especiales.
+        /// </summary>
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            WriteIndented = true, // JSON con formato legible.
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) // Permite caracteres especiales (ñ, á, é, í, ó, ú).
+        };
+
+        // ====================== SECCIÓN: LOG DE INICIO Y FIN ======================
+
         /// <summary>
         /// Formatea el inicio del log.
         /// </summary>
@@ -22,21 +38,14 @@ namespace Logging.Helpers
         public static string FormatEndLog() =>
             $"---------------------------Fin de Log---------------------------\n{DateTime.UtcNow}\n---------------------------Fin de Log---------------------------\n";
 
-        /// <summary>
-        /// Formatea el inicio del log de información del entorno.
-        /// </summary>
+        // ====================== SECCIÓN: INFORMACIÓN DEL ENTORNO ======================
+
         public static string FormatEnvironmentInfoStart() =>
             $"---------------------------Environment Info-------------------------\nInicio: {DateTime.UtcNow}\n-------------------------------------------------------------------\n";
 
-        /// <summary>
-        /// Formatea el final del log de información del entorno.
-        /// </summary>
         public static string FormatEnvironmentInfoEnd() =>
             $"----------------------------Environment Info-------------------------\nFin: {DateTime.UtcNow}\n-------------------------------------------------------------------\n";
 
-        /// <summary>
-        /// Formatea la información del entorno y la devuelve como string formateado.
-        /// </summary>
         public static string FormatEnvironmentInfo(
             string application, string environment, string contentRoot, string executionId,
             string clientIp, string userAgent, string machineName, string os, string host)
@@ -56,9 +65,8 @@ namespace Logging.Helpers
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Formatea la información de la solicitud HTTP.
-        /// </summary>
+        // ====================== SECCIÓN: REQUEST Y RESPONSE ======================
+
         public static string FormatRequestInfo(HttpRequest request)
         {
             var sb = new StringBuilder();
@@ -79,9 +87,6 @@ namespace Logging.Helpers
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Formatea la información de la respuesta HTTP.
-        /// </summary>
         public static string FormatResponseInfo(HttpResponse response)
         {
             var sb = new StringBuilder();
@@ -100,54 +105,96 @@ namespace Logging.Helpers
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Formatea los parámetros de entrada en una acción.
-        /// </summary>
+        // ====================== SECCIÓN: PARÁMETROS ======================
+
+        public static string FormatInputParametersStart() =>
+            $"-----------------------Parámetros de Entrada-----------------------\nInicio: {DateTime.UtcNow}\n-------------------------------------------------------------------\n";
+
+        public static string FormatInputParametersEnd() =>
+            $"-----------------------Parámetros de Entrada-----------------------\nFin: {DateTime.UtcNow}\n-------------------------------------------------------------------\n";
+
         public static string FormatInputParameters(string parameters)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------");
-            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(FormatInputParametersStart());
             sb.AppendLine(parameters);
-            sb.AppendLine("-----------------------Parámetros de Entrada-----------------------");
-            sb.AppendLine($"Fin: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(FormatInputParametersEnd());
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Formatea los parámetros de salida en una acción.
-        /// </summary>
+        public static string FormatOutputParametersStart() =>
+            $"-----------------------Parámetros de Salida-----------------------\nInicio: {DateTime.UtcNow}\n-------------------------------------------------------------------\n";
+
+        public static string FormatOutputParametersEnd() =>
+            $"-----------------------Parámetros de Salida-----------------------\nFin: {DateTime.UtcNow}\n-------------------------------------------------------------------\n";
+
         public static string FormatOutputParameters(string parameters)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("-----------------------Parámetros de Salida-----------------------");
-            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(FormatOutputParametersStart());
             sb.AppendLine(parameters);
-            sb.AppendLine("-----------------------Parámetros de Salida-----------------------");
-            sb.AppendLine($"Fin: {DateTime.UtcNow}");
-            sb.AppendLine("-------------------------------------------------------------------");
+            sb.AppendLine(FormatOutputParametersEnd());
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Formatea la información de una excepción capturada.
-        /// </summary>
-        public static string FormatExceptionDetails(Exception ex)
+        // ====================== SECCIÓN: LOGS MANUALES ======================
+
+        public static string FormatSingleLog(string logMessage)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("----------------------------------Exception Details---------------------------------");
+            sb.AppendLine("----------------------------------Single Log---------------------------------");
             sb.AppendLine($"Inicio: {DateTime.UtcNow}");
             sb.AppendLine("-----------------------------------------------------------------------------");
-            sb.AppendLine($"Exception Type: {ex.GetType().FullName}");
-            sb.AppendLine($"Message: {ex.Message}");
-            sb.AppendLine($"StackTrace: {ex.StackTrace}");
-            sb.AppendLine("----------------------------------Exception Details---------------------------------");
+            sb.AppendLine(logMessage);
+            sb.AppendLine("----------------------------------Single Log---------------------------------");
             sb.AppendLine($"Fin: {DateTime.UtcNow}");
             sb.AppendLine("-----------------------------------------------------------------------------");
             return sb.ToString();
         }
+
+        // ====================== SECCIÓN: LOGS DE OBJETOS ======================
+
+        public static string FormatObjectLog(string objectName, object objectData)
+        {
+            string formattedData = ConvertObjectToString(objectData);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
+            sb.AppendLine($"Inicio: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            sb.AppendLine(formattedData);
+            sb.AppendLine($"----------------------------------Object -> {objectName}---------------------------------");
+            sb.AppendLine($"Fin: {DateTime.UtcNow}");
+            sb.AppendLine("-----------------------------------------------------------------------------");
+            return sb.ToString();
+        }
+
+        private static string ConvertObjectToString(object obj)
+        {
+            if (obj == null)
+                return "Objeto nulo";
+
+            try
+            {
+                if (obj is string strData)
+                {
+                    return IsJson(strData) ? FormatJson(strData) :
+                           IsXml(strData) ? FormatXml(strData) :
+                           strData;
+                }
+
+                return JsonSerializer.Serialize(obj, JsonOptions);
+            }
+            catch (Exception ex)
+            {
+                return $"Error al convertir objeto: {ex.Message}";
+            }
+        }
+
+        private static bool IsJson(string str) => JsonDocument.TryParseValue(ref new Utf8JsonReader(Encoding.UTF8.GetBytes(str)), out _);
+        private static bool IsXml(string str) { try { XDocument.Parse(str); return true; } catch { return false; } }
+
+        private static string FormatJson(string json) => JsonSerializer.Serialize(JsonDocument.Parse(json).RootElement, JsonOptions);
+        private static string FormatXml(string xml) => XDocument.Parse(xml).ToString();
     }
 }
