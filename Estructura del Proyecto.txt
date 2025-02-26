@@ -1,37 +1,61 @@
-public static string FormatRequestInfo(string method, string url, string requestBody)
+using Logging.Abstractions;
+using Logging.Helpers;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using System;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+namespace Logging.Filters
 {
-    string formattedJson = string.IsNullOrWhiteSpace(requestBody) 
-        ? "        (Sin cuerpo en la solicitud)"
-        : FormatJson(requestBody, 8); // Aplica indentación controlada
+    /// <summary>
+    /// Filtro de acción que intercepta la ejecución de los controladores
+    /// y registra automáticamente el flujo de métodos, los parámetros de entrada y salida.
+    /// </summary>
+    public class LoggingActionFilter : IAsyncActionFilter
+    {
+        private readonly ILoggingService _loggingService;
 
-    return $@"
-----------------------------------Request Info---------------------------------
-Inicio: {DateTime.Now}
--------------------------------------------------------------------------------
-Método: {method}
-URL: {url}
-Cuerpo:
-{formattedJson}
-----------------------------------Request Info---------------------------------
-Fin: {DateTime.Now}
--------------------------------------------------------------------------------";
-}
+        /// <summary>
+        /// Constructor que recibe el servicio de logging.
+        /// </summary>
+        public LoggingActionFilter(ILoggingService loggingService)
+        {
+            _loggingService = loggingService;
+        }
 
+        /// <summary>
+        /// Método que intercepta la ejecución de una acción en un controlador.
+        /// Captura la entrada, la salida y las excepciones.
+        /// </summary>
+        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        {
+            string controllerName = ((ControllerActionDescriptor)context.ActionDescriptor).ControllerName;
+            string actionName = ((ControllerActionDescriptor)context.ActionDescriptor).ActionName;
+            string methodFullName = $"{controllerName}.{actionName}";
 
-public static string FormatResponseInfo(int statusCode, string responseBody)
-{
-    string formattedJson = string.IsNullOrWhiteSpace(responseBody) 
-        ? "        (Sin cuerpo en la respuesta)"
-        : FormatJson(responseBody, 8); // Aplica indentación controlada
+            // Capturar parámetros de entrada
+            var inputParams = context.ActionArguments.Any()
+                ? JsonSerializer.Serialize(context.ActionArguments, new JsonSerializerOptions { WriteIndented = true })
+                : "Sin parámetros.";
 
-    return $@"
-----------------------------------Response Info---------------------------------
-Inicio: {DateTime.Now}
--------------------------------------------------------------------------------
-Código Estado: {statusCode}
-Cuerpo:
-{formattedJson}
-----------------------------------Response Info---------------------------------
-Fin: {DateTime.Now}
--------------------------------------------------------------------------------";
+            _loggingService.AddMethodEntryLog(methodFullName, inputParams);
+
+            // Continuar con la ejecución del método
+            var executedContext = await next();
+
+            if (executedContext.Exception == null)
+            {
+                // Capturar resultado si no hay excepción
+                var returnValue = executedContext.Result;
+                _loggingService.AddMethodExitLog(methodFullName, returnValue);
+            }
+            else
+            {
+                // Capturar excepciones
+                _loggingService.AddExceptionLog(executedContext.Exception);
+            }
+        }
+    }
 }
