@@ -1,95 +1,61 @@
-/// <summary>
-/// Registra la entrada de un método, incluyendo su nombre y los parámetros de entrada.
-/// </summary>
-/// <param name="methodName">Nombre del método que se está ejecutando.</param>
-/// <param name="inputParameters">Parámetros de entrada del método.</param>
-public void AddMethodEntryLog(string methodName, object inputParameters)
+using Logging.Abstractions;
+using Logging.Helpers;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using System;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+namespace Logging.Filters
 {
-    try
+    /// <summary>
+    /// Filtro de acción que intercepta la ejecución de los controladores
+    /// y registra automáticamente el flujo de métodos, los parámetros de entrada y salida.
+    /// </summary>
+    public class LoggingActionFilter : IAsyncActionFilter
     {
-        var formatted = LogFormatter.FormatMethodEntry(methodName, inputParameters).Indent(LogScope.CurrentLevel);
-        File.AppendAllText(GetCurrentLogFile(), formatted);
-    }
-    catch (Exception ex)
-    {
-        LogInternalError(ex);
+        private readonly ILoggingService _loggingService;
+
+        /// <summary>
+        /// Constructor que recibe el servicio de logging.
+        /// </summary>
+        public LoggingActionFilter(ILoggingService loggingService)
+        {
+            _loggingService = loggingService;
+        }
+
+        /// <summary>
+        /// Método que intercepta la ejecución de una acción en un controlador.
+        /// Captura la entrada, la salida y las excepciones.
+        /// </summary>
+        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        {
+            var controllerName = ((ControllerActionDescriptor)context.ActionDescriptor).ControllerName;
+            var actionName = ((ControllerActionDescriptor)context.ActionDescriptor).ActionName;
+            var methodFullName = $"{controllerName}.{actionName}";
+
+            // 🔹 Capturar parámetros de entrada
+            var inputParams = context.ActionArguments.Any()
+                ? JsonSerializer.Serialize(context.ActionArguments, new JsonSerializerOptions { WriteIndented = true })
+                : "Sin parámetros.";
+
+            _loggingService.AddMethodEntryLog(methodFullName, inputParams);
+
+            // 🔹 Continuar con la ejecución del método
+            var executedContext = await next();
+
+            if (executedContext.Exception == null)
+            {
+                // 🔹 Capturar resultado si no hay excepción
+                var returnValue = executedContext.Result?.ToString() ?? "Sin retorno (void).";
+                _loggingService.AddMethodExitLog(methodFullName, returnValue);
+            }
+            else
+            {
+                // 🔹 Capturar excepciones
+                _loggingService.AddExceptionLog(executedContext.Exception);
+            }
+        }
     }
 }
-
-/// <summary>
-/// Registra la salida de un método, incluyendo su nombre y el valor de retorno.
-/// </summary>
-/// <param name="methodName">Nombre del método que finalizó su ejecución.</param>
-/// <param name="outputResult">Valor de retorno del método.</param>
-public void AddMethodExitLog(string methodName, object outputResult)
-{
-    try
-    {
-        var formatted = LogFormatter.FormatMethodExit(methodName, outputResult).Indent(LogScope.CurrentLevel);
-        File.AppendAllText(GetCurrentLogFile(), formatted);
-    }
-    catch (Exception ex)
-    {
-        LogInternalError(ex);
-    }
-}
-
-
-/// <summary>
-/// Registra la entrada de un método.
-/// </summary>
-/// <param name="methodName">Nombre del método.</param>
-/// <param name="inputParameters">Parámetros de entrada.</param>
-void AddMethodEntryLog(string methodName, object inputParameters);
-
-/// <summary>
-/// Registra la salida de un método.
-/// </summary>
-/// <param name="methodName">Nombre del método.</param>
-/// <param name="outputResult">Valor de retorno.</param>
-void AddMethodExitLog(string methodName, object outputResult);
-
-
-
-/// <summary>
-/// Formatea el log de entrada de un método.
-/// </summary>
-/// <param name="methodName">Nombre del método.</param>
-/// <param name="inputParameters">Parámetros de entrada.</param>
-/// <returns>Cadena formateada del log de entrada.</returns>
-public static string FormatMethodEntry(string methodName, object inputParameters)
-{
-    return $@"
-----------------------------------Método/Función : {methodName}---------------------------------
-Inicio: {DateTime.Now}
--------------------------------------------------------------------------------
------------------------Parámetros de Entrada-----------------------------------
-{JsonSerializer.Serialize(inputParameters, new JsonSerializerOptions { WriteIndented = true })}
------------------------Parámetros de Entrada-----------------------------------
-";
-}
-
-/// <summary>
-/// Formatea el log de salida de un método.
-/// </summary>
-/// <param name="methodName">Nombre del método.</param>
-/// <param name="outputResult">Resultado del método.</param>
-/// <returns>Cadena formateada del log de salida.</returns>
-public static string FormatMethodExit(string methodName, object outputResult)
-{
-    return $@"
------------------------Parámetros de Salida-----------------------------------
-{JsonSerializer.Serialize(outputResult, new JsonSerializerOptions { WriteIndented = true })}
------------------------Parámetros de Salida-----------------------------------
-----------------------------------Método/Función : {methodName}---------------------------------
-Fin: {DateTime.Now}
--------------------------------------------------------------------------------
-";
-}
-
-
-
-
-
-
-
