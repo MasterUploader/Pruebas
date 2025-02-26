@@ -1,61 +1,35 @@
-using Logging.Abstractions;
-using Logging.Helpers;
-using Microsoft.AspNetCore.Mvc.Controllers;
-using Microsoft.AspNetCore.Mvc.Filters;
-using System;
-using System.Linq;
-using System.Text.Json;
-using System.Threading.Tasks;
-
-namespace Logging.Filters
+private string GetCurrentLogFile()
 {
-    /// <summary>
-    /// Filtro de acción que intercepta la ejecución de los controladores
-    /// y registra automáticamente el flujo de métodos, los parámetros de entrada y salida.
-    /// </summary>
-    public class LoggingActionFilter : IAsyncActionFilter
+    try
     {
-        private readonly ILoggingService _loggingService;
-
-        /// <summary>
-        /// Constructor que recibe el servicio de logging.
-        /// </summary>
-        public LoggingActionFilter(ILoggingService loggingService)
+        var context = _httpContextAccessor.HttpContext;
+        if (context != null)
         {
-            _loggingService = loggingService;
-        }
-
-        /// <summary>
-        /// Método que intercepta la ejecución de una acción en un controlador.
-        /// Captura la entrada, la salida y las excepciones.
-        /// </summary>
-        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
-        {
-            var controllerName = ((ControllerActionDescriptor)context.ActionDescriptor).ControllerName;
-            var actionName = ((ControllerActionDescriptor)context.ActionDescriptor).ActionName;
-            var methodFullName = $"{controllerName}.{actionName}";
-
-            // 🔹 Capturar parámetros de entrada
-            var inputParams = context.ActionArguments.Any()
-                ? JsonSerializer.Serialize(context.ActionArguments, new JsonSerializerOptions { WriteIndented = true })
-                : "Sin parámetros.";
-
-            _loggingService.AddMethodEntryLog(methodFullName, inputParams);
-
-            // 🔹 Continuar con la ejecución del método
-            var executedContext = await next();
-
-            if (executedContext.Exception == null)
+            // Si el log ya está asignado a la petición, lo usamos
+            if (context.Items.ContainsKey("LogFileName"))
             {
-                // 🔹 Capturar resultado si no hay excepción
-                var returnValue = executedContext.Result?.ToString() ?? "Sin retorno (void).";
-                _loggingService.AddMethodExitLog(methodFullName, returnValue);
+                return context.Items["LogFileName"] as string;
             }
-            else
-            {
-                // 🔹 Capturar excepciones
-                _loggingService.AddExceptionLog(executedContext.Exception);
-            }
+
+            // 🔹 Generamos un nombre único basado en el Execution ID, Endpoint y Hora
+            string executionId = context.TraceIdentifier ?? Guid.NewGuid().ToString();
+            string endpoint = context.Request.Path.Value?.Replace("/", "_") ?? "UnknownEndpoint";
+            string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+            string logFilePath = Path.Combine(_logDirectory, $"{executionId}_{endpoint}_{timestamp}.txt");
+
+            // 🔹 Guardamos el archivo en el HttpContext para que sea reutilizado
+            context.Items["LogFileName"] = logFilePath;
+
+            Console.WriteLine($"[DEBUG] Archivo de log asignado: {logFilePath}"); // Para depuración
+
+            return logFilePath;
         }
     }
+    catch (Exception ex)
+    {
+        LogInternalError(ex);
+    }
+
+    // 🔹 Si no hay contexto, usar un log global
+    return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
 }
