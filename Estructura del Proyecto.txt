@@ -1,57 +1,31 @@
-using System;
-using System.IO;
-using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using System.Diagnostics;
 using System.Threading.Tasks;
 
-public class LoggingService
+public class LoggingMiddleware
 {
-    private static string _logFilePath = "C:\\Logs\\api_log.txt"; // Ruta del archivo de logs
+    private readonly RequestDelegate _next;
+    private readonly LoggingService _loggingService;
 
-    public void AddMethodEntryLog(string methodName, string inputParams)
+    public LoggingMiddleware(RequestDelegate next, LoggingService loggingService)
     {
-        var logEntry = FormatMethodEntry(methodName, inputParams);
-        WriteLog(logEntry);
+        _next = next;
+        _loggingService = loggingService;
     }
 
-    public void AddMethodExitLog(string methodName, string outputResult)
+    public async Task InvokeAsync(HttpContext context)
     {
-        var logExit = FormatMethodExit(methodName, outputResult);
-        WriteLog(logExit);
-    }
+        var stopwatch = Stopwatch.StartNew();
+        await _next(context);
+        stopwatch.Stop();
 
-    public void AddExceptionLog(Exception ex)
-    {
-        var exceptionLog = $"[ERROR] {DateTime.Now} - Excepción en método: {ex.Message}\nStackTrace: {ex.StackTrace}";
-        WriteLog(exceptionLog);
-    }
-
-    private void WriteLog(string logContent)
-    {
-        lock (_logFilePath)
-        {
-            File.AppendAllText(_logFilePath, logContent + Environment.NewLine);
-        }
-    }
-
-    private string FormatMethodEntry(string methodName, string inputParams)
-    {
-        return $@"
-------------------------------------------------
-Método/Función: {methodName}
-Inicio: {DateTime.Now}
--------------------- Parámetros de Entrada --------------------
-{inputParams}
-------------------------------------------------
+        var logInfo = $@"
+------------------ Request Log ------------------
+Método: {context.Request.Method}
+URL: {context.Request.Path}
+Tiempo de Ejecución: {stopwatch.ElapsedMilliseconds} ms
+------------------ Request Log ------------------
 ";
-    }
-
-    private string FormatMethodExit(string methodName, string outputResult)
-    {
-        return $@"
--------------------- Parámetros de Salida --------------------
-{outputResult}
-Fin: {DateTime.Now}
-------------------------------------------------
-";
+        _loggingService.AddMethodEntryLog("HTTP Request", logInfo);
     }
 }
