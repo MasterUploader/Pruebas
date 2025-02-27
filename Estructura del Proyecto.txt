@@ -1,35 +1,166 @@
-private string GetCurrentLogFile()
+public async Task<string> CaptureMethodInputAsync()
 {
-    try
+    object[] methodParameters = GetMethodParameters();
+
+    string formattedParams;
+
+    if (methodParameters == null || methodParameters.Length == 0)
     {
-        var context = _httpContextAccessor.HttpContext;
-        if (context != null)
+        formattedParams = "Sin parámetros";
+    }
+    else
+    {
+        try
         {
-            // Si el log ya está asignado a la petición, lo usamos
-            if (context.Items.ContainsKey("LogFileName"))
+            var options = new JsonSerializerOptions 
+            { 
+                WriteIndented = true, 
+                ReferenceHandler = ReferenceHandler.Preserve 
+            };
+            formattedParams = JsonSerializer.Serialize(methodParameters, options);
+        }
+        catch (Exception ex)
+        {
+            formattedParams = $"Error al serializar parámetros: {ex.Message}";
+        }
+    }
+
+    return $@"
+-------------------------------------------------
+Método/Función : {nameof(CaptureMethodInputAsync)}
+-------------------------------------------------
+Inicio: {DateTime.Now}
+-------------------------------------------------
+-------------------Parámetros de Entrada-------------------
+Parámetros de Entrada: {formattedParams}
+-------------------Parámetros de Entrada-------------------
+-------------------------------------------------
+Fin: {DateTime.Now}
+-------------------------------------------------
+";
+}
+
+
+
+private object[] GetMethodParameters()
+{
+    var stackTrace = new StackTrace();
+    var frames = stackTrace.GetFrames();
+
+    foreach (var frame in frames)
+    {
+        var method = frame.GetMethod();
+        if (method != null && method.DeclaringType != null && method.DeclaringType.Namespace?.StartsWith("TuNamespace") == true)
+        {
+            var parameters = method.GetParameters();
+            var values = new List<object>();
+
+            foreach (var param in parameters)
             {
-                return context.Items["LogFileName"] as string;
+                object value = Activator.CreateInstance(param.ParameterType);
+                values.Add(value);
             }
 
-            // 🔹 Generamos un nombre único basado en el Execution ID, Endpoint y Hora
-            string executionId = context.TraceIdentifier ?? Guid.NewGuid().ToString();
-            string endpoint = context.Request.Path.Value?.Replace("/", "_") ?? "UnknownEndpoint";
-            string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-            string logFilePath = Path.Combine(_logDirectory, $"{executionId}_{endpoint}_{timestamp}.txt");
-
-            // 🔹 Guardamos el archivo en el HttpContext para que sea reutilizado
-            context.Items["LogFileName"] = logFilePath;
-
-            Console.WriteLine($"[DEBUG] Archivo de log asignado: {logFilePath}"); // Para depuración
-
-            return logFilePath;
+            return values.ToArray();
         }
+    }
+
+    return new object[] { "Sin parámetros" };
+}
+
+
+
+
+public async Task<string> CaptureMethodOutputAsync(object? outputResult)
+{
+    string formattedOutput;
+
+    if (outputResult == null)
+    {
+        formattedOutput = "Sin retorno (void)";
+    }
+    else if (outputResult is Task task)
+    {
+        var taskType = task.GetType();
+        if (taskType.IsGenericType)
+        {
+            var resultProperty = taskType.GetProperty("Result");
+            if (resultProperty != null)
+            {
+                outputResult = resultProperty.GetValue(task);
+            }
+        }
+        else
+        {
+            await task;
+            formattedOutput = "Sin retorno (async void)";
+        }
+    }
+
+    try
+    {
+        var options = new JsonSerializerOptions 
+        { 
+            WriteIndented = true, 
+            ReferenceHandler = ReferenceHandler.Preserve 
+        };
+        formattedOutput = JsonSerializer.Serialize(outputResult, options);
     }
     catch (Exception ex)
     {
-        LogInternalError(ex);
+        formattedOutput = $"Error al serializar salida: {ex.Message}";
     }
 
-    // 🔹 Si no hay contexto, usar un log global
-    return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
+    return $@"
+-------------------------------------------------
+Método/Función : {nameof(CaptureMethodOutputAsync)}
+-------------------------------------------------
+Inicio: {DateTime.Now}
+-------------------------------------------------
+-------------------Parámetros de Salida-------------------
+Parámetros de Salida: {formattedOutput}
+-------------------Parámetros de Salida-------------------
+-------------------------------------------------
+Fin: {DateTime.Now}
+-------------------------------------------------
+";
 }
+
+
+
+
+public async Task InvokeAsync(HttpContext context)
+{
+    string methodEntryLog = await CaptureMethodInputAsync();
+    await _loggingService.LogAsync(methodEntryLog);
+
+    object? outputResult = null;
+    Exception? capturedException = null;
+
+    try
+    {
+        await _next(context); // Ejecutar el siguiente middleware
+    }
+    catch (Exception ex)
+    {
+        capturedException = ex;
+        throw;
+    }
+    finally
+    {
+        if (context.Response.HasStarted)
+        {
+            outputResult = context.Response;
+        }
+
+        string methodExitLog = await CaptureMethodOutputAsync(outputResult);
+        await _loggingService.LogAsync(methodExitLog);
+
+        if (capturedException != null)
+        {
+            string exceptionLog = LogFormatter.FormatExceptionDetails(capturedException);
+            await _loggingService.LogAsync(exceptionLog);
+        }
+    }
+}
+
