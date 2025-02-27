@@ -1,166 +1,41 @@
-public async Task<string> CaptureMethodInputAsync()
+using Microsoft.AspNetCore.Mvc.Filters;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+public class LoggingActionFilter : IAsyncActionFilter
 {
-    object[] methodParameters = GetMethodParameters();
+    private readonly LoggingService _loggingService;
 
-    string formattedParams;
-
-    if (methodParameters == null || methodParameters.Length == 0)
+    public LoggingActionFilter(LoggingService loggingService)
     {
-        formattedParams = "Sin parámetros";
-    }
-    else
-    {
-        try
-        {
-            var options = new JsonSerializerOptions 
-            { 
-                WriteIndented = true, 
-                ReferenceHandler = ReferenceHandler.Preserve 
-            };
-            formattedParams = JsonSerializer.Serialize(methodParameters, options);
-        }
-        catch (Exception ex)
-        {
-            formattedParams = $"Error al serializar parámetros: {ex.Message}";
-        }
+        _loggingService = loggingService;
     }
 
-    return $@"
--------------------------------------------------
-Método/Función : {nameof(CaptureMethodInputAsync)}
--------------------------------------------------
-Inicio: {DateTime.Now}
--------------------------------------------------
--------------------Parámetros de Entrada-------------------
-Parámetros de Entrada: {formattedParams}
--------------------Parámetros de Entrada-------------------
--------------------------------------------------
-Fin: {DateTime.Now}
--------------------------------------------------
-";
-}
-
-
-
-private object[] GetMethodParameters()
-{
-    var stackTrace = new StackTrace();
-    var frames = stackTrace.GetFrames();
-
-    foreach (var frame in frames)
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        var method = frame.GetMethod();
-        if (method != null && method.DeclaringType != null && method.DeclaringType.Namespace?.StartsWith("TuNamespace") == true)
+        var controllerName = context.Controller.GetType().Name;
+        var actionName = context.ActionDescriptor.DisplayName;
+        var methodFullName = $"{controllerName}.{actionName}";
+
+        // Capturar parámetros de entrada
+        var inputParams = context.ActionArguments.Any()
+            ? JsonSerializer.Serialize(context.ActionArguments, new JsonSerializerOptions { WriteIndented = true })
+            : "Sin parámetros";
+
+        _loggingService.AddMethodEntryLog(methodFullName, inputParams);
+
+        var executedContext = await next(); // Ejecuta el método de la API
+
+        if (executedContext.Exception == null)
         {
-            var parameters = method.GetParameters();
-            var values = new List<object>();
-
-            foreach (var param in parameters)
-            {
-                object value = Activator.CreateInstance(param.ParameterType);
-                values.Add(value);
-            }
-
-            return values.ToArray();
-        }
-    }
-
-    return new object[] { "Sin parámetros" };
-}
-
-
-
-
-public async Task<string> CaptureMethodOutputAsync(object? outputResult)
-{
-    string formattedOutput;
-
-    if (outputResult == null)
-    {
-        formattedOutput = "Sin retorno (void)";
-    }
-    else if (outputResult is Task task)
-    {
-        var taskType = task.GetType();
-        if (taskType.IsGenericType)
-        {
-            var resultProperty = taskType.GetProperty("Result");
-            if (resultProperty != null)
-            {
-                outputResult = resultProperty.GetValue(task);
-            }
+            // Capturar resultado si no hay excepción
+            var returnValue = executedContext.Result?.ToString() ?? "Sin retorno (void)";
+            _loggingService.AddMethodExitLog(methodFullName, returnValue);
         }
         else
         {
-            await task;
-            formattedOutput = "Sin retorno (async void)";
-        }
-    }
-
-    try
-    {
-        var options = new JsonSerializerOptions 
-        { 
-            WriteIndented = true, 
-            ReferenceHandler = ReferenceHandler.Preserve 
-        };
-        formattedOutput = JsonSerializer.Serialize(outputResult, options);
-    }
-    catch (Exception ex)
-    {
-        formattedOutput = $"Error al serializar salida: {ex.Message}";
-    }
-
-    return $@"
--------------------------------------------------
-Método/Función : {nameof(CaptureMethodOutputAsync)}
--------------------------------------------------
-Inicio: {DateTime.Now}
--------------------------------------------------
--------------------Parámetros de Salida-------------------
-Parámetros de Salida: {formattedOutput}
--------------------Parámetros de Salida-------------------
--------------------------------------------------
-Fin: {DateTime.Now}
--------------------------------------------------
-";
-}
-
-
-
-
-public async Task InvokeAsync(HttpContext context)
-{
-    string methodEntryLog = await CaptureMethodInputAsync();
-    await _loggingService.LogAsync(methodEntryLog);
-
-    object? outputResult = null;
-    Exception? capturedException = null;
-
-    try
-    {
-        await _next(context); // Ejecutar el siguiente middleware
-    }
-    catch (Exception ex)
-    {
-        capturedException = ex;
-        throw;
-    }
-    finally
-    {
-        if (context.Response.HasStarted)
-        {
-            outputResult = context.Response;
-        }
-
-        string methodExitLog = await CaptureMethodOutputAsync(outputResult);
-        await _loggingService.LogAsync(methodExitLog);
-
-        if (capturedException != null)
-        {
-            string exceptionLog = LogFormatter.FormatExceptionDetails(capturedException);
-            await _loggingService.LogAsync(exceptionLog);
+            // Capturar excepciones
+            _loggingService.AddExceptionLog(executedContext.Exception);
         }
     }
 }
-
