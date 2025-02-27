@@ -1,41 +1,57 @@
-using Microsoft.AspNetCore.Mvc.Filters;
+using System;
+using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-public class LoggingActionFilter : IAsyncActionFilter
+public class LoggingService
 {
-    private readonly LoggingService _loggingService;
+    private static string _logFilePath = "C:\\Logs\\api_log.txt"; // Ruta del archivo de logs
 
-    public LoggingActionFilter(LoggingService loggingService)
+    public void AddMethodEntryLog(string methodName, string inputParams)
     {
-        _loggingService = loggingService;
+        var logEntry = FormatMethodEntry(methodName, inputParams);
+        WriteLog(logEntry);
     }
 
-    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    public void AddMethodExitLog(string methodName, string outputResult)
     {
-        var controllerName = context.Controller.GetType().Name;
-        var actionName = context.ActionDescriptor.DisplayName;
-        var methodFullName = $"{controllerName}.{actionName}";
+        var logExit = FormatMethodExit(methodName, outputResult);
+        WriteLog(logExit);
+    }
 
-        // Capturar parámetros de entrada
-        var inputParams = context.ActionArguments.Any()
-            ? JsonSerializer.Serialize(context.ActionArguments, new JsonSerializerOptions { WriteIndented = true })
-            : "Sin parámetros";
+    public void AddExceptionLog(Exception ex)
+    {
+        var exceptionLog = $"[ERROR] {DateTime.Now} - Excepción en método: {ex.Message}\nStackTrace: {ex.StackTrace}";
+        WriteLog(exceptionLog);
+    }
 
-        _loggingService.AddMethodEntryLog(methodFullName, inputParams);
-
-        var executedContext = await next(); // Ejecuta el método de la API
-
-        if (executedContext.Exception == null)
+    private void WriteLog(string logContent)
+    {
+        lock (_logFilePath)
         {
-            // Capturar resultado si no hay excepción
-            var returnValue = executedContext.Result?.ToString() ?? "Sin retorno (void)";
-            _loggingService.AddMethodExitLog(methodFullName, returnValue);
+            File.AppendAllText(_logFilePath, logContent + Environment.NewLine);
         }
-        else
-        {
-            // Capturar excepciones
-            _loggingService.AddExceptionLog(executedContext.Exception);
-        }
+    }
+
+    private string FormatMethodEntry(string methodName, string inputParams)
+    {
+        return $@"
+------------------------------------------------
+Método/Función: {methodName}
+Inicio: {DateTime.Now}
+-------------------- Parámetros de Entrada --------------------
+{inputParams}
+------------------------------------------------
+";
+    }
+
+    private string FormatMethodExit(string methodName, string outputResult)
+    {
+        return $@"
+-------------------- Parámetros de Salida --------------------
+{outputResult}
+Fin: {DateTime.Now}
+------------------------------------------------
+";
     }
 }
