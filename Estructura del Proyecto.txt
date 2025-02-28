@@ -1,162 +1,31 @@
-using System;
-using System.Collections.Concurrent;
-using System.IO;
-using System.Text.Json;
-using System.Threading.Tasks;
-
 public class LoggingService
 {
-    private static readonly object _lock = new object();
-    private static string _logFilePath;
-    private static readonly ConcurrentQueue<string> _logQueue = new ConcurrentQueue<string>();
+    private static readonly List<string> _logEntries = new();
+    private static readonly object _lock = new();
+    private string _logFilePath;
 
-    public void SetLogFilePath(string filePath)
+    public void SetLogFilePath(string logFilePath)
     {
-        _logFilePath = filePath;
+        _logFilePath = logFilePath;
     }
 
     public void AddLogEntry(string logEntry)
     {
-        _logQueue.Enqueue(logEntry);
+        lock (_lock) 
+        {
+            _logEntries.Add(logEntry);
+        }
     }
 
     public void WriteLogsToFile()
     {
-        if (string.IsNullOrEmpty(_logFilePath))
-            return;
-
         lock (_lock)
         {
-            using (var writer = new StreamWriter(_logFilePath, true))
+            if (!string.IsNullOrEmpty(_logFilePath) && _logEntries.Any())
             {
-                while (_logQueue.TryDequeue(out var logEntry))
-                {
-                    writer.WriteLine(logEntry);
-                }
+                File.AppendAllLines(_logFilePath, _logEntries);
+                _logEntries.Clear();
             }
         }
     }
-
-    public string FormatMethodEntry(string methodName, string inputParams)
-    {
-        return $@"
-------------------------------------------------
-Método/Función: {methodName}
-Inicio: {DateTime.Now}
--------------------- Parámetros de Entrada --------------------
-{inputParams}
-------------------------------------------------
-";
-    }
-
-    public string FormatMethodExit(string methodName, string outputResult)
-    {
-        return $@"
--------------------- Parámetros de Salida --------------------
-{outputResult}
-Fin: {DateTime.Now}
-------------------------------------------------
-";
-    }
 }
-
-
-
-
-
-
-using Microsoft.AspNetCore.Http;
-using System.Diagnostics;
-using System.IO;
-using System.Threading.Tasks;
-
-public class LoggingMiddleware
-{
-    private readonly RequestDelegate _next;
-    private readonly LoggingService _loggingService;
-
-    public LoggingMiddleware(RequestDelegate next, LoggingService loggingService)
-    {
-        _next = next;
-        _loggingService = loggingService;
-    }
-
-    public async Task InvokeAsync(HttpContext context)
-    {
-        // Definir nombre de archivo basado en la solicitud
-        var logFileName = $"C:\\Logs\\api_{DateTime.UtcNow:yyyyMMdd_HHmmss}.txt";
-        _loggingService.SetLogFilePath(logFileName);
-
-        var stopwatch = Stopwatch.StartNew();
-        await _next(context);
-        stopwatch.Stop();
-
-        var logInfo = $@"
------------------- Request Log ------------------
-Método: {context.Request.Method}
-URL: {context.Request.Path}
-Tiempo de Ejecución: {stopwatch.ElapsedMilliseconds} ms
------------------- Request Log ------------------
-";
-
-        _loggingService.AddLogEntry(logInfo);
-        _loggingService.WriteLogsToFile(); // Escribir en archivo
-    }
-}
-
-
-
-
-
-
-using Microsoft.AspNetCore.Mvc.Filters;
-using System.Text.Json;
-using System.Threading.Tasks;
-
-public class LoggingActionFilter : IAsyncActionFilter
-{
-    private readonly LoggingService _loggingService;
-
-    public LoggingActionFilter(LoggingService loggingService)
-    {
-        _loggingService = loggingService;
-    }
-
-    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
-    {
-        var controllerName = context.Controller.GetType().Name;
-        var actionName = context.ActionDescriptor.DisplayName;
-        var methodFullName = $"{controllerName}.{actionName}";
-
-        var inputParams = context.ActionArguments.Any()
-            ? JsonSerializer.Serialize(context.ActionArguments, new JsonSerializerOptions { WriteIndented = true })
-            : "Sin parámetros";
-
-        _loggingService.AddLogEntry(_loggingService.FormatMethodEntry(methodFullName, inputParams));
-
-        var executedContext = await next();
-
-        if (executedContext.Exception == null)
-        {
-            var returnValue = executedContext.Result?.ToString() ?? "Sin retorno (void)";
-            _loggingService.AddLogEntry(_loggingService.FormatMethodExit(methodFullName, returnValue));
-        }
-        else
-        {
-            _loggingService.AddLogEntry($"[ERROR] {DateTime.Now} - Excepción en método: {executedContext.Exception.Message}");
-        }
-        
-        _loggingService.WriteLogsToFile();
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
