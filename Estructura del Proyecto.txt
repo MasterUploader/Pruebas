@@ -1,18 +1,23 @@
-public async Task InvokeAsync(HttpContext context)
+public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
 {
-    var executionId = Guid.NewGuid().ToString();
-    context.Items["ExecutionId"] = executionId;
+    var executionId = context.HttpContext.Items["ExecutionId"]?.ToString() ?? "Sin ExecutionId";
+    var controllerName = context.Controller.GetType().Name;
+    var actionName = context.ActionDescriptor.DisplayName;
+    var methodFullName = $"{controllerName}.{actionName}";
 
-    var logFileName = $"C:\\Logs\\api_{executionId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.txt";
-    _loggingService.SetLogFilePath(logFileName);
+    var inputParams = _loggingService.CaptureMethodInput(context.ActionArguments);
 
-    // Registrar información de la solicitud
-    _loggingService.AddLogEntry(_loggingService.FormatRequestInfo(context, executionId));
+    _loggingService.AddLogEntry(_loggingService.FormatMethodEntry(methodFullName, inputParams, executionId));
 
-    await _next(context); // Continuar con la ejecución del request
+    var executedContext = await next();  // Continuar la ejecución del método
 
-    // Registrar información de la respuesta
-    _loggingService.AddLogEntry(_loggingService.FormatResponseInfo(context, executionId));
-
-    _loggingService.WriteLogsToFile(); // Escribir logs en orden
+    if (executedContext.Exception == null)
+    {
+        var returnValue = executedContext.Result?.ToString() ?? "Sin retorno (void)";
+        _loggingService.AddLogEntry(_loggingService.FormatMethodExit(methodFullName, returnValue, executionId));
+    }
+    else
+    {
+        _loggingService.AddLogEntry(_loggingService.FormatExceptionDetails(executedContext.Exception, executionId));
+    }
 }
