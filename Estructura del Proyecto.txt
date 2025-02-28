@@ -1,51 +1,34 @@
-public string FormatRequestInfo(HttpContext context, string executionId)
+public Dictionary<string, object?> CaptureMethodInput(IDictionary<string, object?> actionArguments)
 {
-    return $@"
-ExecutionId: {executionId}
------------------- Request Log ------------------
-Método: {context.Request.Method}
-URL: {context.Request.Path}
-";
-}
+    if (actionArguments == null || !actionArguments.Any())
+    {
+        return new Dictionary<string, object?> { { "Parámetros", "Sin parámetros" } };
+    }
 
-public string FormatResponseInfo(HttpContext context, string executionId)
-{
-    return $@"
-ExecutionId: {executionId}
------------------- Response Log ------------------
-Estado HTTP: {context.Response.StatusCode}
-";
-}
+    var inputParams = new Dictionary<string, object?>();
+    
+    foreach (var param in actionArguments)
+    {
+        if (param.Value == null)
+        {
+            inputParams[param.Key] = "null";
+        }
+        else if (param.Value.GetType().IsPrimitive || param.Value is string || param.Value is DateTime)
+        {
+            inputParams[param.Key] = param.Value;
+        }
+        else
+        {
+            try
+            {
+                inputParams[param.Key] = JsonSerializer.Serialize(param.Value, new JsonSerializerOptions { WriteIndented = true });
+            }
+            catch (Exception ex)
+            {
+                inputParams[param.Key] = $"[No se pudo serializar: {ex.Message}]";
+            }
+        }
+    }
 
-public string FormatMethodEntry(string methodName, object inputParams, string executionId)
-{
-    return $@"
-ExecutionId: {executionId}
-------------------------------------------------
-Método/Función: {methodName}
-Inicio: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}
--------------------- Parámetros de Entrada --------------------
-{JsonSerializer.Serialize(inputParams, new JsonSerializerOptions { WriteIndented = true })}
-------------------------------------------------
-";
-}
-
-public string FormatMethodExit(string methodName, object outputResult, string executionId)
-{
-    return $@"
-ExecutionId: {executionId}
--------------------- Parámetros de Salida --------------------
-{JsonSerializer.Serialize(outputResult, new JsonSerializerOptions { WriteIndented = true })}
-Fin: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}
-------------------------------------------------
-";
-}
-
-public string FormatExceptionDetails(Exception ex, string executionId)
-{
-    return $@"
-ExecutionId: {executionId}
-[ERROR] {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} - Excepción: {ex.Message}
-StackTrace: {ex.StackTrace}
-";
+    return inputParams;
 }
