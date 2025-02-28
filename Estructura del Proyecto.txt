@@ -1,31 +1,18 @@
-public class LoggingService
+public async Task InvokeAsync(HttpContext context)
 {
-    private static readonly List<string> _logEntries = new();
-    private static readonly object _lock = new();
-    private string _logFilePath;
+    var executionId = Guid.NewGuid().ToString();
+    context.Items["ExecutionId"] = executionId;
 
-    public void SetLogFilePath(string logFilePath)
-    {
-        _logFilePath = logFilePath;
-    }
+    var logFileName = $"C:\\Logs\\api_{executionId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.txt";
+    _loggingService.SetLogFilePath(logFileName);
 
-    public void AddLogEntry(string logEntry)
-    {
-        lock (_lock) 
-        {
-            _logEntries.Add(logEntry);
-        }
-    }
+    // Registrar información de la solicitud
+    _loggingService.AddLogEntry(_loggingService.FormatRequestInfo(context, executionId));
 
-    public void WriteLogsToFile()
-    {
-        lock (_lock)
-        {
-            if (!string.IsNullOrEmpty(_logFilePath) && _logEntries.Any())
-            {
-                File.AppendAllLines(_logFilePath, _logEntries);
-                _logEntries.Clear();
-            }
-        }
-    }
+    await _next(context); // Continuar con la ejecución del request
+
+    // Registrar información de la respuesta
+    _loggingService.AddLogEntry(_loggingService.FormatResponseInfo(context, executionId));
+
+    _loggingService.WriteLogsToFile(); // Escribir logs en orden
 }
