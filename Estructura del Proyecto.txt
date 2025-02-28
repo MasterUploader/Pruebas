@@ -1,23 +1,51 @@
-public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+public string FormatRequestInfo(HttpContext context, string executionId)
 {
-    var executionId = context.HttpContext.Items["ExecutionId"]?.ToString() ?? "Sin ExecutionId";
-    var controllerName = context.Controller.GetType().Name;
-    var actionName = context.ActionDescriptor.DisplayName;
-    var methodFullName = $"{controllerName}.{actionName}";
+    return $@"
+ExecutionId: {executionId}
+------------------ Request Log ------------------
+Método: {context.Request.Method}
+URL: {context.Request.Path}
+";
+}
 
-    var inputParams = _loggingService.CaptureMethodInput(context.ActionArguments);
+public string FormatResponseInfo(HttpContext context, string executionId)
+{
+    return $@"
+ExecutionId: {executionId}
+------------------ Response Log ------------------
+Estado HTTP: {context.Response.StatusCode}
+";
+}
 
-    _loggingService.AddLogEntry(_loggingService.FormatMethodEntry(methodFullName, inputParams, executionId));
+public string FormatMethodEntry(string methodName, object inputParams, string executionId)
+{
+    return $@"
+ExecutionId: {executionId}
+------------------------------------------------
+Método/Función: {methodName}
+Inicio: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}
+-------------------- Parámetros de Entrada --------------------
+{JsonSerializer.Serialize(inputParams, new JsonSerializerOptions { WriteIndented = true })}
+------------------------------------------------
+";
+}
 
-    var executedContext = await next();  // Continuar la ejecución del método
+public string FormatMethodExit(string methodName, object outputResult, string executionId)
+{
+    return $@"
+ExecutionId: {executionId}
+-------------------- Parámetros de Salida --------------------
+{JsonSerializer.Serialize(outputResult, new JsonSerializerOptions { WriteIndented = true })}
+Fin: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}
+------------------------------------------------
+";
+}
 
-    if (executedContext.Exception == null)
-    {
-        var returnValue = executedContext.Result?.ToString() ?? "Sin retorno (void)";
-        _loggingService.AddLogEntry(_loggingService.FormatMethodExit(methodFullName, returnValue, executionId));
-    }
-    else
-    {
-        _loggingService.AddLogEntry(_loggingService.FormatExceptionDetails(executedContext.Exception, executionId));
-    }
+public string FormatExceptionDetails(Exception ex, string executionId)
+{
+    return $@"
+ExecutionId: {executionId}
+[ERROR] {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} - Excepción: {ex.Message}
+StackTrace: {ex.StackTrace}
+";
 }
