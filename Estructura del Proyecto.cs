@@ -1,60 +1,152 @@
-using Logging.Services;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Text.Json;
 
-namespace Logging.Filters
-{
     /// <summary>
-    /// Atributo para registrar automáticamente la ejecución de métodos en los logs.
+    /// Métodos de extensión para manipulación de cadenas en el logging.
     /// </summary>
-    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
-    public class LogMethodExecutionAttribute : ActionFilterAttribute
+    public static class StringExtensions
     {
-        private LoggingService? _loggingService;
+        /// <summary>
+        /// Indenta cada línea de un texto con un número de espacios determinado.
+        /// </summary>
+        public static string Indent(this string text, int level = 4)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return text;
+            string indentation = new string(' ', level);
+            return indentation + text.Replace("\n", "\n" + indentation);
+        }
 
         /// <summary>
-        /// Se ejecuta antes de que el método sea llamado, registrando sus parámetros de entrada.
+        /// Normaliza los espacios en blanco dentro de una cadena eliminando espacios extra.
         /// </summary>
-        /// <param name="context">Contexto de ejecución de la acción.</param>
-        public override void OnActionExecuting(ActionExecutingContext context)
+        public static string NormalizeWhitespace(this string text)
         {
-            // Obtiene la instancia del servicio de logging.
-            _loggingService = context.HttpContext.RequestServices.GetService<LoggingService>();
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            return System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+        }
 
-            if (_loggingService != null)
+        /// <summary>
+        /// Convierte un objeto a formato de texto legible (JSON o XML).
+        /// </summary>
+        public static string ConvertObjectToString(object obj)
+        {
+            if (obj == null) return "Sin datos";
+            string objString = obj.ToString();
+            if (IsJson(objString)) return FormatJson(objString);
+            if (IsXml(objString)) return FormatXml(objString);
+            return objString;
+        }
+
+        /// <summary>
+        /// Determina si una cadena está en formato JSON.
+        /// </summary>
+        public static bool IsJson(string input)
+        {
+            input = input.Trim();
+            return input.StartsWith("{") && input.EndsWith("}") || input.StartsWith("[") && input.EndsWith("]");
+        }
+
+        /// <summary>
+        /// Determina si una cadena está en formato XML.
+        /// </summary>
+        public static bool IsXml(string input)
+        {
+            input = input.Trim();
+            return input.StartsWith("<") && input.EndsWith(">");
+        }
+
+        /// <summary>
+        /// Aplica formato JSON legible con indentación.
+        /// </summary>
+        public static string FormatJson(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return "Sin datos";
+            try
             {
-                string methodName = context.ActionDescriptor.DisplayName;
-
-                // Serializa los parámetros de entrada.
-                string parameters = context.ActionArguments.Count > 0
-                    ? JsonSerializer.Serialize(context.ActionArguments, new JsonSerializerOptions { WriteIndented = true })
-                    : "Sin parámetros";
-
-                // Registra la entrada del método.
-                _loggingService.AddMethodEntryLog(methodName, parameters);
+                var jsonObject = JsonDocument.Parse(json);
+                return JsonSerializer.Serialize(jsonObject, new JsonSerializerOptions { WriteIndented = true });
+            }
+            catch
+            {
+                return json; // Si falla, retorna la cadena original.
             }
         }
 
         /// <summary>
-        /// Se ejecuta después de que el método haya finalizado, registrando su valor de retorno.
+        /// Aplica formato XML legible con indentación.
         /// </summary>
-        /// <param name="context">Contexto de ejecución de la acción.</param>
-        public override void OnActionExecuted(ActionExecutedContext context)
+        public static string FormatXml(string xml)
         {
-            if (_loggingService != null)
+            if (string.IsNullOrWhiteSpace(xml)) return "Sin datos";
+            try
             {
-                string methodName = context.ActionDescriptor.DisplayName;
-
-                // Determina el valor de retorno del método.
-                string returnValue = context.Result != null
-                    ? JsonSerializer.Serialize(context.Result, new JsonSerializerOptions { WriteIndented = true })
-                    : "Sin valor de retorno";
-
-                // Registra la salida del método.
-                _loggingService.AddMethodExitLog(methodName, returnValue);
+                var xmlDocument = new XmlDocument();
+                xmlDocument.LoadXml(xml);
+                using var stringWriter = new System.IO.StringWriter();
+                using var xmlTextWriter = new XmlTextWriter(stringWriter) { Formatting = Formatting.Indented };
+                xmlDocument.WriteContentTo(xmlTextWriter);
+                return stringWriter.ToString();
+            }
+            catch
+            {
+                return xml; // Si falla, retorna la cadena original.
             }
         }
     }
-}
+
+
+
+    /// <summary>
+    /// Clase estática encargada de formatear los logs con la estructura definida.
+    /// </summary>
+    public static class LogFormatter
+    {
+        public static string FormatBeginLog() =>
+            $"\n---------------------------Inicio de Log---------------------------\n{DateTime.Now:yyyy-MM-dd HH:mm:ss}\n";
+
+        public static string FormatEndLog() =>
+            $"\n---------------------------Fin de Log---------------------------\n{DateTime.Now:yyyy-MM-dd HH:mm:ss}\n";
+
+        public static string FormatEnvironmentInfoStart() =>
+            $"\n---------------------------Enviroment Info-------------------------\nInicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-------------------------------------------------------------------";
+
+        public static string FormatEnvironmentInfoEnd() =>
+            $"\n---------------------------Enviroment Info-------------------------\nFin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-------------------------------------------------------------------";
+
+        public static string FormatRequestInfo(string method, string path, string queryParams, string body) =>
+            $"\n----------------------------------Request Info---------------------------------\nInicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------"
+            + $"\nMétodo: {method}\nRuta: {path}\nQuery Params: {queryParams}\nCuerpo:\n{body.FormatJson()}\n"
+            + $"\n----------------------------------Request Info---------------------------------\nFin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------";
+
+        public static string FormatResponseInfo(string statusCode, string headers, string body) =>
+            $"\n----------------------------------Response Info---------------------------------\nInicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------"
+            + $"\nCódigo de Estado: {statusCode}\nEncabezados: {headers}\nCuerpo:\n{body.FormatJson()}\n"
+            + $"\n----------------------------------Response Info---------------------------------\nFin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------";
+
+        public static string FormatMethodEntry(string methodName, string parameters) =>
+            $"\n----------------------------------Método: {methodName}---------------------------------\nInicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------"
+            + $"\nParámetros de Entrada:\n{parameters}\n";
+
+        public static string FormatMethodExit(string methodName, string returnValue) =>
+            $"\nParámetros de Salida:\n{returnValue}"
+            + $"\n----------------------------------Método: {methodName}---------------------------------\nFin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------";
+
+        public static string FormatSingleLog(string message) =>
+            $"\n----------------------------------Single Log---------------------------------\nInicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------"
+            + $"\n{message}\n"
+            + $"\n----------------------------------Single Log---------------------------------\nFin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------";
+
+        public static string FormatObjectLog(string objectName, object obj) =>
+            $"\n----------------------------------Object -> {objectName}---------------------------------\nInicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------"
+            + $"\n{obj.ConvertObjectToString()}\n"
+            + $"\n----------------------------------Object -> {objectName}---------------------------------\nFin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------";
+
+        public static string FormatExceptionDetails(string exceptionMessage) =>
+            $"\n----------------------------------Exception Details---------------------------------\nInicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------"
+            + $"\n{exceptionMessage}\n"
+            + $"\n----------------------------------Exception Details---------------------------------\nFin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n-----------------------------------------------------------------------------";
+    }
+
+
+
+
+
+
