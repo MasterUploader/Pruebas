@@ -1,64 +1,35 @@
 using System;
-using System.IO;
+using System.Threading;
 
 namespace Logging.Helpers
 {
     /// <summary>
-    /// Proporciona métodos auxiliares para la gestión y almacenamiento de logs en archivos.
+    /// Gestiona los niveles de indentación de los logs para mejorar la legibilidad.
     /// </summary>
-    public static class LogHelper
+    public static class LogScope
     {
+        // Usa un `AsyncLocal<int>` para mantener la indentación en hilos independientes
+        private static readonly AsyncLocal<int> _currentLevel = new AsyncLocal<int>();
+
         /// <summary>
-        /// Escribe un log en un archivo, asegurando que no interrumpa la ejecución si ocurre un error.
+        /// Obtiene el nivel de indentación actual.
         /// </summary>
-        /// <param name="logDirectory">Directorio donde se almacenará el archivo de log.</param>
-        /// <param name="fileName">Nombre del archivo de log.</param>
-        /// <param name="logContent">Contenido del log a escribir.</param>
-        public static void WriteLogToFile(string logDirectory, string fileName, string logContent)
+        public static int CurrentLevel => _currentLevel.Value;
+
+        /// <summary>
+        /// Aumenta el nivel de indentación cuando un método es ejecutado.
+        /// </summary>
+        public static void IncreaseIndentation()
         {
-            try
-            {
-                // Asegura que el directorio de logs exista
-                if (!Directory.Exists(logDirectory))
-                {
-                    Directory.CreateDirectory(logDirectory);
-                }
-
-                // Define la ruta completa del archivo de log
-                string logFilePath = Path.Combine(logDirectory, fileName);
-
-                // Escribe el contenido en el archivo (append para evitar sobrescribir)
-                File.AppendAllText(logFilePath, logContent + Environment.NewLine + Environment.NewLine);
-            }
-            catch (Exception ex)
-            {
-                // En caso de error, guarda un log interno para depuración
-                LogInternalError(logDirectory, ex);
-            }
+            _currentLevel.Value += 4; // Aumenta 4 espacios por cada nivel de profundidad
         }
 
         /// <summary>
-        /// Registra un error interno en un archivo separado ("InternalErrorLog.txt") sin afectar la API.
+        /// Reduce el nivel de indentación cuando un método finaliza su ejecución.
         /// </summary>
-        /// <param name="logDirectory">Directorio donde se almacenará el archivo de errores internos.</param>
-        /// <param name="ex">Excepción capturada.</param>
-        private static void LogInternalError(string logDirectory, Exception ex)
+        public static void DecreaseIndentation()
         {
-            try
-            {
-                // Define la ruta del archivo de errores internos
-                string errorLogPath = Path.Combine(logDirectory, "InternalErrorLog.txt");
-
-                // Mensaje de error con timestamp
-                string errorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Error en LogHelper: {ex}{Environment.NewLine}";
-
-                // Guarda el error sin interrumpir la ejecución de la API
-                File.AppendAllText(errorLogPath, errorMessage);
-            }
-            catch
-            {
-                // Evita bucles de error si la escritura en el log interno también falla
-            }
+            _currentLevel.Value = Math.Max(0, _currentLevel.Value - 4); // Asegura que no sea negativo
         }
     }
 }
