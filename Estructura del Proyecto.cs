@@ -1,91 +1,67 @@
-using System;
-using System.Text;
+using Logging.Services;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using System.Text.Json;
 
-namespace Logging.Extensions
+namespace Logging.Filters
 {
     /// <summary>
-    /// Métodos de extensión para manipulación de cadenas en el logging.
+    /// Filtro de acción que captura la ejecución de métodos dentro de los controladores.
     /// </summary>
-    public static class StringExtensions
+    public class LoggingActionFilter : IActionFilter
     {
-        /// <summary>
-        /// Indenta cada línea de un texto con un número de espacios determinado.
-        /// </summary>
-        /// <param name="text">Texto a formatear.</param>
-        /// <param name="level">Nivel de indentación (número de espacios).</param>
-        /// <returns>Texto indentado.</returns>
-        public static string Indent(this string text, int level = 4)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                return text;
+        private readonly LoggingService _loggingService;
 
-            // Crea el prefijo de indentación basado en el nivel
-            string indentation = new string(' ', level);
-            
-            // Aplica la indentación a cada línea del texto
-            return indentation + text.Replace("\n", "\n" + indentation);
+        /// <summary>
+        /// Constructor que inyecta el servicio de logging.
+        /// </summary>
+        /// <param name="loggingService">Instancia del servicio de logging.</param>
+        public LoggingActionFilter(LoggingService loggingService)
+        {
+            _loggingService = loggingService;
         }
 
         /// <summary>
-        /// Normaliza los espacios en blanco dentro de una cadena eliminando espacios extra.
+        /// Se ejecuta antes de que el método del controlador sea llamado.
+        /// Registra la entrada del método y los parámetros de entrada.
         /// </summary>
-        /// <param name="text">Texto a limpiar.</param>
-        /// <returns>Texto sin espacios en blanco excesivos.</returns>
-        public static string NormalizeWhitespace(this string text)
+        /// <param name="context">Contexto de la ejecución de la acción.</param>
+        public void OnActionExecuting(ActionExecutingContext context)
         {
-            if (string.IsNullOrWhiteSpace(text))
-                return string.Empty;
-
-            // Reemplaza múltiples espacios por un solo espacio
-            return System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
-        }
-
-        /// <summary>
-        /// Convierte una cadena en formato JSON a una versión legible con sangría.
-        /// </summary>
-        /// <param name="json">Cadena JSON sin formato.</param>
-        /// <returns>Cadena JSON formateada.</returns>
-        public static string FormatJson(this string json)
-        {
-            if (string.IsNullOrWhiteSpace(json))
-                return string.Empty;
-
-            try
+            // Verifica si la acción pertenece a un controlador para capturar métodos internos.
+            if (context.ActionDescriptor is ControllerActionDescriptor descriptor)
             {
-                var jsonObject = System.Text.Json.JsonDocument.Parse(json);
-                return System.Text.Json.JsonSerializer.Serialize(jsonObject, new System.Text.Json.JsonSerializerOptions
-                {
-                    WriteIndented = true
-                });
-            }
-            catch
-            {
-                return json; // Si el formato es incorrecto, retorna el JSON sin cambios.
+                string methodName = descriptor.MethodInfo.Name;
+                
+                // Serializa los parámetros de entrada del método.
+                string parameters = context.ActionArguments.Count > 0 
+                    ? JsonSerializer.Serialize(context.ActionArguments, new JsonSerializerOptions { WriteIndented = true }) 
+                    : "Sin parámetros";
+
+                // Registra el inicio del método en los logs.
+                _loggingService.AddMethodEntryLog(methodName, parameters);
             }
         }
 
         /// <summary>
-        /// Convierte una cadena XML en una versión legible con sangría.
+        /// Se ejecuta después de que el método del controlador haya terminado su ejecución.
+        /// Registra el valor de retorno del método.
         /// </summary>
-        /// <param name="xml">Cadena XML sin formato.</param>
-        /// <returns>Cadena XML formateada.</returns>
-        public static string FormatXml(this string xml)
+        /// <param name="context">Contexto de la ejecución de la acción.</param>
+        public void OnActionExecuted(ActionExecutedContext context)
         {
-            if (string.IsNullOrWhiteSpace(xml))
-                return string.Empty;
+            // Verifica si la acción pertenece a un controlador.
+            if (context.ActionDescriptor is ControllerActionDescriptor descriptor)
+            {
+                string methodName = descriptor.MethodInfo.Name;
 
-            try
-            {
-                var xmlDocument = new System.Xml.XmlDocument();
-                xmlDocument.LoadXml(xml);
-                using var stringWriter = new StringWriter();
-                using var xmlTextWriter = new System.Xml.XmlTextWriter(stringWriter) { Formatting = System.Xml.Formatting.Indented };
-                xmlDocument.WriteContentTo(xmlTextWriter);
-                return stringWriter.ToString();
-            }
-            catch
-            {
-                return xml; // Si el formato es incorrecto, retorna el XML sin cambios.
+                // Determina el valor de retorno del método.
+                string returnValue = context.Result != null 
+                    ? JsonSerializer.Serialize(context.Result, new JsonSerializerOptions { WriteIndented = true }) 
+                    : "Sin valor de retorno";
+
+                // Registra la salida del método en los logs.
+                _loggingService.AddMethodExitLog(methodName, returnValue);
             }
         }
     }
