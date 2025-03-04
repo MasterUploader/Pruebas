@@ -1,34 +1,22 @@
-using System;
-using System.IO;
+using Logging.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 
-namespace Logging.Helpers
+namespace Logging.Extensions
 {
     /// <summary>
-    /// Métodos auxiliares para manejar validaciones y formato de logs.
+    /// Métodos de extensión para configurar el servicio de logging.
     /// </summary>
-    public static class LogHelper
+    public static class LoggingExtensions
     {
-        /// <summary>
-        /// Verifica si una ruta de archivo es válida.
-        /// </summary>
-        public static bool IsValidFilePath(string filePath)
+        public static void AddLoggingServices(this IServiceCollection services)
         {
-            return !string.IsNullOrWhiteSpace(filePath) && filePath.IndexOfAny(Path.GetInvalidPathChars()) < 0;
+            services.AddSingleton<LoggingService>();
         }
 
-        /// <summary>
-        /// Maneja excepciones sin detener la ejecución.
-        /// </summary>
-        public static void SafeExecute(Action action)
+        public static void UseLoggingMiddleware(this IApplicationBuilder app)
         {
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[LOG ERROR]: {ex.Message}");
-            }
+            app.UseMiddleware<LoggingMiddleware>();
         }
     }
 }
