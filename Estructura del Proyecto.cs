@@ -1,42 +1,39 @@
-using Logging.Services;
-using Microsoft.AspNetCore.Mvc.Controllers;
-using Microsoft.AspNetCore.Mvc.Filters;
-using System;
-using System.Linq;
-using System.Text.Json;
 
-namespace Logging.Filters
-{
     /// <summary>
-    /// Filtro de acción que captura la ejecución de métodos dentro de la API.
+    /// Middleware que captura y registra las solicitudes HTTP, respuestas y excepciones.
     /// </summary>
-    public class LoggingActionFilter : IActionFilter
+    public class LoggingMiddleware
     {
+        private readonly RequestDelegate _next;
         private readonly LoggingService _loggingService;
 
-        public LoggingActionFilter(LoggingService loggingService)
+        public LoggingMiddleware(RequestDelegate next, LoggingService loggingService)
         {
+            _next = next;
             _loggingService = loggingService;
         }
 
-        public void OnActionExecuting(ActionExecutingContext context)
+        public async Task InvokeAsync(HttpContext context)
         {
-            if (context.ActionDescriptor is ControllerActionDescriptor descriptor)
-            {
-                string methodName = descriptor.MethodInfo.Name;
-                string parameters = JsonSerializer.Serialize(context.ActionArguments);
-                _loggingService.AddMethodEntryLog(methodName, parameters);
-            }
-        }
+            var logs = new List<string>();
+            context.Items["RequestLogs"] = logs;
 
-        public void OnActionExecuted(ActionExecutedContext context)
-        {
-            if (context.ActionDescriptor is ControllerActionDescriptor descriptor)
+            logs.Add(LogFormatter.FormatBeginLog());
+            logs.Add(LogFormatter.FormatRequestInfo(context.Request.Method, context.Request.Path, context.Request.QueryString.ToString(), await ReadRequestBody(context)));
+
+            try
             {
-                string methodName = descriptor.MethodInfo.Name;
-                string returnValue = context.Result != null ? JsonSerializer.Serialize(context.Result) : "Void";
-                _loggingService.AddMethodExitLog(methodName, returnValue);
+                await _next(context);
             }
+            catch (Exception ex)
+            {
+                logs.Add(LogFormatter.FormatExceptionDetails(ex.ToString()));
+            }
+
+            logs.Add(LogFormatter.FormatResponseInfo(context.Response.StatusCode.ToString(), context.Response.Headers.ToString(), await ReadResponseBody(context)));
+            logs.Add(LogFormatter.FormatEndLog());
+
+            _loggingService.FlushLogs();
         }
     }
-}
+
