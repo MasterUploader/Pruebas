@@ -1,44 +1,30 @@
 /// <summary>
-/// Formatea la información de inicio del entorno donde se ejecuta la aplicación.
-/// Incluye datos del sistema operativo, máquina, entorno, y cliente.
+/// Agrega la información del entorno al log, capturando detalles del sistema y la petición actual.
 /// </summary>
-public static string FormatEnvironmentInfoStart(
-    string application, string env, string contentRoot, string executionId,
-    string clientIp, string userAgent, string machineName, string os,
-    string host, string distribution)
+public void AddEnvironmentLog()
 {
-    var sb = new StringBuilder();
+    try
+    {
+        var context = _httpContextAccessor.HttpContext;
+        var hostEnvironment = context?.RequestServices.GetService<IHostEnvironment>();
 
-    sb.AppendLine("---------------------------Enviroment Info-------------------------");
-    sb.AppendLine($"Inicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-    sb.AppendLine("-------------------------------------------------------------------");
-    sb.AppendLine($"Application: {application}");
-    sb.AppendLine($"Environment: {env}");
-    sb.AppendLine($"ContentRoot: {contentRoot}");
-    sb.AppendLine($"Execution ID: {executionId}");
-    sb.AppendLine($"Client IP: {clientIp}");
-    sb.AppendLine($"User Agent: {userAgent}");
-    sb.AppendLine($"Machine Name: {machineName}");
-    sb.AppendLine($"OS: {os}");
-    sb.AppendLine($"Host: {host}");
-    sb.AppendLine($"Distribución: {distribution}");
-    sb.AppendLine("----------------------------Enviroment Info-------------------------");
+        string formatted = LogFormatter.FormatEnvironmentInfoStart(
+            application: hostEnvironment?.ApplicationName ?? "Desconocido",
+            env: hostEnvironment?.EnvironmentName ?? "Desconocido",
+            contentRoot: hostEnvironment?.ContentRootPath ?? "Desconocido",
+            executionId: context?.TraceIdentifier ?? "Desconocido",
+            clientIp: context?.Connection.RemoteIpAddress?.ToString() ?? "Desconocido",
+            userAgent: context?.Request.Headers["User-Agent"].ToString() ?? "Desconocido",
+            machineName: Environment.MachineName,
+            os: Environment.OSVersion.ToString(),
+            host: context?.Request.Host.ToString() ?? "Desconocido",
+            distribution: "N/A"
+        );
 
-    return sb.ToString();
-}
-
-
-
-/// <summary>
-/// Formatea la sección de cierre de la información del entorno.
-/// </summary>
-public static string FormatEnvironmentInfoEnd()
-{
-    var sb = new StringBuilder();
-
-    sb.AppendLine("---------------------------Enviroment Info-------------------------");
-    sb.AppendLine($"Fin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-    sb.AppendLine("-------------------------------------------------------------------");
-
-    return sb.ToString();
+        LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+    }
+    catch (Exception ex)
+    {
+        LogInternalError(ex);
+    }
 }
