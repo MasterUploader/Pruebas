@@ -1,99 +1,210 @@
 using System;
 using System.IO;
-using System.Text;
-using System.Threading.Tasks;
-using Logging.Services;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Logging.Extensions;
+using Logging.Helpers;
 
-namespace Logging.Middleware
+namespace Logging.Services
 {
     /// <summary>
-    /// Middleware de logging que captura todas las solicitudes HTTP y sus respuestas.
+    /// Servicio de logging que captura y almacena eventos en archivos de log.
     /// </summary>
-    public class LoggingMiddleware
+    public class LoggingService
     {
-        private readonly RequestDelegate _next;
-        private readonly LoggingService _loggingService;
+        private readonly string _logDirectory;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
         /// <summary>
-        /// Constructor que inyecta el siguiente middleware en la canalización y el servicio de logging.
+        /// Constructor que inicializa el servicio de logging con la configuración de rutas.
         /// </summary>
-        /// <param name="next">Delegado del middleware siguiente en la canalización.</param>
-        /// <param name="loggingService">Instancia del servicio de logging.</param>
-        public LoggingMiddleware(RequestDelegate next, LoggingService loggingService)
+        public LoggingService(IHttpContextAccessor httpContextAccessor, IHostEnvironment hostEnvironment, IOptions<Logging.Configuration.LoggingOptions> options)
         {
-            _next = next;
-            _loggingService = loggingService;
-        }
+            _httpContextAccessor = httpContextAccessor;
+            string baseLogDir = options.Value.BaseLogDirectory;
+            string apiName = !string.IsNullOrWhiteSpace(hostEnvironment.ApplicationName) ? hostEnvironment.ApplicationName : "Desconocido";
+            _logDirectory = Path.Combine(baseLogDir, apiName);
 
-        /// <summary>
-        /// Método principal que captura la solicitud y la respuesta HTTP.
-        /// </summary>
-        /// <param name="context">Contexto HTTP de la petición actual.</param>
-        public async Task InvokeAsync(HttpContext context)
-        {
-            string executionId = Guid.NewGuid().ToString(); // Identificador único de la ejecución
-            context.Items["ExecutionId"] = executionId; // Guarda el ID en el contexto de la petición
-
-            // Capturar la información de la solicitud antes de enviarla al controlador
-            string requestLog = await CaptureRequestInfoAsync(context);
-            _loggingService.WriteLog(context, requestLog);
-
-            // Capturar la respuesta después de que el controlador la procese
-            var originalBodyStream = context.Response.Body;
-            using (var responseBody = new MemoryStream())
+            try
             {
-                context.Response.Body = responseBody;
-
-                // Continuar con el siguiente middleware en la cadena de ejecución
-                await _next(context);
-
-                // Capturar y registrar la respuesta HTTP
-                string responseLog = await CaptureResponseInfoAsync(context);
-                _loggingService.WriteLog(context, responseLog);
-
-                // Copiar la respuesta original al cuerpo de la respuesta para que llegue al cliente
-                responseBody.Seek(0, SeekOrigin.Begin);
-                await responseBody.CopyToAsync(originalBodyStream);
+                if (!Directory.Exists(_logDirectory))
+                    Directory.CreateDirectory(_logDirectory);
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
             }
         }
 
         /// <summary>
-        /// Captura la información de la solicitud HTTP antes de que sea procesada por los controladores.
+        /// Obtiene el archivo de log asociado a la petición actual.
         /// </summary>
-        /// <param name="context">Contexto HTTP de la petición actual.</param>
-        private async Task<string> CaptureRequestInfoAsync(HttpContext context)
+        private string GetCurrentLogFile()
         {
-            context.Request.EnableBuffering(); // Permite leer el cuerpo de la petición sin afectar la ejecución
-
-            using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-            string body = await reader.ReadToEndAsync();
-            context.Request.Body.Position = 0; // Restablece la posición para que el controlador pueda leerlo
-
-            return LogFormatter.FormatRequestInfo(
-                method: context.Request.Method,
-                path: context.Request.Path,
-                queryParams: context.Request.QueryString.ToString(),
-                body: body
-            );
+            try
+            {
+                var context = _httpContextAccessor.HttpContext;
+                if (context != null && context.Items.ContainsKey("ExecutionId"))
+                {
+                    string executionId = context.Items["ExecutionId"].ToString();
+                    string endpoint = context.Request.Path.ToString().Replace("/", "_").Trim('_');
+                    string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    return Path.Combine(_logDirectory, $"{executionId}_{endpoint}_{timestamp}.txt");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
+            }
+            return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
         }
 
         /// <summary>
-        /// Captura la información de la respuesta HTTP antes de enviarla al cliente.
+        /// Registra errores internos en un archivo separado sin afectar la API.
         /// </summary>
-        /// <param name="context">Contexto HTTP de la petición actual.</param>
-        private async Task<string> CaptureResponseInfoAsync(HttpContext context)
+        private void LogInternalError(Exception ex)
         {
-            context.Response.Body.Seek(0, SeekOrigin.Begin);
-            using var reader = new StreamReader(context.Response.Body, Encoding.UTF8, leaveOpen: true);
-            string body = await reader.ReadToEndAsync();
-            context.Response.Body.Seek(0, SeekOrigin.Begin);
+            try
+            {
+                string errorLogPath = Path.Combine(_logDirectory, "InternalErrorLog.txt");
+                string errorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Error en LoggingService: {ex}{Environment.NewLine}";
+                File.AppendAllText(errorLogPath, errorMessage);
+            }
+            catch
+            {
+                // Evita bucles de error
+            }
+        }
 
-            return LogFormatter.FormatResponseInfo(
-                statusCode: context.Response.StatusCode.ToString(),
-                headers: string.Join("; ", context.Response.Headers),
-                body: body
-            );
+        /// <summary>
+        /// Escribe un log en el archivo correspondiente.
+        /// </summary>
+        public void WriteLog(HttpContext context, string logContent)
+        {
+            try
+            {
+                LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), logContent.Indent(LogScope.CurrentLevel));
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
+            }
+        }
+
+        /// <summary>
+        /// Agrega un log manual de texto en el archivo de log actual.
+        /// </summary>
+        public void AddSingleLog(string logMessage)
+        {
+            try
+            {
+                string formatted = LogFormatter.FormatSingleLog(logMessage).Indent(LogScope.CurrentLevel);
+                LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
+            }
+        }
+
+        /// <summary>
+        /// Registra un objeto en los logs (JSON o XML).
+        /// </summary>
+        public void AddObjLog(string objectName, object logObject)
+        {
+            try
+            {
+                string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
+                LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
+            }
+        }
+
+        /// <summary>
+        /// Registra la información de una respuesta HTTP.
+        /// </summary>
+        public void AddResponseLog(string logMessage)
+        {
+            try
+            {
+                string formatted = LogFormatter.FormatResponseInfo("200", "application/json", logMessage).Indent(LogScope.CurrentLevel);
+                LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
+            }
+        }
+
+        /// <summary>
+        /// Registra la información del entorno del servidor.
+        /// </summary>
+        public void AddEnvironmentLog()
+        {
+            try
+            {
+                string formatted = LogFormatter.FormatEnvironmentInfoStart().Indent(LogScope.CurrentLevel);
+                LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
+            }
+        }
+
+        /// <summary>
+        /// Registra excepciones en los logs.
+        /// </summary>
+        public void AddExceptionLog(Exception ex)
+        {
+            try
+            {
+                string formatted = LogFormatter.FormatExceptionDetails(ex.ToString()).Indent(LogScope.CurrentLevel);
+                LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+            }
+            catch (Exception e)
+            {
+                LogInternalError(e);
+            }
+        }
+
+        /// <summary>
+        /// Registra los parámetros de entrada de un método.
+        /// </summary>
+        public void AddMethodEntryLog(string methodName, string parameters)
+        {
+            try
+            {
+                LogScope.IncreaseIndentation();
+                string formatted = LogFormatter.FormatMethodEntry(methodName, parameters).Indent(LogScope.CurrentLevel);
+                LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
+            }
+        }
+
+        /// <summary>
+        /// Registra los valores de salida de un método.
+        /// </summary>
+        public void AddMethodExitLog(string methodName, string returnValue)
+        {
+            try
+            {
+                string formatted = LogFormatter.FormatMethodExit(methodName, returnValue).Indent(LogScope.CurrentLevel);
+                LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+                LogScope.DecreaseIndentation();
+            }
+            catch (Exception ex)
+            {
+                LogInternalError(ex);
+            }
         }
     }
 }
