@@ -1,52 +1,36 @@
 /// <summary>
-/// Formatea los parámetros de entrada de un método antes de guardarlos en el log.
+/// Escribe un log en el archivo correspondiente de la petición actual.
+/// Se asegura de que la API no se bloquee si ocurre un error en el proceso de escritura.
 /// </summary>
-public static string FormatInputParameters(IDictionary<string, object> parameters)
+public void WriteLog(HttpContext context, string logContent)
 {
-    var sb = new StringBuilder();
+    try
+    {
+        string filePath = GetCurrentLogFile();
+        bool isNewFile = !File.Exists(filePath);
 
-    sb.AppendLine("-----------------------Parámetros de Entrada-----------------------------------");
-    
-    if (parameters == null || parameters.Count == 0)
-    {
-        sb.AppendLine("Sin parámetros de entrada.");
-    }
-    else
-    {
-        foreach (var param in parameters)
+        var logBuilder = new StringBuilder();
+
+        // Si es la primera vez que escribimos en este archivo, agregamos la cabecera
+        if (isNewFile)
         {
-            if (param.Value == null)
-            {
-                sb.AppendLine($"{param.Key} = null");
-            }
-            else if (param.Value.GetType().IsPrimitive || param.Value is string)
-            {
-                sb.AppendLine($"{param.Key} = {param.Value}");
-            }
-            else
-            {
-                string json = JsonSerializer.Serialize(param.Value, new JsonSerializerOptions { WriteIndented = true });
-                sb.AppendLine($"Objeto {param.Key} =\n{json}");
-            }
+            logBuilder.AppendLine(LogFormatter.FormatBeginLog());
         }
+
+        // Agregamos el contenido del log
+        logBuilder.AppendLine(logContent);
+
+        // Si es la última entrada del log, agregamos el cierre
+        if (context.Response.HasStarted)
+        {
+            logBuilder.AppendLine(LogFormatter.FormatEndLog());
+        }
+
+        // **Escritura en el archivo sin bloquear la API**
+        Task.Run(() => LogHelper.WriteLogToFile(_logDirectory, filePath, logBuilder.ToString()));
     }
-
-    sb.AppendLine("-----------------------Parámetros de Entrada-----------------------------------");
-
-    return sb.ToString();
-}
-
-
-
-
-public override void OnActionExecuting(ActionExecutingContext context)
-{
-    var loggingService = context.HttpContext.RequestServices.GetRequiredService<ILoggingService>();
-
-    // Capturar el nombre del método y los parámetros de entrada
-    string methodName = $"{context.Controller.GetType().Name}.{context.ActionDescriptor.DisplayName}";
-    string parameters = LogFormatter.FormatInputParameters(context.ActionArguments);
-
-    // Registrar la entrada del método
-    loggingService.AddMethodEntryLog(methodName, parameters);
+    catch (Exception ex)
+    {
+        LogInternalError(ex);
+    }
 }
