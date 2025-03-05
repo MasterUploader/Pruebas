@@ -1,91 +1,130 @@
-using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Http;
 using System.Diagnostics;
+using System.Text.Json;
 using Logging.Abstractions;
+using System.Text;
 
-namespace Logging.Filters
+namespace Logging.Middleware
 {
     /// <summary>
-    /// Filtro de acción que se ejecuta antes y después de la ejecución de una acción en un controlador.
-    /// Captura información como parámetros de entrada, salida, tiempos de ejecución y errores.
+    /// Middleware para capturar logs de ejecución de controladores en la API.
+    /// Captura información de Request, Response, Excepciones y Entorno.
     /// </summary>
-    public class LoggingActionFilter : IAsyncActionFilter
+    public class LoggingMiddleware
     {
+        private readonly RequestDelegate _next;
         private readonly ILoggingService _loggingService;
-        private Stopwatch _stopwatch; // Para medir el tiempo de ejecución de la acción
 
         /// <summary>
-        /// Constructor: Recibe `ILoggingService` a través de inyección de dependencias.
+        /// Constructor del Middleware que recibe el servicio de logs inyectado.
         /// </summary>
-        public LoggingActionFilter(ILoggingService loggingService)
+        public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService)
         {
+            _next = next ?? throw new ArgumentNullException(nameof(next));
             _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
         }
 
         /// <summary>
-        /// Se ejecuta antes y después de la acción del controlador.
-        /// Registra los parámetros de entrada y la información de inicio.
+        /// Método principal del Middleware que intercepta las solicitudes HTTP.
         /// </summary>
-        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        public async Task InvokeAsync(HttpContext context)
         {
+            // Iniciar medición del tiempo de ejecución
+            var stopwatch = Stopwatch.StartNew();
+
             try
             {
-                _stopwatch = Stopwatch.StartNew(); // Iniciar medición del tiempo de ejecución
-                
-                // Capturar el nombre del controlador y acción
-                string controllerName = context.ActionDescriptor.RouteValues["controller"] ?? "Desconocido";
-                string actionName = context.ActionDescriptor.RouteValues["action"] ?? "Desconocido";
-                string methodName = $"{controllerName}.{actionName}";
+                // Capturar información del entorno y request
+                await CaptureEnvironmentInfoAsync(context);
+                await CaptureRequestInfoAsync(context);
 
-                // Capturar los parámetros de entrada
-                string inputParams = context.ActionArguments.Any()
-                    ? string.Join(Environment.NewLine, context.ActionArguments.Select(arg => $"{arg.Key}: {arg.Value}"))
-                    : "Sin parámetros de entrada";
+                // Guardar logs de inicio de ejecución en el archivo correspondiente
+                _loggingService.SaveLogsToFile();
 
-                // Escribir en el log la información inicial
-                _loggingService.AddSingleLog($"[Inicio de Acción] {methodName} | Parámetros de entrada: {inputParams}");
+                // Continuar con la ejecución del siguiente middleware en la cadena
+                await _next(context);
 
-                // Continuar con la ejecución del siguiente middleware
-                var executedContext = await next();
-
-                // Capturar los datos de salida después de la ejecución
-                await OnActionExecutedAsync(executedContext);
+                // Capturar la respuesta HTTP después de procesar la solicitud
+                await CaptureResponseInfoAsync(context);
             }
             catch (Exception ex)
             {
+                // Capturar errores y guardarlos en el log
                 _loggingService.AddExceptionLog(ex);
+            }
+            finally
+            {
+                // Detener el cronómetro y registrar el tiempo total de ejecución
+                stopwatch.Stop();
+                _loggingService.AddSingleLog($"[Tiempo Total de Ejecución]: {stopwatch.ElapsedMilliseconds} ms");
+
+                // Guardar todos los logs en el archivo definitivo
+                _loggingService.SaveLogsToFile();
             }
         }
 
         /// <summary>
-        /// Se ejecuta después de que la acción del controlador ha terminado.
-        /// Registra los parámetros de salida y el tiempo de ejecución.
+        /// Captura información del entorno, como la máquina y el entorno de ejecución.
         /// </summary>
-        private async Task OnActionExecutedAsync(ActionExecutedContext context)
+        private async Task CaptureEnvironmentInfoAsync(HttpContext context)
         {
-            try
+            var envInfo = new
             {
-                _stopwatch.Stop(); // Detener la medición del tiempo
+                MachineName = Environment.MachineName,
+                OS = Environment.OSVersion.ToString(),
+                Framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+                Timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
+            };
 
-                // Capturar el nombre del controlador y acción
-                string controllerName = context.ActionDescriptor.RouteValues["controller"] ?? "Desconocido";
-                string actionName = context.ActionDescriptor.RouteValues["action"] ?? "Desconocido";
-                string methodName = $"{controllerName}.{actionName}";
+            string formattedEnvInfo = JsonSerializer.Serialize(envInfo, new JsonSerializerOptions { WriteIndented = true });
+            _loggingService.AddSingleLog($"[Environment Info]: {formattedEnvInfo}");
+        }
 
-                // Capturar la respuesta del método
-                string outputParams = "Sin datos de salida";
-                if (context.Result is ObjectResult objectResult && objectResult.Value != null)
-                {
-                    outputParams = System.Text.Json.JsonSerializer.Serialize(objectResult.Value, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-                }
-
-                // Guardar los datos en el log
-                _loggingService.AddSingleLog($"[Fin de Acción] {methodName} | Parámetros de salida: {outputParams}");
-                _loggingService.AddSingleLog($"[Tiempo de ejecución] {methodName} | { _stopwatch.ElapsedMilliseconds} ms");
-            }
-            catch (Exception ex)
+        /// <summary>
+        /// Captura información de la solicitud HTTP.
+        /// </summary>
+        private async Task CaptureRequestInfoAsync(HttpContext context)
+        {
+            var request = context.Request;
+            var requestInfo = new
             {
-                _loggingService.AddExceptionLog(ex);
-            }
+                Method = request.Method,
+                Path = request.Path,
+                Query = request.QueryString.ToString(),
+                Headers = request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString()),
+                Body = await ReadRequestBodyAsync(request)
+            };
+
+            string formattedRequest = JsonSerializer.Serialize(requestInfo, new JsonSerializerOptions { WriteIndented = true });
+            _loggingService.AddSingleLog($"[Request Info]: {formattedRequest}");
+        }
+
+        /// <summary>
+        /// Captura información de la respuesta HTTP.
+        /// </summary>
+        private async Task CaptureResponseInfoAsync(HttpContext context)
+        {
+            var response = context.Response;
+            var responseInfo = new
+            {
+                StatusCode = response.StatusCode,
+                Headers = response.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
+            };
+
+            string formattedResponse = JsonSerializer.Serialize(responseInfo, new JsonSerializerOptions { WriteIndented = true });
+            _loggingService.AddSingleLog($"[Response Info]: {formattedResponse}");
+        }
+
+        /// <summary>
+        /// Lee el cuerpo de la solicitud HTTP sin afectar el flujo de la aplicación.
+        /// </summary>
+        private async Task<string> ReadRequestBodyAsync(HttpRequest request)
+        {
+            request.EnableBuffering();
+            using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+            string body = await reader.ReadToEndAsync();
+            request.Body.Position = 0; // Restablecer la posición del stream para que pueda ser leído nuevamente
+            return body;
         }
     }
 }
