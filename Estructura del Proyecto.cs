@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using Logging.Abstractions;
+using Logging.Formatters;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Logging.Middleware
@@ -16,14 +16,16 @@ namespace Logging.Middleware
     {
         private readonly RequestDelegate _next;
         private readonly ILoggingService _loggingService;
+        private readonly ILogFormatter _logFormatter;
 
         /// <summary>
         /// Constructor del Middleware que recibe el servicio de logs inyectado.
         /// </summary>
-        public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService)
+        public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService, ILogFormatter logFormatter)
         {
             _next = next ?? throw new ArgumentNullException(nameof(next));
             _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
+            _logFormatter = logFormatter ?? throw new ArgumentNullException(nameof(logFormatter));
         }
 
         /// <summary>
@@ -41,28 +43,32 @@ namespace Logging.Middleware
                     context.Items["ExecutionId"] = Guid.NewGuid().ToString();
                 }
 
-                // 2️⃣ Capturar información del entorno y request
-                _loggingService.WriteLog(context, _loggingService.FormatEnvironmentInfoStart());
-                _loggingService.WriteLog(context, await CaptureRequestInfoAsync(context));
+                // 2️⃣ Capturar información del entorno y escribirlo en el log
+                await CaptureEnvironmentInfoAsync(context);
 
-                // 3️⃣ Reemplazar el Stream original de respuesta para capturarla
+                // 3️⃣ Capturar y escribir en el log la información de la solicitud HTTP
+                string requestLog = await CaptureRequestInfoAsync(context);
+                _loggingService.WriteLog(context, requestLog);
+
+                // 4️⃣ Reemplazar el Stream original de respuesta para capturarla
                 var originalBodyStream = context.Response.Body;
                 using (var responseBody = new MemoryStream())
                 {
                     context.Response.Body = responseBody;
 
-                    // 4️⃣ Continuar con la ejecución del pipeline
+                    // 5️⃣ Continuar con la ejecución del pipeline
                     await _next(context);
 
-                    // 5️⃣ Capturar la respuesta y agregarla al log
-                    _loggingService.WriteLog(context, await CaptureResponseInfoAsync(context));
+                    // 6️⃣ Capturar la respuesta y agregarla al log
+                    string responseLog = await CaptureResponseInfoAsync(context);
+                    _loggingService.WriteLog(context, responseLog);
 
-                    // 6️⃣ Restaurar el stream original para que el API pueda responder correctamente
+                    // 7️⃣ Restaurar el stream original para que el API pueda responder correctamente
                     responseBody.Seek(0, SeekOrigin.Begin);
                     await responseBody.CopyToAsync(originalBodyStream);
                 }
 
-                // 7️⃣ Verificar si hubo alguna excepción en la ejecución y loguearla
+                // 8️⃣ Verificar si hubo alguna excepción en la ejecución y loguearla
                 if (context.Items.ContainsKey("Exception"))
                 {
                     Exception ex = context.Items["Exception"] as Exception;
@@ -71,18 +77,24 @@ namespace Logging.Middleware
             }
             catch (Exception ex)
             {
-                // 8️⃣ Manejo de excepciones para evitar que el middleware interrumpa la API
+                // 9️⃣ Manejo de excepciones para evitar que el middleware interrumpa la API
                 _loggingService.AddExceptionLog(ex);
             }
             finally
             {
-                // 9️⃣ Detener el cronómetro y registrar el tiempo total de ejecución
+                // 🔟 Detener el cronómetro y registrar el tiempo total de ejecución
                 stopwatch.Stop();
                 _loggingService.WriteLog(context, $"[Tiempo Total de Ejecución]: {stopwatch.ElapsedMilliseconds} ms");
-
-                // 🔟 Guardar todos los logs en un solo archivo consolidado
-                _loggingService.SaveLogsToFile();
             }
+        }
+
+        /// <summary>
+        /// Captura información del entorno y lo escribe en el log.
+        /// </summary>
+        private async Task CaptureEnvironmentInfoAsync(HttpContext context)
+        {
+            string envLog = await _logFormatter.FormatEnvironmentInfoAsync();
+            _loggingService.WriteLog(context, envLog);
         }
 
         /// <summary>
@@ -100,7 +112,7 @@ namespace Logging.Middleware
                 Body = await ReadRequestBodyAsync(request)
             };
 
-            return _loggingService.FormatRequestInfo(requestInfo);
+            return _logFormatter.FormatRequestInfo(requestInfo);
         }
 
         /// <summary>
@@ -115,7 +127,7 @@ namespace Logging.Middleware
                 Headers = response.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
             };
 
-            return _loggingService.FormatResponseInfo(responseInfo);
+            return _logFormatter.FormatResponseInfo(responseInfo);
         }
 
         /// <summary>
