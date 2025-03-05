@@ -1,13 +1,4 @@
-using Microsoft.AspNetCore.Http;
-using Logging.Abstractions;
-using Logging.Formatters;
-using System.Diagnostics;
-using System.IO;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Logging.Middleware
-{
     /// <summary>
     /// Middleware para capturar logs de ejecución de controladores en la API.
     /// Captura información de Request, Response, Excepciones y Entorno.
@@ -16,16 +7,16 @@ namespace Logging.Middleware
     {
         private readonly RequestDelegate _next;
         private readonly ILoggingService _loggingService;
-        private readonly ILogFormatter _logFormatter;
+        private readonly LogFormatter _logFormatter; // Se usa directamente LogFormatter
 
         /// <summary>
         /// Constructor del Middleware que recibe el servicio de logs inyectado.
         /// </summary>
-        public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService, ILogFormatter logFormatter)
+        public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService)
         {
             _next = next ?? throw new ArgumentNullException(nameof(next));
             _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
-            _logFormatter = logFormatter ?? throw new ArgumentNullException(nameof(logFormatter));
+            _logFormatter = new LogFormatter(); // Se instancia directamente
         }
 
         /// <summary>
@@ -142,4 +133,4 @@ namespace Logging.Middleware
             return body;
         }
     }
-}
+
