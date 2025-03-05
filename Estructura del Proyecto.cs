@@ -1,138 +1,83 @@
+using System;
+using System.Diagnostics;
+using System.Reflection;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Castle.DynamicProxy;
+using Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Logging.Filters
+{
+    /// <summary>
+    /// Atributo para interceptar la ejecución de métodos y registrar logs automáticamente.
+    /// Se usa con Castle DynamicProxy para capturar cualquier método decorado con este atributo.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+    public class LogMethodExecutionAttribute : Attribute { }
 
     /// <summary>
-    /// Middleware para capturar logs de ejecución de controladores en la API.
-    /// Captura información de Request, Response, Excepciones y Entorno.
+    /// Interceptor que captura métodos decorados con [LogMethodExecution] y registra su ejecución en el log.
     /// </summary>
-    public class LoggingMiddleware
+    public class LogMethodExecutionInterceptor : IInterceptor
     {
-        private readonly RequestDelegate _next;
         private readonly ILoggingService _loggingService;
-        private readonly LogFormatter _logFormatter; // Instancia de formateador de logs
 
-        /// <summary>
-        /// Constructor del Middleware que recibe el servicio de logs inyectado.
-        /// </summary>
-        public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService)
+        public LogMethodExecutionInterceptor(ILoggingService loggingService)
         {
-            _next = next ?? throw new ArgumentNullException(nameof(next));
             _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
-            _logFormatter = new LogFormatter(); // Instancia del formateador
         }
 
-        /// <summary>
-        /// Método principal del Middleware que intercepta las solicitudes HTTP.
-        /// </summary>
-        public async Task InvokeAsync(HttpContext context)
+        public void Intercept(IInvocation invocation)
         {
-            var stopwatch = Stopwatch.StartNew(); // Iniciar medición de tiempo
+            var methodName = $"{invocation.TargetType.Name}.{invocation.Method.Name}";
+            var stopwatch = Stopwatch.StartNew();
 
             try
             {
-                // 1️⃣ Asegurar que exista un ExecutionId único para la solicitud
-                if (!context.Items.ContainsKey("ExecutionId"))
+                _loggingService.AddSingleLog($"[Inicio de Método]: {methodName}");
+
+                // Capturar parámetros de entrada
+                var inputParams = JsonSerializer.Serialize(invocation.Arguments, new JsonSerializerOptions { WriteIndented = true });
+                _loggingService.AddInputParameters(inputParams);
+
+                // Ejecutar el método real
+                invocation.Proceed();
+
+                if (invocation.Method.ReturnType == typeof(Task))
                 {
-                    context.Items["ExecutionId"] = Guid.NewGuid().ToString();
+                    // Si el método devuelve Task, necesitamos capturar el resultado asincrónamente
+                    var task = (Task)invocation.ReturnValue;
+                    task.ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            _loggingService.AddExceptionLog(t.Exception);
+                        }
+                        else
+                        {
+                            _loggingService.AddSingleLog($"[Fin de Método]: {methodName} en {stopwatch.ElapsedMilliseconds} ms");
+                        }
+                        _loggingService.WriteLog();
+                    });
                 }
-
-                // 2️⃣ Capturar información del entorno y escribirlo en el log
-                string envLog = await CaptureEnvironmentInfoAsync(context);
-                _loggingService.WriteLog(context, envLog);
-
-                // 3️⃣ Capturar y escribir en el log la información de la solicitud HTTP
-                string requestLog = await CaptureRequestInfoAsync(context);
-                _loggingService.WriteLog(context, requestLog);
-
-                // 4️⃣ Reemplazar el Stream original de respuesta para capturarla
-                var originalBodyStream = context.Response.Body;
-                using (var responseBody = new MemoryStream())
+                else
                 {
-                    context.Response.Body = responseBody;
+                    // Capturar parámetros de salida si no es una tarea asincrónica
+                    string outputParams = invocation.ReturnValue != null
+                        ? JsonSerializer.Serialize(invocation.ReturnValue, new JsonSerializerOptions { WriteIndented = true })
+                        : "Sin retorno (void)";
 
-                    // 5️⃣ Continuar con la ejecución del pipeline
-                    await _next(context);
-
-                    // 6️⃣ Capturar la respuesta y agregarla al log
-                    string responseLog = await CaptureResponseInfoAsync(context);
-                    _loggingService.WriteLog(context, responseLog);
-
-                    // 7️⃣ Restaurar el stream original para que el API pueda responder correctamente
-                    responseBody.Seek(0, SeekOrigin.Begin);
-                    await responseBody.CopyToAsync(originalBodyStream);
-                }
-
-                // 8️⃣ Verificar si hubo alguna excepción en la ejecución y loguearla
-                if (context.Items.ContainsKey("Exception"))
-                {
-                    Exception ex = context.Items["Exception"] as Exception;
-                    _loggingService.AddExceptionLog(ex);
+                    _loggingService.AddOutputParameters(outputParams);
+                    _loggingService.AddSingleLog($"[Fin de Método]: {methodName} en {stopwatch.ElapsedMilliseconds} ms");
+                    _loggingService.WriteLog();
                 }
             }
             catch (Exception ex)
             {
-                // 9️⃣ Manejo de excepciones para evitar que el middleware interrumpa la API
                 _loggingService.AddExceptionLog(ex);
+                throw;
             }
-            finally
-            {
-                // 🔟 Detener el cronómetro y registrar el tiempo total de ejecución
-                stopwatch.Stop();
-                _loggingService.WriteLog(context, $"[Tiempo Total de Ejecución]: {stopwatch.ElapsedMilliseconds} ms");
-            }
-        }
-
-        /// <summary>
-        /// Captura la información del entorno del servidor y del cliente.
-        /// </summary>
-        private async Task<string> CaptureEnvironmentInfoAsync(HttpContext context)
-        {
-            return LogFormatter.FormatEnvironmentInfoStart(
-                application: context.RequestServices.GetService<IHostEnvironment>()?.ApplicationName ?? "Desconocido",
-                env: context.RequestServices.GetService<IHostEnvironment>()?.EnvironmentName ?? "Desconocido",
-                contentRoot: context.RequestServices.GetService<IHostEnvironment>()?.ContentRootPath ?? "Desconocido",
-                executionId: context.TraceIdentifier ?? "Desconocido",
-                clientIp: context.Connection.RemoteIpAddress?.ToString() ?? "Desconocido",
-                userAgent: context.Request.Headers["User-Agent"].ToString() ?? "Desconocido",
-                machineName: Environment.MachineName,
-                os: Environment.OSVersion.ToString(),
-                host: context.Request.Host.ToString() ?? "Desconocido",
-                distribution: "N/A"
-            );
-        }
-
-        /// <summary>
-        /// Captura la información de la solicitud HTTP antes de que sea procesada por los controladores.
-        /// </summary>
-        private async Task<string> CaptureRequestInfoAsync(HttpContext context)
-        {
-            context.Request.EnableBuffering(); // Permite leer el cuerpo de la petición sin afectar la ejecución
-
-            using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-            string body = await reader.ReadToEndAsync();
-            context.Request.Body.Position = 0; // Restablece la posición para que el controlador pueda leerlo
-
-            return LogFormatter.FormatRequestInfo(
-                method: context.Request.Method,
-                path: context.Request.Path,
-                queryParams: context.Request.QueryString.ToString(),
-                body: body
-            );
-        }
-
-        /// <summary>
-        /// Captura la información de la respuesta HTTP antes de enviarla al cliente.
-        /// </summary>
-        private async Task<string> CaptureResponseInfoAsync(HttpContext context)
-        {
-            context.Response.Body.Seek(0, SeekOrigin.Begin);
-            using var reader = new StreamReader(context.Response.Body, Encoding.UTF8, leaveOpen: true);
-            string body = await reader.ReadToEndAsync();
-            context.Response.Body.Seek(0, SeekOrigin.Begin);
-
-            return LogFormatter.FormatResponseInfo(
-                statusCode: context.Response.StatusCode.ToString(),
-                headers: string.Join("; ", context.Response.Headers),
-                body: body
-            );
         }
     }
-
+}
