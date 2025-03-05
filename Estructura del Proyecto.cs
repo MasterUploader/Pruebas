@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Http;
-using System.Diagnostics;
-using System.Text.Json;
 using Logging.Abstractions;
+using System.Diagnostics;
+using System.IO;
 using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
 
 namespace Logging.Middleware
 {
@@ -29,61 +31,64 @@ namespace Logging.Middleware
         /// </summary>
         public async Task InvokeAsync(HttpContext context)
         {
-            // Iniciar medición del tiempo de ejecución
-            var stopwatch = Stopwatch.StartNew();
+            var stopwatch = Stopwatch.StartNew(); // Iniciar medición de tiempo
 
             try
             {
-                // Capturar información del entorno y request
-                await CaptureEnvironmentInfoAsync(context);
-                await CaptureRequestInfoAsync(context);
+                // 1️⃣ Asegurar que exista un ExecutionId único para la solicitud
+                if (!context.Items.ContainsKey("ExecutionId"))
+                {
+                    context.Items["ExecutionId"] = Guid.NewGuid().ToString();
+                }
 
-                // Guardar logs de inicio de ejecución en el archivo correspondiente
-                _loggingService.SaveLogsToFile();
+                // 2️⃣ Capturar información de entorno y request
+                _loggingService.WriteLog(context, _loggingService.FormatEnvironmentInfoStart());
+                _loggingService.WriteLog(context, await CaptureRequestInfoAsync(context));
 
-                // Continuar con la ejecución del siguiente middleware en la cadena
-                await _next(context);
+                // 3️⃣ Reemplazar el Stream original de respuesta para capturarla
+                var originalBodyStream = context.Response.Body;
+                using (var responseBody = new MemoryStream())
+                {
+                    context.Response.Body = responseBody;
 
-                // Capturar la respuesta HTTP después de procesar la solicitud
-                await CaptureResponseInfoAsync(context);
+                    // 4️⃣ Continuar con la ejecución del pipeline
+                    await _next(context);
+
+                    // 5️⃣ Capturar la respuesta y agregarla al log
+                    _loggingService.WriteLog(context, await CaptureResponseInfoAsync(context));
+
+                    // 6️⃣ Restaurar el stream original para que el API pueda responder correctamente
+                    responseBody.Seek(0, SeekOrigin.Begin);
+                    await responseBody.CopyToAsync(originalBodyStream);
+                }
+
+                // 7️⃣ Verificar si hubo alguna excepción en la ejecución y loguearla
+                if (context.Items.ContainsKey("Exception"))
+                {
+                    Exception ex = context.Items["Exception"] as Exception;
+                    _loggingService.AddExceptionLog(ex);
+                }
             }
             catch (Exception ex)
             {
-                // Capturar errores y guardarlos en el log
+                // 8️⃣ Manejo de excepciones para evitar que el middleware interrumpa la API
                 _loggingService.AddExceptionLog(ex);
             }
             finally
             {
-                // Detener el cronómetro y registrar el tiempo total de ejecución
+                // 9️⃣ Detener el cronómetro y registrar el tiempo total de ejecución
                 stopwatch.Stop();
-                _loggingService.AddSingleLog($"[Tiempo Total de Ejecución]: {stopwatch.ElapsedMilliseconds} ms");
+                _loggingService.WriteLog(context, $"[Tiempo Total de Ejecución]: {stopwatch.ElapsedMilliseconds} ms");
 
-                // Guardar todos los logs en el archivo definitivo
+                // 🔟 Guardar todos los logs en un solo archivo consolidado
                 _loggingService.SaveLogsToFile();
             }
         }
 
         /// <summary>
-        /// Captura información del entorno, como la máquina y el entorno de ejecución.
+        /// Captura información detallada de la solicitud HTTP.
         /// </summary>
-        private async Task CaptureEnvironmentInfoAsync(HttpContext context)
-        {
-            var envInfo = new
-            {
-                MachineName = Environment.MachineName,
-                OS = Environment.OSVersion.ToString(),
-                Framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
-                Timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
-            };
-
-            string formattedEnvInfo = JsonSerializer.Serialize(envInfo, new JsonSerializerOptions { WriteIndented = true });
-            _loggingService.AddSingleLog($"[Environment Info]: {formattedEnvInfo}");
-        }
-
-        /// <summary>
-        /// Captura información de la solicitud HTTP.
-        /// </summary>
-        private async Task CaptureRequestInfoAsync(HttpContext context)
+        private async Task<string> CaptureRequestInfoAsync(HttpContext context)
         {
             var request = context.Request;
             var requestInfo = new
@@ -95,14 +100,13 @@ namespace Logging.Middleware
                 Body = await ReadRequestBodyAsync(request)
             };
 
-            string formattedRequest = JsonSerializer.Serialize(requestInfo, new JsonSerializerOptions { WriteIndented = true });
-            _loggingService.AddSingleLog($"[Request Info]: {formattedRequest}");
+            return _loggingService.FormatRequestInfo(requestInfo);
         }
 
         /// <summary>
-        /// Captura información de la respuesta HTTP.
+        /// Captura información detallada de la respuesta HTTP.
         /// </summary>
-        private async Task CaptureResponseInfoAsync(HttpContext context)
+        private async Task<string> CaptureResponseInfoAsync(HttpContext context)
         {
             var response = context.Response;
             var responseInfo = new
@@ -111,8 +115,7 @@ namespace Logging.Middleware
                 Headers = response.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
             };
 
-            string formattedResponse = JsonSerializer.Serialize(responseInfo, new JsonSerializerOptions { WriteIndented = true });
-            _loggingService.AddSingleLog($"[Response Info]: {formattedResponse}");
+            return _loggingService.FormatResponseInfo(responseInfo);
         }
 
         /// <summary>
@@ -123,7 +126,7 @@ namespace Logging.Middleware
             request.EnableBuffering();
             using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
             string body = await reader.ReadToEndAsync();
-            request.Body.Position = 0; // Restablecer la posición del stream para que pueda ser leído nuevamente
+            request.Body.Position = 0; // Restablecer el Stream para que pueda ser leído nuevamente
             return body;
         }
     }
