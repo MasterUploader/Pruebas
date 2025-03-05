@@ -7,7 +7,7 @@
     {
         private readonly RequestDelegate _next;
         private readonly ILoggingService _loggingService;
-        private readonly LogFormatter _logFormatter; // Se usa directamente LogFormatter
+        private readonly LogFormatter _logFormatter; // Instancia de formateador de logs
 
         /// <summary>
         /// Constructor del Middleware que recibe el servicio de logs inyectado.
@@ -16,7 +16,7 @@
         {
             _next = next ?? throw new ArgumentNullException(nameof(next));
             _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
-            _logFormatter = new LogFormatter(); // Se instancia directamente
+            _logFormatter = new LogFormatter(); // Instancia del formateador
         }
 
         /// <summary>
@@ -35,7 +35,8 @@
                 }
 
                 // 2️⃣ Capturar información del entorno y escribirlo en el log
-                await CaptureEnvironmentInfoAsync(context);
+                string envLog = await CaptureEnvironmentInfoAsync(context);
+                _loggingService.WriteLog(context, envLog);
 
                 // 3️⃣ Capturar y escribir en el log la información de la solicitud HTTP
                 string requestLog = await CaptureRequestInfoAsync(context);
@@ -80,57 +81,58 @@
         }
 
         /// <summary>
-        /// Captura información del entorno y lo escribe en el log.
+        /// Captura la información del entorno del servidor y del cliente.
         /// </summary>
-        private async Task CaptureEnvironmentInfoAsync(HttpContext context)
+        private async Task<string> CaptureEnvironmentInfoAsync(HttpContext context)
         {
-            string envLog = await _logFormatter.FormatEnvironmentInfoAsync();
-            _loggingService.WriteLog(context, envLog);
+            return LogFormatter.FormatEnvironmentInfoStart(
+                application: context.RequestServices.GetService<IHostEnvironment>()?.ApplicationName ?? "Desconocido",
+                env: context.RequestServices.GetService<IHostEnvironment>()?.EnvironmentName ?? "Desconocido",
+                contentRoot: context.RequestServices.GetService<IHostEnvironment>()?.ContentRootPath ?? "Desconocido",
+                executionId: context.TraceIdentifier ?? "Desconocido",
+                clientIp: context.Connection.RemoteIpAddress?.ToString() ?? "Desconocido",
+                userAgent: context.Request.Headers["User-Agent"].ToString() ?? "Desconocido",
+                machineName: Environment.MachineName,
+                os: Environment.OSVersion.ToString(),
+                host: context.Request.Host.ToString() ?? "Desconocido",
+                distribution: "N/A"
+            );
         }
 
         /// <summary>
-        /// Captura información detallada de la solicitud HTTP.
+        /// Captura la información de la solicitud HTTP antes de que sea procesada por los controladores.
         /// </summary>
         private async Task<string> CaptureRequestInfoAsync(HttpContext context)
         {
-            var request = context.Request;
-            var requestInfo = new
-            {
-                Method = request.Method,
-                Path = request.Path,
-                Query = request.QueryString.ToString(),
-                Headers = request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString()),
-                Body = await ReadRequestBodyAsync(request)
-            };
+            context.Request.EnableBuffering(); // Permite leer el cuerpo de la petición sin afectar la ejecución
 
-            return _logFormatter.FormatRequestInfo(requestInfo);
+            using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
+            string body = await reader.ReadToEndAsync();
+            context.Request.Body.Position = 0; // Restablece la posición para que el controlador pueda leerlo
+
+            return LogFormatter.FormatRequestInfo(
+                method: context.Request.Method,
+                path: context.Request.Path,
+                queryParams: context.Request.QueryString.ToString(),
+                body: body
+            );
         }
 
         /// <summary>
-        /// Captura información detallada de la respuesta HTTP.
+        /// Captura la información de la respuesta HTTP antes de enviarla al cliente.
         /// </summary>
         private async Task<string> CaptureResponseInfoAsync(HttpContext context)
         {
-            var response = context.Response;
-            var responseInfo = new
-            {
-                StatusCode = response.StatusCode,
-                Headers = response.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
-            };
-
-            return _logFormatter.FormatResponseInfo(responseInfo);
-        }
-
-        /// <summary>
-        /// Lee el cuerpo de la solicitud HTTP sin afectar el flujo de la aplicación.
-        /// </summary>
-        private async Task<string> ReadRequestBodyAsync(HttpRequest request)
-        {
-            request.EnableBuffering();
-            using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+            using var reader = new StreamReader(context.Response.Body, Encoding.UTF8, leaveOpen: true);
             string body = await reader.ReadToEndAsync();
-            request.Body.Position = 0; // Restablecer el Stream para que pueda ser leído nuevamente
-            return body;
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+
+            return LogFormatter.FormatResponseInfo(
+                statusCode: context.Response.StatusCode.ToString(),
+                headers: string.Join("; ", context.Response.Headers),
+                body: body
+            );
         }
     }
 
