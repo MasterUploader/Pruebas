@@ -1,93 +1,44 @@
 /// <summary>
-/// Captura la información del entorno del servidor y del cliente.
+/// Formatea la información de inicio del entorno donde se ejecuta la aplicación.
+/// Incluye datos del sistema operativo, máquina, entorno, y cliente.
 /// </summary>
-private async Task<string> CaptureEnvironmentInfoAsync(HttpContext context)
+public static string FormatEnvironmentInfoStart(
+    string application, string env, string contentRoot, string executionId,
+    string clientIp, string userAgent, string machineName, string os,
+    string host, string distribution)
 {
-    return LogFormatter.FormatEnvironmentInfoStart(
-        application: context.RequestServices.GetService<IHostEnvironment>()?.ApplicationName ?? "Desconocido",
-        env: context.RequestServices.GetService<IHostEnvironment>()?.EnvironmentName ?? "Desconocido",
-        contentRoot: context.RequestServices.GetService<IHostEnvironment>()?.ContentRootPath ?? "Desconocido",
-        executionId: context.TraceIdentifier ?? "Desconocido",
-        clientIp: context.Connection.RemoteIpAddress?.ToString() ?? "Desconocido",
-        userAgent: context.Request.Headers["User-Agent"].ToString() ?? "Desconocido",
-        machineName: Environment.MachineName,
-        os: Environment.OSVersion.ToString(),
-        host: context.Request.Host.ToString() ?? "Desconocido",
-        distribution: "N/A"
-    );
+    var sb = new StringBuilder();
+
+    sb.AppendLine("---------------------------Enviroment Info-------------------------");
+    sb.AppendLine($"Inicio: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+    sb.AppendLine("-------------------------------------------------------------------");
+    sb.AppendLine($"Application: {application}");
+    sb.AppendLine($"Environment: {env}");
+    sb.AppendLine($"ContentRoot: {contentRoot}");
+    sb.AppendLine($"Execution ID: {executionId}");
+    sb.AppendLine($"Client IP: {clientIp}");
+    sb.AppendLine($"User Agent: {userAgent}");
+    sb.AppendLine($"Machine Name: {machineName}");
+    sb.AppendLine($"OS: {os}");
+    sb.AppendLine($"Host: {host}");
+    sb.AppendLine($"Distribución: {distribution}");
+    sb.AppendLine("----------------------------Enviroment Info-------------------------");
+
+    return sb.ToString();
 }
 
 
 
-public async Task InvokeAsync(HttpContext context)
+/// <summary>
+/// Formatea la sección de cierre de la información del entorno.
+/// </summary>
+public static string FormatEnvironmentInfoEnd()
 {
-    string executionId = Guid.NewGuid().ToString();
-    context.Items["ExecutionId"] = executionId; // Guardamos el ID en Items para trazabilidad
+    var sb = new StringBuilder();
 
-    // 1️⃣ Capturar la información del entorno y escribirla en el log
-    string environmentLog = await CaptureEnvironmentInfoAsync(context);
-    _loggingService.WriteLog(context, environmentLog);
+    sb.AppendLine("---------------------------Enviroment Info-------------------------");
+    sb.AppendLine($"Fin: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+    sb.AppendLine("-------------------------------------------------------------------");
 
-    // 2️⃣ Capturar la información del Request y escribirla en el log
-    string requestLog = await CaptureRequestInfoAsync(context);
-    _loggingService.WriteLog(context, requestLog);
-
-    var originalBodyStream = context.Response.Body;
-    using (var responseBody = new MemoryStream())
-    {
-        context.Response.Body = responseBody;
-
-        await _next(context); // Llamar al siguiente middleware
-
-        // 3️⃣ Capturar la respuesta HTTP y escribirla en el log
-        string responseLog = await CaptureResponseInfoAsync(context);
-        _loggingService.WriteLog(context, responseLog);
-
-        // Restaurar el cuerpo de la respuesta
-        responseBody.Seek(0, SeekOrigin.Begin);
-        await responseBody.CopyToAsync(originalBodyStream);
-    }
-
-    // 4️⃣ Capturar las excepciones si ocurrieron
-    if (context.Items.ContainsKey("Exception"))
-    {
-        Exception ex = context.Items["Exception"] as Exception;
-        _loggingService.AddExceptionLog(ex);
-    }
-}
-
-
-
-
-public void WriteLog(HttpContext context, string logContent)
-{
-    try
-    {
-        string filePath = GetCurrentLogFile();
-        bool isNewFile = !File.Exists(filePath);
-
-        var logBuilder = new StringBuilder();
-
-        // Si es la primera vez que escribimos en este archivo, agregamos la cabecera
-        if (isNewFile)
-        {
-            logBuilder.AppendLine(LogFormatter.FormatBeginLog());
-        }
-
-        // Agregamos el contenido del log
-        logBuilder.AppendLine(logContent);
-
-        // Si es la última entrada del log, agregamos el cierre
-        if (context.Response.HasStarted)
-        {
-            logBuilder.AppendLine(LogFormatter.FormatEndLog());
-        }
-
-        // Guardamos el log en el archivo
-        LogHelper.WriteLogToFile(_logDirectory, filePath, logBuilder.ToString());
-    }
-    catch (Exception ex)
-    {
-        LogInternalError(ex);
-    }
+    return sb.ToString();
 }
