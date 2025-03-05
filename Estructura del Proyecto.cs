@@ -41,7 +41,7 @@ namespace Logging.Middleware
                     context.Items["ExecutionId"] = Guid.NewGuid().ToString();
                 }
 
-                // 2️⃣ Capturar información de entorno y request
+                // 2️⃣ Capturar información del entorno y request
                 _loggingService.WriteLog(context, _loggingService.FormatEnvironmentInfoStart());
                 _loggingService.WriteLog(context, await CaptureRequestInfoAsync(context));
 
