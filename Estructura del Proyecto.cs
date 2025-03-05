@@ -1,43 +1,91 @@
-public async Task InvokeAsync(HttpContext context)
+using Microsoft.AspNetCore.Mvc.Filters;
+using System.Diagnostics;
+using Logging.Abstractions;
+
+namespace Logging.Filters
 {
-    try
+    /// <summary>
+    /// Filtro de acción que se ejecuta antes y después de la ejecución de una acción en un controlador.
+    /// Captura información como parámetros de entrada, salida, tiempos de ejecución y errores.
+    /// </summary>
+    public class LoggingActionFilter : IAsyncActionFilter
     {
-        if (!context.Items.ContainsKey("ExecutionId"))
+        private readonly ILoggingService _loggingService;
+        private Stopwatch _stopwatch; // Para medir el tiempo de ejecución de la acción
+
+        /// <summary>
+        /// Constructor: Recibe `ILoggingService` a través de inyección de dependencias.
+        /// </summary>
+        public LoggingActionFilter(ILoggingService loggingService)
         {
-            string executionId = Guid.NewGuid().ToString();
-            context.Items["ExecutionId"] = executionId;
+            _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
         }
 
-        _ = _loggingService.GetCurrentLogFile();
-
-        string environmentLog = await CaptureEnvironmentInfoAsync(context);
-        _loggingService.WriteLog(context, environmentLog);
-
-        string requestLog = await CaptureRequestInfoAsync(context);
-        _loggingService.WriteLog(context, requestLog);
-
-        var originalBodyStream = context.Response.Body;
-        using (var responseBody = new MemoryStream())
+        /// <summary>
+        /// Se ejecuta antes y después de la acción del controlador.
+        /// Registra los parámetros de entrada y la información de inicio.
+        /// </summary>
+        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            context.Response.Body = responseBody;
+            try
+            {
+                _stopwatch = Stopwatch.StartNew(); // Iniciar medición del tiempo de ejecución
+                
+                // Capturar el nombre del controlador y acción
+                string controllerName = context.ActionDescriptor.RouteValues["controller"] ?? "Desconocido";
+                string actionName = context.ActionDescriptor.RouteValues["action"] ?? "Desconocido";
+                string methodName = $"{controllerName}.{actionName}";
 
-            await _next(context); // Llamar al siguiente middleware
+                // Capturar los parámetros de entrada
+                string inputParams = context.ActionArguments.Any()
+                    ? string.Join(Environment.NewLine, context.ActionArguments.Select(arg => $"{arg.Key}: {arg.Value}"))
+                    : "Sin parámetros de entrada";
 
-            string responseLog = await CaptureResponseInfoAsync(context);
-            _loggingService.WriteLog(context, responseLog);
+                // Escribir en el log la información inicial
+                _loggingService.AddSingleLog($"[Inicio de Acción] {methodName} | Parámetros de entrada: {inputParams}");
 
-            responseBody.Seek(0, SeekOrigin.Begin);
-            await responseBody.CopyToAsync(originalBodyStream);
+                // Continuar con la ejecución del siguiente middleware
+                var executedContext = await next();
+
+                // Capturar los datos de salida después de la ejecución
+                await OnActionExecutedAsync(executedContext);
+            }
+            catch (Exception ex)
+            {
+                _loggingService.AddExceptionLog(ex);
+            }
         }
 
-        if (context.Items.ContainsKey("Exception"))
+        /// <summary>
+        /// Se ejecuta después de que la acción del controlador ha terminado.
+        /// Registra los parámetros de salida y el tiempo de ejecución.
+        /// </summary>
+        private async Task OnActionExecutedAsync(ActionExecutedContext context)
         {
-            Exception ex = context.Items["Exception"] as Exception;
-            _loggingService.AddExceptionLog(ex);
+            try
+            {
+                _stopwatch.Stop(); // Detener la medición del tiempo
+
+                // Capturar el nombre del controlador y acción
+                string controllerName = context.ActionDescriptor.RouteValues["controller"] ?? "Desconocido";
+                string actionName = context.ActionDescriptor.RouteValues["action"] ?? "Desconocido";
+                string methodName = $"{controllerName}.{actionName}";
+
+                // Capturar la respuesta del método
+                string outputParams = "Sin datos de salida";
+                if (context.Result is ObjectResult objectResult && objectResult.Value != null)
+                {
+                    outputParams = System.Text.Json.JsonSerializer.Serialize(objectResult.Value, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                }
+
+                // Guardar los datos en el log
+                _loggingService.AddSingleLog($"[Fin de Acción] {methodName} | Parámetros de salida: {outputParams}");
+                _loggingService.AddSingleLog($"[Tiempo de ejecución] {methodName} | { _stopwatch.ElapsedMilliseconds} ms");
+            }
+            catch (Exception ex)
+            {
+                _loggingService.AddExceptionLog(ex);
+            }
         }
-    }
-    catch (Exception ex)
-    {
-        _loggingService.AddExceptionLog(ex);
     }
 }
