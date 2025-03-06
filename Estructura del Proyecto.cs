@@ -1,58 +1,41 @@
-using System;
-using System.Diagnostics;
-using Castle.DynamicProxy;
-using Logging.Abstractions;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-
-public class LogMethodExecutionInterceptor : IInterceptor
+/// <summary>
+/// Registra un objeto en los logs con un nombre descriptivo.
+/// </summary>
+/// <param name="objectName">Nombre descriptivo del objeto.</param>
+/// <param name="logObject">Objeto a registrar.</param>
+public void AddObjLog(string objectName, object logObject)
 {
-    private readonly IHttpContextAccessor _httpContextAccessor;
-
-    public LogMethodExecutionInterceptor(IHttpContextAccessor httpContextAccessor)
+    try
     {
-        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+        string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
+        LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
     }
-
-    public void Intercept(IInvocation invocation)
+    catch (Exception ex)
     {
-        var httpContext = _httpContextAccessor.HttpContext;
+        LogInternalError(ex);
+    }
+}
 
-        if (httpContext == null)
-        {
-            throw new InvalidOperationException("HttpContext is not available.");
-        }
+/// <summary>
+/// Registra un objeto en los logs sin necesidad de un nombre específico.
+/// Se intentará capturar automáticamente el tipo de objeto.
+/// </summary>
+/// <param name="logObject">Objeto a registrar.</param>
+public void AddObjLog(object logObject)
+{
+    try
+    {
+        // Obtener el nombre del tipo del objeto
+        string objectName = logObject?.GetType().Name ?? "ObjetoDesconocido";
 
-        var loggingService = httpContext.RequestServices.GetService<ILoggingService>();
+        // Convertir objeto a JSON o XML según el formato
+        string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
 
-        if (loggingService == null)
-        {
-            throw new InvalidOperationException("ILoggingService is not registered in DI.");
-        }
-
-        var methodName = invocation.Method.Name;
-        var className = invocation.TargetType.Name;
-
-        // Registrar inicio del método
-        loggingService.AddSingleLog($"Inicio de ejecución del método {className}.{methodName}");
-
-        var stopwatch = Stopwatch.StartNew();
-
-        try
-        {
-            invocation.Proceed();
-            stopwatch.Stop();
-
-            // Registrar parámetros de salida
-            var outputParams = invocation.ReturnValue;
-            loggingService.AddOutputParameters(className, methodName, outputParams);
-
-            loggingService.AddSingleLog($"Método {className}.{methodName} ejecutado en {stopwatch.ElapsedMilliseconds} ms");
-        }
-        catch (Exception ex)
-        {
-            loggingService.AddExceptionLog(ex);
-            throw;
-        }
+        // Guardar el log en archivo
+        LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+    }
+    catch (Exception ex)
+    {
+        LogInternalError(ex);
     }
 }
