@@ -5,20 +5,25 @@ using Logging.Abstractions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
-public class LogMethodExecutionAttribute : Attribute, IInterceptor
+public class LogMethodExecutionInterceptor : IInterceptor
 {
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public LogMethodExecutionInterceptor(IHttpContextAccessor httpContextAccessor)
+    {
+        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+    }
+
     public void Intercept(IInvocation invocation)
     {
-        var httpContextAccessor = invocation.InvocationTarget as IHttpContextAccessor;
+        var httpContext = _httpContextAccessor.HttpContext;
 
-        if (httpContextAccessor == null)
+        if (httpContext == null)
         {
-            throw new InvalidOperationException("IHttpContextAccessor is not available.");
+            throw new InvalidOperationException("HttpContext is not available.");
         }
 
-        var httpContext = httpContextAccessor.HttpContext;
-        var loggingService = httpContext?.RequestServices.GetService<ILoggingService>();
+        var loggingService = httpContext.RequestServices.GetService<ILoggingService>();
 
         if (loggingService == null)
         {
