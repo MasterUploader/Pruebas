@@ -26,23 +26,23 @@ builder.Services.AddTransient<LogMethodExecutionInterceptor>();
 // - Clases del sistema
 // - Clases marcadas con [NonIntercepted]
 builder.Services.Scan(scan => scan
-    .FromAssemblyOf<LoggingService>() // Se escanea desde el ensamblado actual
+    .FromAssemblyOf<LoggingService>() // Escanea desde el ensamblado actual
     .AddClasses(classes => classes
-        .Where(type => 
-            type.Namespace != null &&  // Evita clases sin namespace
+        .Where(type =>
+            type.Namespace != null && // Evita clases sin namespace
             !type.Namespace.StartsWith("System") && // Excluye clases del sistema
             !type.IsDefined(typeof(NonInterceptedAttribute), false))) // Excluye clases con [NonIntercepted]
     .AsSelf()
     .WithTransientLifetime()
-    .OnActivated(context =>
+    .ConfigureServices((context, descriptor) =>
     {
         var proxyGenerator = context.GetRequiredService<IProxyGenerator>();
         var interceptor = context.GetRequiredService<LogMethodExecutionInterceptor>();
 
         // Reemplaza la instancia original con su proxy
-        var instanceType = context.Instance.GetType();
-        var proxy = proxyGenerator.CreateClassProxyWithTarget(instanceType, context.Instance, interceptor);
-        context.ReplaceInstance(proxy);
+        context.TryAddEnumerable(ServiceDescriptor.Transient(descriptor.ServiceType, provider =>
+            proxyGenerator.CreateClassProxyWithTarget(descriptor.ServiceType, provider.GetRequiredService(descriptor.ServiceType), interceptor)
+        ));
     })
 );
 
