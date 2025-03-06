@@ -1,65 +1,53 @@
+using System;
+using System.Diagnostics;
 using Castle.DynamicProxy;
 using Logging.Abstractions;
-using Logging.Filters;
-using Logging.Services;
-using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Scrutor;
-using System;
-using System.Linq;
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Registrar IHttpContextAccessor
-builder.Services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
-
-// Registrar servicios de logging
-builder.Services.AddSingleton<ILoggingService, LoggingService>();
-
-// Registrar el generador de proxies de Castle
-builder.Services.AddSingleton<IProxyGenerator, ProxyGenerator>();
-
-// Registrar el interceptor
-builder.Services.AddTransient<LogMethodExecutionInterceptor>();
-
-// Escanear y registrar todas las clases del ensamblado, excluyendo:
-// - Clases del sistema
-// - Clases marcadas con [NonIntercepted]
-builder.Services.Scan(scan => scan
-    .FromAssemblyOf<LoggingService>()
-    .AddClasses(classes => classes
-        .Where(type =>
-            type.Namespace != null &&
-            !type.Namespace.StartsWith("System") &&
-            !type.IsDefined(typeof(NonInterceptedAttribute), false)))
-    .AsSelf()
-    .WithTransientLifetime()
-);
-
-// Construir la aplicación
-var app = builder.Build();
-
-// Aplicar la interceptación después de construir la app
-using (var scope = app.Services.CreateScope())
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+public class LogMethodExecutionAttribute : Attribute, IInterceptor
 {
-    var proxyGenerator = scope.ServiceProvider.GetRequiredService<IProxyGenerator>();
-    var interceptor = scope.ServiceProvider.GetRequiredService<LogMethodExecutionInterceptor>();
-
-    foreach (var serviceDescriptor in builder.Services)
+    public void Intercept(IInvocation invocation)
     {
-        if (serviceDescriptor.ServiceType.Namespace != null &&
-            !serviceDescriptor.ServiceType.Namespace.StartsWith("System") &&
-            !serviceDescriptor.ServiceType.IsDefined(typeof(NonInterceptedAttribute), false))
+        var httpContextAccessor = invocation.InvocationTarget as IHttpContextAccessor;
+
+        if (httpContextAccessor == null)
         {
-            var implementation = scope.ServiceProvider.GetRequiredService(serviceDescriptor.ServiceType);
-            var proxy = proxyGenerator.CreateClassProxyWithTarget(serviceDescriptor.ServiceType, implementation, interceptor);
-            builder.Services.AddTransient(_ => proxy);
+            throw new InvalidOperationException("IHttpContextAccessor is not available.");
+        }
+
+        var httpContext = httpContextAccessor.HttpContext;
+        var loggingService = httpContext?.RequestServices.GetService<ILoggingService>();
+
+        if (loggingService == null)
+        {
+            throw new InvalidOperationException("ILoggingService is not registered in DI.");
+        }
+
+        var methodName = invocation.Method.Name;
+        var className = invocation.TargetType.Name;
+
+        // Registrar inicio del método
+        loggingService.AddSingleLog($"Inicio de ejecución del método {className}.{methodName}");
+
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            invocation.Proceed();
+            stopwatch.Stop();
+
+            // Registrar parámetros de salida
+            var outputParams = invocation.ReturnValue;
+            loggingService.AddOutputParameters(className, methodName, outputParams);
+
+            loggingService.AddSingleLog($"Método {className}.{methodName} ejecutado en {stopwatch.ElapsedMilliseconds} ms");
+        }
+        catch (Exception ex)
+        {
+            loggingService.AddExceptionLog(ex);
+            throw;
         }
     }
 }
-
-// Agregar el middleware de logging
-app.UseMiddleware<LoggingMiddleware>();
-
-// Ejecutar la aplicación
-app.Run();
