@@ -26,27 +26,40 @@ builder.Services.AddTransient<LogMethodExecutionInterceptor>();
 // - Clases del sistema
 // - Clases marcadas con [NonIntercepted]
 builder.Services.Scan(scan => scan
-    .FromAssemblyOf<LoggingService>() // Escanea desde el ensamblado actual
+    .FromAssemblyOf<LoggingService>()
     .AddClasses(classes => classes
         .Where(type =>
-            type.Namespace != null && // Evita clases sin namespace
-            !type.Namespace.StartsWith("System") && // Excluye clases del sistema
-            !type.IsDefined(typeof(NonInterceptedAttribute), false))) // Excluye clases con [NonIntercepted]
+            type.Namespace != null &&
+            !type.Namespace.StartsWith("System") &&
+            !type.IsDefined(typeof(NonInterceptedAttribute), false)))
     .AsSelf()
     .WithTransientLifetime()
-    .ConfigureServices((context, descriptor) =>
-    {
-        var proxyGenerator = context.GetRequiredService<IProxyGenerator>();
-        var interceptor = context.GetRequiredService<LogMethodExecutionInterceptor>();
-
-        // Reemplaza la instancia original con su proxy
-        context.TryAddEnumerable(ServiceDescriptor.Transient(descriptor.ServiceType, provider =>
-            proxyGenerator.CreateClassProxyWithTarget(descriptor.ServiceType, provider.GetRequiredService(descriptor.ServiceType), interceptor)
-        ));
-    })
 );
 
+// Construir la aplicación
 var app = builder.Build();
+
+// Aplicar la interceptación después de construir la app
+using (var scope = app.Services.CreateScope())
+{
+    var proxyGenerator = scope.ServiceProvider.GetRequiredService<IProxyGenerator>();
+    var interceptor = scope.ServiceProvider.GetRequiredService<LogMethodExecutionInterceptor>();
+
+    foreach (var serviceDescriptor in builder.Services)
+    {
+        if (serviceDescriptor.ServiceType.Namespace != null &&
+            !serviceDescriptor.ServiceType.Namespace.StartsWith("System") &&
+            !serviceDescriptor.ServiceType.IsDefined(typeof(NonInterceptedAttribute), false))
+        {
+            var implementation = scope.ServiceProvider.GetRequiredService(serviceDescriptor.ServiceType);
+            var proxy = proxyGenerator.CreateClassProxyWithTarget(serviceDescriptor.ServiceType, implementation, interceptor);
+            builder.Services.AddTransient(_ => proxy);
+        }
+    }
+}
+
+// Agregar el middleware de logging
 app.UseMiddleware<LoggingMiddleware>();
 
+// Ejecutar la aplicación
 app.Run();
