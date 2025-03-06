@@ -1,41 +1,46 @@
-/// <summary>
-/// Registra un objeto en los logs con un nombre descriptivo.
-/// </summary>
-/// <param name="objectName">Nombre descriptivo del objeto.</param>
-/// <param name="logObject">Objeto a registrar.</param>
-public void AddObjLog(string objectName, object logObject)
+public async Task OnActionExecutedAsync(ActionExecutedContext context)
 {
-    try
+    // Si la respuesta es un ObjectResult, extrae el valor y guárdalo en HttpContext.Items
+    if (context.Result is ObjectResult objectResult)
     {
-        string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
-        LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+        context.HttpContext.Items["ResponseObject"] = objectResult.Value;
     }
-    catch (Exception ex)
-    {
-        LogInternalError(ex);
-    }
+
+    await Task.CompletedTask; // No es necesario ejecutar más lógica aquí
 }
 
-/// <summary>
-/// Registra un objeto en los logs sin necesidad de un nombre específico.
-/// Se intentará capturar automáticamente el tipo de objeto.
-/// </summary>
-/// <param name="logObject">Objeto a registrar.</param>
-public void AddObjLog(object logObject)
+
+
+private async Task<string> CaptureResponseInfoAsync(HttpContext context)
 {
-    try
-    {
-        // Obtener el nombre del tipo del objeto
-        string objectName = logObject?.GetType().Name ?? "ObjetoDesconocido";
+    context.Response.Body.Seek(0, SeekOrigin.Begin);
+    using var reader = new StreamReader(context.Response.Body, Encoding.UTF8, leaveOpen: true);
+    string body = await reader.ReadToEndAsync();
+    context.Response.Body.Seek(0, SeekOrigin.Begin);
 
-        // Convertir objeto a JSON o XML según el formato
-        string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
+    string formattedResponse;
 
-        // Guardar el log en archivo
-        LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
-    }
-    catch (Exception ex)
+    // Usar el objeto guardado en context.Items si existe
+    if (context.Items.ContainsKey("ResponseObject"))
     {
-        LogInternalError(ex);
+        var responseObject = context.Items["ResponseObject"];
+        formattedResponse = LogFormatter.FormatResponseInfo(
+            statusCode: context.Response.StatusCode.ToString(),
+            headers: string.Join("; ", context.Response.Headers),
+            body: responseObject != null 
+                ? JsonSerializer.Serialize(responseObject, new JsonSerializerOptions { WriteIndented = true }) 
+                : "null"
+        );
     }
+    else
+    {
+        // Si no se interceptó el ObjectResult, usar el cuerpo normal
+        formattedResponse = LogFormatter.FormatResponseInfo(
+            statusCode: context.Response.StatusCode.ToString(),
+            headers: string.Join("; ", context.Response.Headers),
+            body: body
+        );
+    }
+
+    return formattedResponse;
 }
