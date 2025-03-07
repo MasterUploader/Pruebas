@@ -1,14 +1,8 @@
-<asp:SqlDataSource 
-    ID="SqlDBGridView" 
-    runat="server" 
-    ConnectionString="<%$ ConnectionStrings:TuConexion %>" 
-    SelectCommand="SELECT CODCCO, NOMAGE FROM BCAH96DTA.RSAGE01"
-    UpdateCommand="UPDATE BCAH96DTA.RSAGE01 
-                   SET NOMAGE = @Nombre 
-                   WHERE CODCCO = @CODCCO">
-    
-    <UpdateParameters>
-        <asp:Parameter Name="Nombre" Type="String" />
-        <asp:Parameter Name="CODCCO" Type="Int32" />
-    </UpdateParameters>
-</asp:SqlDataSource>
+<asp:TemplateField HeaderText="NOMBRE" SortExpression="NOMAGE">
+    <ItemTemplate>
+        <asp:Label ID="lblNombre" runat="server" Text='<%# Bind("NOMAGE") %>'></asp:Label>
+    </ItemTemplate>
+    <EditItemTemplate>
+        <asp:TextBox ID="txtNombre" runat="server" Text='<%# Bind("NOMAGE") %>'></asp:TextBox>
+    </EditItemTemplate>
+</asp:TemplateField>
