@@ -1,41 +1,46 @@
-public async Task InvokeAsync(HttpContext context)
-{
-    // Iniciar medición del tiempo de ejecución
-    var stopwatch = Stopwatch.StartNew();
+<asp:SqlDataSource 
+    ID="SqlDBGridView" 
+    runat="server" 
+    ConnectionString="<%$ ConnectionStrings:TuConexion %>" 
+    UpdateCommand="UPDATE BCAH96DTA.RSAGE01 
+                   SET NOMAGE = @descripcion, 
+                       zona = @zona, 
+                       marquesina = @marque, 
+                       rstbranch = @rstbrch, 
+                       NOMBD = @nombd 
+                   WHERE CODCCO = @codcco">
+    <UpdateParameters>
+        <asp:Parameter Name="descripcion" Type="String" />
+        <asp:Parameter Name="zona" Type="Int32" />
+        <asp:Parameter Name="marque" Type="String" />
+        <asp:Parameter Name="rstbrch" Type="String" />
+        <asp:Parameter Name="nombd" Type="String" />
+        <asp:Parameter Name="codcco" Type="Int32" />
+    </UpdateParameters>
+</asp:SqlDataSource>
 
+
+private bool actualizarAgencia(int codcco, string descripcion, int zona, string marque, 
+                               string rstbrch, string nombd)
+{
     try
     {
-        // Capturar información del entorno y request
-        await CaptureEnvironmentInfoAsync(context);
-        await CaptureRequestInfoAsync(context);
+        // Asigna los valores a los parámetros del SqlDataSource
+        SqlDBGridView.UpdateParameters["descripcion"].DefaultValue = descripcion;
+        SqlDBGridView.UpdateParameters["zona"].DefaultValue = zona.ToString();
+        SqlDBGridView.UpdateParameters["marque"].DefaultValue = marque;
+        SqlDBGridView.UpdateParameters["rstbrch"].DefaultValue = rstbrch;
+        SqlDBGridView.UpdateParameters["nombd"].DefaultValue = nombd;
+        SqlDBGridView.UpdateParameters["codcco"].DefaultValue = codcco.ToString();
 
-        // Guardar logs de inicio de ejecución
-        _loggingService.WriteLog(context, "Inicio de ejecución");
+        // Ejecutar actualización
+        SqlDBGridView.Update();
 
-        // Clonar el body de la respuesta
-        var originalBodyStream = context.Response.Body;
-        using var responseBody = new MemoryStream();
-        context.Response.Body = responseBody;
-
-        // Continuar con la ejecución del siguiente middleware
-        await _next(context);
-
-        // Capturar la respuesta HTTP después de procesar la solicitud
-        string responseLog = await CaptureResponseInfoAsync(context);
-        _loggingService.WriteLog(context, responseLog);
-
-        // Copiar el contenido de vuelta al stream original
-        responseBody.Seek(0, SeekOrigin.Begin);
-        await responseBody.CopyToAsync(originalBodyStream);
+        return true; // Si no hay errores, retorna true
     }
     catch (Exception ex)
     {
-        _loggingService.AddExceptionLog(ex);
-    }
-    finally
-    {
-        stopwatch.Stop();
-        _loggingService.AddSingleLog($"Tiempo Total de Ejecución: {stopwatch.ElapsedMilliseconds} ms");
-        _loggingService.WriteLog(context, "Fin de ejecución");
+        error = ex.Message;
+        return false;
     }
 }
