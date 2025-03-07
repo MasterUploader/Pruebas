@@ -1,36 +1,3 @@
-/// <summary>
-/// Captura la información de la respuesta HTTP antes de enviarla al cliente.
-/// </summary>
-/// <param name="context">Contexto HTTP de la petición actual.</param>
-private async Task<string> CaptureResponseInfoAsync(HttpContext context)
-{
-    try
-    {
-        // Clonar el stream de respuesta antes de procesarlo
-        context.Response.Body.Seek(0, SeekOrigin.Begin);
-
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8, leaveOpen: true);
-        string body = await reader.ReadToEndAsync();
-        
-        // Restablecer el stream para que el controlador pueda leerlo
-        context.Response.Body.Seek(0, SeekOrigin.Begin);
-
-        return LogFormatter.FormatResponseInfo(
-            statusCode: context.Response.StatusCode.ToString(),
-            headers: string.Join("; ", context.Response.Headers),
-            body: body
-        );
-    }
-    catch (Exception ex)
-    {
-        _loggingService.AddExceptionLog(ex);
-        return "Error al capturar la respuesta HTTP.";
-    }
-}
-
-
-
-
 public async Task InvokeAsync(HttpContext context)
 {
     // Iniciar medición del tiempo de ejecución
