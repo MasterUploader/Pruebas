@@ -6,41 +6,31 @@
 
 <asp:UpdatePanel ID="upPanel" runat="server">
     <ContentTemplate>
+
+        <!-- DropDownList con AutoPostBack activado -->
         <asp:DropDownList ID="ddlAgencias" runat="server" AutoPostBack="True"
-            DataSourceID="DB2dataSourceAgencias" 
-            DataTextField="NOMAGE" 
+            DataSourceID="DB2dataSourceAgencias"
+            DataTextField="NOMAGE"
             DataValueField="DatosAgencia"
             OnSelectedIndexChanged="ddlAgencias_SelectedIndexChanged">
         </asp:DropDownList>
 
+        <!-- Botón para resetear -->
         <asp:Button ID="btnResetear" runat="server" Text="Resetear" OnClick="btnResetear_Click" />
-        
+
+        <!-- Etiqueta para mensajes -->
         <asp:Label ID="lblMensaje" runat="server" ForeColor="Green" />
+
+        <!-- SqlDataSource para cargar agencias -->
+        <asp:SqlDataSource ID="DB2dataSourceAgencias" runat="server"
+            ConnectionString="<%$ ConnectionStrings:ConnectionStringGood %>"
+            ProviderName="IBM.Data.DB2"
+            SelectCommand="SELECT NOMAGE, IPSER || '|' || NOMBD AS DatosAgencia FROM BCAMISOTA.RSAGE01 WHERE CODCCO > 0 ORDER BY CODCCO">
+        </asp:SqlDataSource>
+
     </ContentTemplate>
     <Triggers>
+        <asp:AsyncPostBackTrigger ControlID="ddlAgencias" EventName="SelectedIndexChanged" />
         <asp:AsyncPostBackTrigger ControlID="btnResetear" EventName="Click" />
     </Triggers>
 </asp:UpdatePanel>
-
-
-<script src="Scripts/jquery-1.7.1.min.js"></script>
-<script>
-    $(document).ready(function () {
-        // Cuando se presiona el botón Resetear, mostrar la pantalla de carga
-        $("#btnResetear").click(function () {
-            $("#loadingScreen").fadeIn();
-            $(this).prop("disabled", true);
-        });
-
-        // Cuando se selecciona una agencia en el DropDownList
-        $("#ddlAgencias").change(function () {
-            $("#loadingScreen").fadeIn();
-        });
-
-        // Detectar cuando finaliza una solicitud AJAX en ASP.NET y ocultar la pantalla de carga
-        Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
-            $("#loadingScreen").fadeOut();
-            $("#btnResetear").prop("disabled", false);
-        });
-    });
-</script>
