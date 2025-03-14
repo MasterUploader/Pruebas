@@ -1,21 +1,26 @@
 <script src="Scripts/jquery-1.7.1.min.js"></script>
 <script>
     $(document).ready(function () {
-        // Mostrar pantalla de carga cuando el usuario selecciona una sucursal
-        $("#ddlAgencias").change(function () {
-            $("#loadingScreen").fadeIn(); // Se activa ANTES del PostBack
+        iniciarEventos(); // Activar eventos al cargar la página
+    });
+
+    // Detectar cuando el UpdatePanel ha sido actualizado (PostBack parcial)
+    Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
+        iniciarEventos(); // Reactivar eventos después de cada PostBack
+        $("#loadingScreen").fadeOut(); // Ocultar pantalla de carga al finalizar el proceso
+        $("#btnResetear").prop("disabled", false); // Reactivar botón Resetear
+    });
+
+    function iniciarEventos() {
+        // Mostrar pantalla de carga cuando se selecciona una sucursal
+        $("#ddlAgencias").off("change").on("change", function () {
+            $("#loadingScreen").fadeIn();
         });
 
         // Mostrar pantalla de carga cuando se presiona el botón Resetear
-        $("#btnResetear").click(function () {
+        $("#btnResetear").off("click").on("click", function () {
             $("#loadingScreen").fadeIn();
             $(this).prop("disabled", true);
         });
-
-        // Ocultar la ventana de carga cuando la respuesta del servidor llega
-        Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
-            $("#loadingScreen").fadeOut();
-            $("#btnResetear").prop("disabled", false);
-        });
-    });
+    }
 </script>
