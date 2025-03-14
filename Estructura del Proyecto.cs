@@ -1,36 +1,21 @@
-<asp:ScriptManager runat="server" />
+<script src="Scripts/jquery-1.7.1.min.js"></script>
+<script>
+    $(document).ready(function () {
+        // Mostrar ventana de carga cuando se presiona el botón Resetear
+        $("#btnResetear").click(function () {
+            $("#loadingScreen").fadeIn();
+            $(this).prop("disabled", true);
+        });
 
-<div id="loadingScreen">
-    <span>Procesando... Por favor, espere</span>
-</div>
+        // Mostrar ventana de carga cuando se selecciona una sucursal en el DropDownList
+        $("#ddlAgencias").change(function () {
+            $("#loadingScreen").fadeIn();
+        });
 
-<asp:UpdatePanel ID="upPanel" runat="server">
-    <ContentTemplate>
-
-        <!-- DropDownList con AutoPostBack activado -->
-        <asp:DropDownList ID="ddlAgencias" runat="server" AutoPostBack="True"
-            DataSourceID="DB2dataSourceAgencias"
-            DataTextField="NOMAGE"
-            DataValueField="DatosAgencia"
-            OnSelectedIndexChanged="ddlAgencias_SelectedIndexChanged">
-        </asp:DropDownList>
-
-        <!-- Botón para resetear -->
-        <asp:Button ID="btnResetear" runat="server" Text="Resetear" OnClick="btnResetear_Click" />
-
-        <!-- Etiqueta para mensajes -->
-        <asp:Label ID="lblMensaje" runat="server" ForeColor="Green" />
-
-        <!-- SqlDataSource para cargar agencias -->
-        <asp:SqlDataSource ID="DB2dataSourceAgencias" runat="server"
-            ConnectionString="<%$ ConnectionStrings:ConnectionStringGood %>"
-            ProviderName="IBM.Data.DB2"
-            SelectCommand="SELECT NOMAGE, IPSER || '|' || NOMBD AS DatosAgencia FROM BCAMISOTA.RSAGE01 WHERE CODCCO > 0 ORDER BY CODCCO">
-        </asp:SqlDataSource>
-
-    </ContentTemplate>
-    <Triggers>
-        <asp:AsyncPostBackTrigger ControlID="ddlAgencias" EventName="SelectedIndexChanged" />
-        <asp:AsyncPostBackTrigger ControlID="btnResetear" EventName="Click" />
-    </Triggers>
-</asp:UpdatePanel>
+        // Ocultar la ventana de carga cuando la respuesta del servidor llega
+        Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
+            $("#loadingScreen").fadeOut();
+            $("#btnResetear").prop("disabled", false);
+        });
+    });
+</script>
