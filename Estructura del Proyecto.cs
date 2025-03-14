@@ -1,26 +1,24 @@
-<script src="Scripts/jquery-1.7.1.min.js"></script>
-<script>
-    $(document).ready(function () {
-        iniciarEventos(); // Activar eventos al cargar la página
-    });
+<head>
+    <style>
+        /* Contenedor principal para centrar los elementos en columna */
+        .contenedor-vertical {
+            display: flex;
+            flex-direction: column; /* Asegura que los elementos estén en vertical */
+            align-items: center; /* Centra los elementos horizontalmente */
+            gap: 10px; /* Espacio entre los elementos */
+        }
 
-    // Detectar cuando el UpdatePanel ha sido actualizado (PostBack parcial)
-    Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
-        iniciarEventos(); // Reactivar eventos después de cada PostBack
-        $("#loadingScreen").fadeOut(); // Ocultar pantalla de carga al finalizar el proceso
-        $("#btnResetear").prop("disabled", false); // Reactivar botón Resetear
-    });
+        /* Ajuste para los labels */
+        .contenedor-vertical label {
+            font-weight: bold;
+        }
 
-    function iniciarEventos() {
-        // Mostrar pantalla de carga cuando se selecciona una sucursal
-        $("#ddlAgencias").off("change").on("change", function () {
-            $("#loadingScreen").fadeIn();
-        });
-
-        // Mostrar pantalla de carga cuando se presiona el botón Resetear
-        $("#btnResetear").off("click").on("click", function () {
-            $("#loadingScreen").fadeIn();
-            $(this).prop("disabled", true);
-        });
-    }
-</script>
+        /* Ajuste para el botón */
+        .contenedor-vertical button, 
+        .contenedor-vertical input[type="submit"] {
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
