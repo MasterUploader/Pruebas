@@ -1,4 +1,4 @@
-/* Asegurar que todo esté alineado verticalmente */
+/* Asegurar que todo esté alineado verticalmente con más separación */
 .contenedor-vertical {
     display: flex;
     flex-direction: column; /* Poner los elementos en columna */
@@ -8,7 +8,7 @@
     max-width: 400px; /* Limitar el ancho máximo */
     margin: 0 auto; /* Centrar en la página */
     padding: 20px;
-    gap: 15px; /* Espaciado entre elementos */
+    gap: 25px; /* 🔥 Aumentar espacio entre elementos */
 }
 
 /* Ajuste para los labels */
@@ -16,6 +16,7 @@
     font-weight: bold;
     text-align: center;
     display: block; /* Asegurar que los labels estén en líneas separadas */
+    font-size: 16px;
 }
 
 /* Asegurar que el DropDownList y los inputs ocupen todo el ancho */
@@ -23,13 +24,14 @@
 .contenedor-vertical input {
     width: 100%;
     max-width: 300px;
-    padding: 8px;
+    padding: 10px; /* Más espacio interno */
+    font-size: 14px;
 }
 
 /* Ajuste para el botón */
 .contenedor-vertical button, 
 .contenedor-vertical input[type="submit"] {
-    padding: 10px 15px;
+    padding: 12px 18px;
     font-size: 16px;
     cursor: pointer;
     width: 100%; /* Hacer que el botón ocupe todo el ancho */
