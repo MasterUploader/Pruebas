@@ -1,21 +1,26 @@
 <script src="Scripts/jquery-1.7.1.min.js"></script>
 <script>
     $(document).ready(function () {
-        // Mostrar ventana de carga cuando se presiona el botón Resetear
-        $("#btnResetear").click(function () {
-            $("#loadingScreen").fadeIn();
-            $(this).prop("disabled", true);
-        });
+        iniciarEventos();
+    });
 
-        // Mostrar ventana de carga cuando se selecciona una sucursal en el DropDownList
+    // Detectar actualizaciones en el UpdatePanel y reactivar eventos
+    Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
+        iniciarEventos(); // Volver a adjuntar eventos después de cada PostBack
+        $("#loadingScreen").fadeOut();
+        $("#btnResetear").prop("disabled", false);
+    });
+
+    function iniciarEventos() {
+        // Mostrar pantalla de carga cuando el usuario cambia de sucursal
         $("#ddlAgencias").change(function () {
             $("#loadingScreen").fadeIn();
         });
 
-        // Ocultar la ventana de carga cuando la respuesta del servidor llega
-        Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
-            $("#loadingScreen").fadeOut();
-            $("#btnResetear").prop("disabled", false);
+        // Mostrar pantalla de carga cuando se presiona el botón Resetear
+        $("#btnResetear").click(function () {
+            $("#loadingScreen").fadeIn();
+            $(this).prop("disabled", true);
         });
-    });
+    }
 </script>
