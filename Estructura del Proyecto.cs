@@ -4,11 +4,11 @@
         iniciarEventos();
     });
 
-    // Detectar actualizaciones en el UpdatePanel y reactivar eventos
+    // Detectar cuando una solicitud AJAX (UpdatePanel) finaliza
     Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
-        iniciarEventos(); // Volver a adjuntar eventos después de cada PostBack
-        $("#loadingScreen").fadeOut();
-        $("#btnResetear").prop("disabled", false);
+        $("#loadingScreen").fadeOut(); // Ocultar la pantalla de carga
+        $("#btnResetear").prop("disabled", false); // Reactivar el botón
+        iniciarEventos(); // Volver a adjuntar eventos después del PostBack
     });
 
     function iniciarEventos() {
