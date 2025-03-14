@@ -8,7 +8,7 @@
     max-width: 400px; /* Limitar el ancho máximo */
     margin: 0 auto; /* Centrar en la página */
     padding: 20px;
-    gap: 20px; /* 🔥 Espacio entre elementos */
+    gap: 25px; /* 🔥 Más espacio entre elementos */
 }
 
 /* Asegurar que cada label y su campo estén alineados correctamente */
@@ -44,4 +44,5 @@
     cursor: pointer;
     width: 100%; /* Hacer que el botón ocupe todo el ancho */
     max-width: 300px;
+    margin-top: 40px; /* 🔥 Más espacio entre el botón y el campo de usuario */
 }
