@@ -1,95 +1,51 @@
-El cargo de Analista Programador combina funciones de análisis de sistemas con el desarrollo de software, asegurando que las soluciones tecnológicas sean funcionales, eficientes y alineadas con los requerimientos del negocio. A continuación, se detallan sus principales funciones:
+<style>
+    /* Estilo del overlay de carga */
+    #loadingScreen {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        top: 0;
+        left: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        display: none;
+    }
 
+    #loadingScreen span {
+        background: white;
+        padding: 20px;
+        font-size: 18px;
+        font-weight: bold;
+        border-radius: 10px;
+    }
+</style>
 
----
+<!-- Ventana de carga -->
+<div id="loadingScreen">
+    <span>Procesando... Por favor, espere</span>
+</div>
 
-1. Análisis de Requerimientos
+<script src="Scripts/jquery-1.7.1.min.js"></script>
+<script>
+    $(document).ready(function () {
+        // Mostrar ventana de carga cuando se hace clic en el botón "Resetear"
+        $("#btnResetear").click(function () {
+            $("#loadingScreen").fadeIn();
+            $(this).prop("disabled", true);
+        });
 
-Recopilar y analizar necesidades del cliente o área usuaria.
+        // Mostrar ventana de carga cuando se selecciona una agencia en el DropDownList
+        $("#ddlAgencias").change(function () {
+            $("#loadingScreen").fadeIn();
+        });
 
-Definir especificaciones funcionales y técnicas.
-
-Documentar requisitos de software y flujos de trabajo.
-
-
-2. Diseño de Soluciones
-
-Modelar la arquitectura del software (bases de datos, componentes y flujos de información).
-
-Diseñar estructuras de datos eficientes.
-
-Elaborar diagramas UML y documentación técnica.
-
-
-3. Desarrollo de Software
-
-Programar aplicaciones utilizando lenguajes como Java, Python, C#, PHP, JavaScript, entre otros.
-
-Implementar código limpio, modular y escalable.
-
-Integrar APIs, servicios web y bases de datos.
-
-Optimizar código para mejorar rendimiento y seguridad.
-
-
-4. Pruebas y Depuración
-
-Desarrollar y ejecutar pruebas unitarias, de integración y funcionales.
-
-Identificar y corregir errores en el código (debugging).
-
-Validar el cumplimiento de requerimientos.
-
-
-5. Mantenimiento y Mejora Continua
-
-Implementar mejoras en sistemas existentes.
-
-Realizar actualizaciones y migraciones de software.
-
-Monitorizar el rendimiento de aplicaciones y optimizar procesos.
-
-
-6. Documentación y Gestión del Código
-
-Mantener documentación del código y sistemas.
-
-Usar herramientas de control de versiones como Git, GitHub, GitLab o Bitbucket.
-
-Escribir manuales técnicos y funcionales.
-
-
-7. Soporte Técnico y Capacitación
-
-Brindar asistencia a usuarios y equipos de TI.
-
-Capacitar a usuarios sobre nuevas funcionalidades.
-
-Resolver incidencias de software.
-
-
-8. Gestión de Proyectos y Metodologías Ágiles
-
-Trabajar con metodologías como Scrum, Kanban o DevOps.
-
-Participar en reuniones de planificación y seguimiento.
-
-Coordinar con otros desarrolladores, analistas y stakeholders.
-
-
-
----
-
-Habilidades Clave del Analista Programador
-
-✔ Técnicas: Desarrollo de software, bases de datos, seguridad informática.
-✔ Analíticas: Resolución de problemas, modelado de datos, optimización de código.
-✔ Blandas: Comunicación efectiva, trabajo en equipo, adaptabilidad.
-
-Conclusión
-
-El Analista Programador es una pieza clave en el desarrollo de software, combinando habilidades técnicas con capacidad analítica para crear soluciones eficientes. Su rol no solo se limita a programar, sino que también participa en el ciclo de vida del software desde el análisis hasta la implementación y mantenimiento.
-
-Si necesitas información más específica, dime en qué tecnología o industria te interesa enfocarte.
-
-    
+        // Ocultar la ventana de carga después de la respuesta del servidor
+        Sys.WebForms.PageRequestManager.getInstance().add_endRequest(function () {
+            $("#loadingScreen").fadeOut();
+            $("#btnResetear").prop("disabled", false);
+        });
+    });
+</script>
