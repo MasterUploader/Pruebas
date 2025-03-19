@@ -1,35 +1,24 @@
 using System;
-using System.Threading.Tasks;
-using System.Net.Http;
 
 namespace RestUtilities.Connections.Interfaces
 {
     /// <summary>
-    /// Define los métodos estándar para conexiones a servicios externos REST o SOAP.
+    /// Define la gestión de conexiones en la aplicación.
     /// </summary>
-    public interface IExternalServiceConnection : IDisposable
+    public interface IConnectionManager
     {
         /// <summary>
-        /// Realiza una solicitud GET a un servicio externo.
+        /// Obtiene una conexión de base de datos según el nombre configurado.
         /// </summary>
-        /// <param name="endpoint">URL del endpoint.</param>
-        /// <returns>Respuesta en formato `HttpResponseMessage`.</returns>
-        Task<HttpResponseMessage> GetAsync(string endpoint);
+        /// <param name="connectionName">Nombre de la conexión.</param>
+        /// <returns>Instancia de `IDatabaseConnection`.</returns>
+        IDatabaseConnection GetDatabaseConnection(string connectionName);
 
         /// <summary>
-        /// Realiza una solicitud POST a un servicio externo.
+        /// Obtiene una conexión a un servicio externo según el nombre configurado.
         /// </summary>
-        /// <param name="endpoint">URL del endpoint.</param>
-        /// <param name="data">Datos en formato JSON.</param>
-        /// <returns>Respuesta en formato `HttpResponseMessage`.</returns>
-        Task<HttpResponseMessage> PostAsync(string endpoint, object data);
-
-        /// <summary>
-        /// Realiza una solicitud SOAP a un servicio externo.
-        /// </summary>
-        /// <param name="soapAction">Acción SOAP.</param>
-        /// <param name="xmlBody">Cuerpo de la petición en XML.</param>
-        /// <returns>Respuesta en formato `HttpResponseMessage`.</returns>
-        Task<HttpResponseMessage> CallSoapServiceAsync(string soapAction, string xmlBody);
+        /// <param name="serviceName">Nombre del servicio.</param>
+        /// <returns>Instancia de `IExternalServiceConnection`.</returns>
+        IExternalServiceConnection GetServiceConnection(string serviceName);
     }
 }
