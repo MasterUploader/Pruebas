@@ -1,34 +1,15 @@
-using System;
-using System.Collections.Concurrent;
-using RestUtilities.Connections.Interfaces;
-
-namespace RestUtilities.Connections.Managers
+namespace RestUtilities.Connections.Interfaces
 {
     /// <summary>
-    /// Administra conexiones a servicios gRPC y permite reutilizar instancias activas.
+    /// Interfaz para la fábrica de conexiones a servicios.
     /// </summary>
-    public class GrpcManager : IDisposable
+    public interface IServiceConnectionFactory
     {
-        private readonly ConcurrentDictionary<string, IGrpcConnection> _grpcConnections = new();
-
-        public IGrpcConnection GetGrpcConnection(string endpoint)
-        {
-            return _grpcConnections.GetOrAdd(endpoint, _ =>
-            {
-                return new GrpcConnectionProvider(endpoint);
-            });
-        }
-
         /// <summary>
-        /// Libera todas las conexiones gRPC activas.
+        /// Crea una conexión genérica según el tipo especificado.
         /// </summary>
-        public void Dispose()
-        {
-            foreach (var connection in _grpcConnections.Values)
-            {
-                connection.Dispose();
-            }
-            _grpcConnections.Clear();
-        }
+        /// <typeparam name="T">Tipo de conexión a crear.</typeparam>
+        /// <returns>Instancia de la conexión solicitada.</returns>
+        T CreateConnection<T>() where T : class;
     }
 }
