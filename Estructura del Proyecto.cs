@@ -1,55 +1,41 @@
 using System;
-using System.Data.Common;
-using System.Threading.Tasks;
-using Oracle.ManagedDataAccess.Client;
+using System.Collections.Generic;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Database
 {
     /// <summary>
-    /// Proveedor de conexión para Oracle Database.
+    /// Fábrica para la creación de conexiones a bases de datos según el tipo configurado.
     /// </summary>
-    public class OracleConnectionProvider : IDatabaseConnection
+    public class DatabaseConnectionFactory
     {
-        private readonly string _connectionString;
-        private OracleConnection _connection;
+        private readonly Dictionary<string, Func<string, IDatabaseConnection>> _providers;
 
-        public OracleConnectionProvider(string connectionString)
+        public DatabaseConnectionFactory()
         {
-            _connectionString = connectionString;
-            _connection = new OracleConnection(_connectionString);
+            _providers = new Dictionary<string, Func<string, IDatabaseConnection>>
+            {
+                { "AS400", connectionString => new AS400ConnectionProvider(connectionString) },
+                { "MSSQL", connectionString => new MSSQLConnectionProvider(connectionString) },
+                { "Oracle", connectionString => new OracleConnectionProvider(connectionString) }
+                // Se pueden agregar más motores de BD aquí
+            };
         }
 
-        public async Task OpenAsync()
+        /// <summary>
+        /// Crea una conexión a la base de datos según el tipo configurado.
+        /// </summary>
+        /// <param name="dbType">Tipo de base de datos (ejemplo: "MSSQL", "AS400").</param>
+        /// <param name="connectionString">Cadena de conexión.</param>
+        /// <returns>Instancia de `IDatabaseConnection`.</returns>
+        public IDatabaseConnection CreateConnection(string dbType, string connectionString)
         {
-            if (_connection.State != System.Data.ConnectionState.Open)
-                await _connection.OpenAsync();
-        }
+            if (_providers.TryGetValue(dbType, out var provider))
+            {
+                return provider(connectionString);
+            }
 
-        public void Close()
-        {
-            if (_connection.State == System.Data.ConnectionState.Open)
-                _connection.Close();
-        }
-
-        public async Task<DbDataReader> ExecuteQueryAsync(string query)
-        {
-            await OpenAsync();
-            using var command = new OracleCommand(query, _connection);
-            return await command.ExecuteReaderAsync();
-        }
-
-        public async Task<int> ExecuteNonQueryAsync(string query)
-        {
-            await OpenAsync();
-            using var command = new OracleCommand(query, _connection);
-            return await command.ExecuteNonQueryAsync();
-        }
-
-        public void Dispose()
-        {
-            Close();
-            _connection.Dispose();
+            throw new ArgumentException($"No se encontró un proveedor para el tipo de base de datos: {dbType}");
         }
     }
 }
