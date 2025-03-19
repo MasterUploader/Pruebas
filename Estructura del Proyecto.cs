@@ -5,32 +5,30 @@ using RestUtilities.Connections.Interfaces;
 namespace RestUtilities.Connections.Managers
 {
     /// <summary>
-    /// Administra conexiones WebSocket y permite reutilizar sesiones activas.
+    /// Administra conexiones a servicios gRPC y permite reutilizar instancias activas.
     /// </summary>
-    public class WebSocketManager : IDisposable
+    public class GrpcManager : IDisposable
     {
-        private readonly ConcurrentDictionary<string, IWebSocketConnection> _webSocketConnections = new();
+        private readonly ConcurrentDictionary<string, IGrpcConnection> _grpcConnections = new();
 
-        public IWebSocketConnection GetWebSocketConnection(string uri)
+        public IGrpcConnection GetGrpcConnection(string endpoint)
         {
-            return _webSocketConnections.GetOrAdd(uri, _ =>
+            return _grpcConnections.GetOrAdd(endpoint, _ =>
             {
-                var connection = new WebSocketConnectionProvider();
-                connection.ConnectAsync(uri).GetAwaiter().GetResult();
-                return connection;
+                return new GrpcConnectionProvider(endpoint);
             });
         }
 
         /// <summary>
-        /// Libera todas las conexiones WebSocket activas.
+        /// Libera todas las conexiones gRPC activas.
         /// </summary>
         public void Dispose()
         {
-            foreach (var connection in _webSocketConnections.Values)
+            foreach (var connection in _grpcConnections.Values)
             {
                 connection.Dispose();
             }
-            _webSocketConnections.Clear();
+            _grpcConnections.Clear();
         }
     }
 }
