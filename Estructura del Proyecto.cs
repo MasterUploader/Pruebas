@@ -1,31 +1,56 @@
 using System;
+using System.Text;
 using System.Threading.Tasks;
-using Grpc.Net.Client;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Services
 {
     /// <summary>
-    /// Cliente para conexiones gRPC.
+    /// Cliente para conexiones a RabbitMQ.
     /// </summary>
-    public class GrpcConnectionProvider : IGrpcConnection
+    public class RabbitMQConnectionProvider : IMessageQueueConnection
     {
-        private readonly GrpcChannel _channel;
+        private readonly IConnection _connection;
+        private readonly IModel _channel;
 
-        public GrpcConnectionProvider(string baseUrl)
+        public RabbitMQConnectionProvider(string hostName)
         {
-            _channel = GrpcChannel.ForAddress(baseUrl);
+            var factory = new ConnectionFactory() { HostName = hostName };
+            _connection = factory.CreateConnection();
+            _channel = _connection.CreateModel();
         }
 
-        public async Task<TResponse> CallGrpcServiceAsync<TRequest, TResponse>(string method, TRequest request)
+        public Task PublishMessageAsync(string queueName, string message)
         {
-            // Implementación de gRPC con cliente dinámico
-            throw new NotImplementedException("El método debe ser implementado según el contrato gRPC.");
+            _channel.QueueDeclare(queueName, false, false, false, null);
+            var body = Encoding.UTF8.GetBytes(message);
+            _channel.BasicPublish("", queueName, null, body);
+            return Task.CompletedTask;
+        }
+
+        public Task<string> ConsumeMessageAsync(string queueName)
+        {
+            _channel.QueueDeclare(queueName, false, false, false, null);
+            var consumer = new EventingBasicConsumer(_channel);
+            var tcs = new TaskCompletionSource<string>();
+
+            consumer.Received += (model, ea) =>
+            {
+                var body = ea.Body.ToArray();
+                var message = Encoding.UTF8.GetString(body);
+                tcs.SetResult(message);
+            };
+
+            _channel.BasicConsume(queueName, true, consumer);
+            return tcs.Task;
         }
 
         public void Dispose()
         {
-            _channel.ShutdownAsync().Wait();
+            _channel?.Close();
+            _connection?.Close();
         }
     }
 }
