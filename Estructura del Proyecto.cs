@@ -5,37 +5,37 @@ using RestUtilities.Connections.Interfaces;
 namespace RestUtilities.Connections.Managers
 {
     /// <summary>
-    /// Administra las conexiones a bases de datos y permite reutilizar instancias activas.
+    /// Administra conexiones a servicios externos REST y SOAP.
     /// </summary>
-    public class DatabaseManager : IDisposable
+    public class ServiceManager : IDisposable
     {
         private readonly IConnectionManager _connectionManager;
-        private readonly ConcurrentDictionary<string, IDatabaseConnection> _databaseConnections = new();
+        private readonly ConcurrentDictionary<string, IExternalServiceConnection> _serviceConnections = new();
 
-        public DatabaseManager(IConnectionManager connectionManager)
+        public ServiceManager(IConnectionManager connectionManager)
         {
             _connectionManager = connectionManager;
         }
 
         /// <summary>
-        /// Obtiene una conexión a base de datos, reutilizando si ya existe.
+        /// Obtiene una conexión a un servicio externo, reutilizando si ya existe.
         /// </summary>
-        public IDatabaseConnection GetDatabaseConnection(string connectionName)
+        public IExternalServiceConnection GetServiceConnection(string serviceName)
         {
-            return _databaseConnections.GetOrAdd(connectionName, _ =>
-                _connectionManager.GetDatabaseConnection(connectionName));
+            return _serviceConnections.GetOrAdd(serviceName, _ =>
+                _connectionManager.GetServiceConnection(serviceName));
         }
 
         /// <summary>
-        /// Libera todas las conexiones a bases de datos activas.
+        /// Libera todas las conexiones a servicios externos activas.
         /// </summary>
         public void Dispose()
         {
-            foreach (var connection in _databaseConnections.Values)
+            foreach (var connection in _serviceConnections.Values)
             {
                 connection.Dispose();
             }
-            _databaseConnections.Clear();
+            _serviceConnections.Clear();
         }
     }
 }
