@@ -5,37 +5,32 @@ using RestUtilities.Connections.Interfaces;
 namespace RestUtilities.Connections.Managers
 {
     /// <summary>
-    /// Administra conexiones a servicios externos REST y SOAP.
+    /// Administra conexiones WebSocket y permite reutilizar sesiones activas.
     /// </summary>
-    public class ServiceManager : IDisposable
+    public class WebSocketManager : IDisposable
     {
-        private readonly IConnectionManager _connectionManager;
-        private readonly ConcurrentDictionary<string, IExternalServiceConnection> _serviceConnections = new();
+        private readonly ConcurrentDictionary<string, IWebSocketConnection> _webSocketConnections = new();
 
-        public ServiceManager(IConnectionManager connectionManager)
+        public IWebSocketConnection GetWebSocketConnection(string uri)
         {
-            _connectionManager = connectionManager;
+            return _webSocketConnections.GetOrAdd(uri, _ =>
+            {
+                var connection = new WebSocketConnectionProvider();
+                connection.ConnectAsync(uri).GetAwaiter().GetResult();
+                return connection;
+            });
         }
 
         /// <summary>
-        /// Obtiene una conexión a un servicio externo, reutilizando si ya existe.
-        /// </summary>
-        public IExternalServiceConnection GetServiceConnection(string serviceName)
-        {
-            return _serviceConnections.GetOrAdd(serviceName, _ =>
-                _connectionManager.GetServiceConnection(serviceName));
-        }
-
-        /// <summary>
-        /// Libera todas las conexiones a servicios externos activas.
+        /// Libera todas las conexiones WebSocket activas.
         /// </summary>
         public void Dispose()
         {
-            foreach (var connection in _serviceConnections.Values)
+            foreach (var connection in _webSocketConnections.Values)
             {
                 connection.Dispose();
             }
-            _serviceConnections.Clear();
+            _webSocketConnections.Clear();
         }
     }
 }
