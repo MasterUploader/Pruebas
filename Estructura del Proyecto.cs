@@ -1,41 +1,39 @@
 using System;
-using System.Collections.Generic;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
 using RestUtilities.Connections.Interfaces;
 
-namespace RestUtilities.Connections.Providers.Database
+namespace RestUtilities.Connections.Providers.Services
 {
     /// <summary>
-    /// Fábrica para la creación de conexiones a bases de datos según el tipo configurado.
+    /// Cliente para conexiones a servicios RESTful.
     /// </summary>
-    public class DatabaseConnectionFactory
+    public class RestServiceClient : IExternalServiceConnection
     {
-        private readonly Dictionary<string, Func<string, IDatabaseConnection>> _providers;
+        private readonly HttpClient _httpClient;
 
-        public DatabaseConnectionFactory()
+        public RestServiceClient(string baseUrl)
         {
-            _providers = new Dictionary<string, Func<string, IDatabaseConnection>>
-            {
-                { "AS400", connectionString => new AS400ConnectionProvider(connectionString) },
-                { "MSSQL", connectionString => new MSSQLConnectionProvider(connectionString) },
-                { "Oracle", connectionString => new OracleConnectionProvider(connectionString) }
-                // Se pueden agregar más motores de BD aquí
-            };
+            _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
         }
 
-        /// <summary>
-        /// Crea una conexión a la base de datos según el tipo configurado.
-        /// </summary>
-        /// <param name="dbType">Tipo de base de datos (ejemplo: "MSSQL", "AS400").</param>
-        /// <param name="connectionString">Cadena de conexión.</param>
-        /// <returns>Instancia de `IDatabaseConnection`.</returns>
-        public IDatabaseConnection CreateConnection(string dbType, string connectionString)
+        public async Task<HttpResponseMessage> GetAsync(string endpoint)
         {
-            if (_providers.TryGetValue(dbType, out var provider))
-            {
-                return provider(connectionString);
-            }
+            return await _httpClient.GetAsync(endpoint);
+        }
 
-            throw new ArgumentException($"No se encontró un proveedor para el tipo de base de datos: {dbType}");
+        public async Task<HttpResponseMessage> PostAsync(string endpoint, object data)
+        {
+            var jsonContent = JsonSerializer.Serialize(data);
+            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+            return await _httpClient.PostAsync(endpoint, content);
+        }
+
+        public void Dispose()
+        {
+            _httpClient.Dispose();
         }
     }
 }
