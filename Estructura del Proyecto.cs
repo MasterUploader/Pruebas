@@ -1,34 +1,28 @@
 using System;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Services
 {
     /// <summary>
-    /// Cliente para conexiones a servicios RESTful.
+    /// Cliente para conexiones a servicios SOAP.
     /// </summary>
-    public class RestServiceClient : IExternalServiceConnection
+    public class SoapServiceClient : IExternalServiceConnection
     {
         private readonly HttpClient _httpClient;
 
-        public RestServiceClient(string baseUrl)
+        public SoapServiceClient(string baseUrl)
         {
             _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
         }
 
-        public async Task<HttpResponseMessage> GetAsync(string endpoint)
+        public async Task<HttpResponseMessage> CallSoapServiceAsync(string soapAction, string xmlBody)
         {
-            return await _httpClient.GetAsync(endpoint);
-        }
-
-        public async Task<HttpResponseMessage> PostAsync(string endpoint, object data)
-        {
-            var jsonContent = JsonSerializer.Serialize(data);
-            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-            return await _httpClient.PostAsync(endpoint, content);
+            var content = new StringContent(xmlBody, Encoding.UTF8, "text/xml");
+            content.Headers.Add("SOAPAction", soapAction);
+            return await _httpClient.PostAsync("", content);
         }
 
         public void Dispose()
