@@ -1,62 +1,53 @@
 using System;
-using Microsoft.Extensions.Configuration;
-using RabbitMQ.Client;
-using System.Data.SqlClient;
-using StackExchange.Redis;
+using System.Collections.Concurrent;
+using RestUtilities.Connections.Interfaces;
 
-namespace RestUtilities.Connections.Providers.Services
+namespace RestUtilities.Connections.Managers
 {
     /// <summary>
-    /// Fábrica de conexiones para múltiples servicios, incluyendo RabbitMQ, SQL Server y Redis.
-    /// Permite la creación dinámica de conexiones según el tipo requerido.
+    /// Administra todas las conexiones disponibles en la aplicación.
     /// </summary>
-    public class ServiceConnectionFactory : IServiceConnectionFactory
+    public class ConnectionManager : IConnectionManager
     {
-        private readonly IConfiguration _configuration;
+        private readonly IServiceConnectionFactory _serviceConnectionFactory;
+        private readonly ConcurrentDictionary<string, object> _activeConnections = new();
 
-        /// <summary>
-        /// Constructor que inyecta la configuración de la aplicación.
-        /// </summary>
-        /// <param name="configuration">Objeto de configuración para obtener cadenas de conexión.</param>
-        public ServiceConnectionFactory(IConfiguration configuration)
+        public ConnectionManager(IServiceConnectionFactory serviceConnectionFactory)
         {
-            _configuration = configuration;
+            _serviceConnectionFactory = serviceConnectionFactory;
         }
 
         /// <summary>
-        /// Crea una conexión a un servicio específico basado en el tipo genérico `T`.
+        /// Obtiene una conexión de base de datos según el nombre configurado.
         /// </summary>
-        /// <typeparam name="T">Tipo de la conexión a crear (ejemplo: IConnection para RabbitMQ, SqlConnection para SQL Server).</typeparam>
-        /// <returns>Una instancia de la conexión especificada o lanza una excepción si no es compatible.</returns>
-        public T CreateConnection<T>() where T : class
+        public IDatabaseConnection GetDatabaseConnection(string connectionName)
         {
-            // Conexión a RabbitMQ
-            if (typeof(T) == typeof(IConnection))
+            return _activeConnections.GetOrAdd(connectionName, _ =>
+                _serviceConnectionFactory.CreateConnection<IDatabaseConnection>()) as IDatabaseConnection;
+        }
+
+        /// <summary>
+        /// Obtiene una conexión a un servicio externo según el nombre configurado.
+        /// </summary>
+        public IExternalServiceConnection GetServiceConnection(string serviceName)
+        {
+            return _activeConnections.GetOrAdd(serviceName, _ =>
+                _serviceConnectionFactory.CreateConnection<IExternalServiceConnection>()) as IExternalServiceConnection;
+        }
+
+        /// <summary>
+        /// Libera todas las conexiones activas.
+        /// </summary>
+        public void Dispose()
+        {
+            foreach (var connection in _activeConnections.Values)
             {
-                var factory = new ConnectionFactory
+                if (connection is IDisposable disposable)
                 {
-                    Uri = new Uri(_configuration.GetConnectionString("RabbitMQ")), // Obtiene la URI desde la configuración
-                    AutomaticRecoveryEnabled = true // Habilita la recuperación automática de la conexión
-                };
-                return factory.CreateConnection() as T;
+                    disposable.Dispose();
+                }
             }
-            // Conexión a SQL Server
-            else if (typeof(T) == typeof(SqlConnection))
-            {
-                var connectionString = _configuration.GetConnectionString("SqlServer");
-                return new SqlConnection(connectionString) as T;
-            }
-            // Conexión a Redis
-            else if (typeof(T) == typeof(ConnectionMultiplexer))
-            {
-                var configurationOptions = ConfigurationOptions.Parse(_configuration.GetConnectionString("Redis"));
-                return ConnectionMultiplexer.Connect(configurationOptions) as T;
-            }
-            else
-            {
-                // Si el tipo de conexión solicitado no está soportado, lanza una excepción
-                throw new NotSupportedException($"El tipo de conexión '{typeof(T).Name}' no es compatible.");
-            }
+            _activeConnections.Clear();
         }
     }
 }
