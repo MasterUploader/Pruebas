@@ -4,22 +4,22 @@ using System.Threading.Tasks;
 namespace RestUtilities.Connections.Interfaces
 {
     /// <summary>
-    /// Define los métodos estándar para conexiones FTP/SFTP.
+    /// Define los métodos estándar para conexiones a colas de mensajes (RabbitMQ, Kafka).
     /// </summary>
-    public interface IFtpConnection : IDisposable
+    public interface IMessageQueueConnection : IDisposable
     {
         /// <summary>
-        /// Sube un archivo al servidor FTP.
+        /// Publica un mensaje en la cola.
         /// </summary>
-        /// <param name="filePath">Ruta del archivo local.</param>
-        /// <param name="destinationPath">Ruta en el servidor.</param>
-        Task UploadFileAsync(string filePath, string destinationPath);
+        /// <param name="queueName">Nombre de la cola.</param>
+        /// <param name="message">Mensaje a enviar.</param>
+        Task PublishMessageAsync(string queueName, string message);
 
         /// <summary>
-        /// Descarga un archivo del servidor FTP.
+        /// Consume un mensaje de la cola.
         /// </summary>
-        /// <param name="remotePath">Ruta en el servidor.</param>
-        /// <param name="localPath">Ruta donde se guardará el archivo.</param>
-        Task DownloadFileAsync(string remotePath, string localPath);
+        /// <param name="queueName">Nombre de la cola.</param>
+        /// <returns>Mensaje recibido.</returns>
+        Task<string> ConsumeMessageAsync(string queueName);
     }
 }
