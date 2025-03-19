@@ -4,26 +4,18 @@ using System.Threading.Tasks;
 namespace RestUtilities.Connections.Interfaces
 {
     /// <summary>
-    /// Define los métodos estándar para conexiones WebSocket.
+    /// Define los métodos estándar para conexiones gRPC.
     /// </summary>
-    public interface IWebSocketConnection : IDisposable
+    public interface IGrpcConnection : IDisposable
     {
         /// <summary>
-        /// Conecta con un servidor WebSocket.
+        /// Realiza una llamada a un servicio gRPC.
         /// </summary>
-        /// <param name="uri">URL del servidor WebSocket.</param>
-        Task ConnectAsync(string uri);
-
-        /// <summary>
-        /// Envía un mensaje al servidor WebSocket.
-        /// </summary>
-        /// <param name="message">Mensaje a enviar.</param>
-        Task SendMessageAsync(string message);
-
-        /// <summary>
-        /// Recibe un mensaje del servidor WebSocket.
-        /// </summary>
-        /// <returns>Mensaje recibido.</returns>
-        Task<string> ReceiveMessageAsync();
+        /// <typeparam name="TRequest">Tipo de la solicitud.</typeparam>
+        /// <typeparam name="TResponse">Tipo de la respuesta.</typeparam>
+        /// <param name="method">Método gRPC.</param>
+        /// <param name="request">Solicitud a enviar.</param>
+        /// <returns>Respuesta gRPC.</returns>
+        Task<TResponse> CallGrpcServiceAsync<TRequest, TResponse>(string method, TRequest request);
     }
 }
