@@ -4,18 +4,22 @@ using System.Threading.Tasks;
 namespace RestUtilities.Connections.Interfaces
 {
     /// <summary>
-    /// Define los métodos estándar para conexiones gRPC.
+    /// Define los métodos estándar para conexiones FTP/SFTP.
     /// </summary>
-    public interface IGrpcConnection : IDisposable
+    public interface IFtpConnection : IDisposable
     {
         /// <summary>
-        /// Realiza una llamada a un servicio gRPC.
+        /// Sube un archivo al servidor FTP.
         /// </summary>
-        /// <typeparam name="TRequest">Tipo de la solicitud.</typeparam>
-        /// <typeparam name="TResponse">Tipo de la respuesta.</typeparam>
-        /// <param name="method">Método gRPC.</param>
-        /// <param name="request">Solicitud a enviar.</param>
-        /// <returns>Respuesta gRPC.</returns>
-        Task<TResponse> CallGrpcServiceAsync<TRequest, TResponse>(string method, TRequest request);
+        /// <param name="filePath">Ruta del archivo local.</param>
+        /// <param name="destinationPath">Ruta en el servidor.</param>
+        Task UploadFileAsync(string filePath, string destinationPath);
+
+        /// <summary>
+        /// Descarga un archivo del servidor FTP.
+        /// </summary>
+        /// <param name="remotePath">Ruta en el servidor.</param>
+        /// <param name="localPath">Ruta donde se guardará el archivo.</param>
+        Task DownloadFileAsync(string remotePath, string localPath);
     }
 }
