@@ -1,28 +1,52 @@
 namespace RestUtilities.Connections.Models
 {
     /// <summary>
-    /// Representa la información general de una conexión.
+    /// Configuración para servicios externos REST y SOAP.
     /// </summary>
-    public class ConnectionInfo
+    public class ServiceSettings
     {
         /// <summary>
-        /// Nombre de la conexión.
+        /// URL base del servicio.
         /// </summary>
-        public string Name { get; set; }
+        public string BaseUrl { get; set; }
 
         /// <summary>
-        /// Tipo de conexión (Ejemplo: "MSSQL", "AS400", "Redis", "RabbitMQ").
+        /// Tipo de servicio (Ejemplo: "REST", "SOAP").
         /// </summary>
-        public string Type { get; set; }
+        public string ServiceType { get; set; }
 
         /// <summary>
-        /// Cadena de conexión completa si aplica.
+        /// API Key si aplica.
         /// </summary>
-        public string ConnectionString { get; set; }
+        public string ApiKey { get; set; }
+
+        /// <summary>
+        /// Indica si debe usarse autenticación OAuth.
+        /// </summary>
+        public bool UseOAuth { get; set; }
     }
 }
 
 
+
+namespace RestUtilities.Connections.Models
+{
+    /// <summary>
+    /// Configuración para conexiones WebSocket.
+    /// </summary>
+    public class WebSocketSettings
+    {
+        /// <summary>
+        /// URL del servidor WebSocket.
+        /// </summary>
+        public string Url { get; set; }
+
+        /// <summary>
+        /// Indica si la conexión debe mantenerse abierta.
+        /// </summary>
+        public bool KeepAlive { get; set; }
+    }
+}
 
 
 
@@ -30,33 +54,18 @@ namespace RestUtilities.Connections.Models
 namespace RestUtilities.Connections.Models
 {
     /// <summary>
-    /// Configuración específica para conexiones a bases de datos relacionales.
+    /// Configuración para conexiones gRPC.
     /// </summary>
-    public class DatabaseSettings
+    public class GrpcSettings
     {
         /// <summary>
-        /// Dirección del servidor de base de datos.
+        /// Dirección del servidor gRPC.
         /// </summary>
-        public string Host { get; set; }
+        public string ServerAddress { get; set; }
 
         /// <summary>
-        /// Nombre de la base de datos.
+        /// Indica si debe usarse autenticación TLS.
         /// </summary>
-        public string DatabaseName { get; set; }
-
-        /// <summary>
-        /// Nombre de usuario para autenticación.
-        /// </summary>
-        public string Username { get; set; }
-
-        /// <summary>
-        /// Contraseña de acceso a la base de datos.
-        /// </summary>
-        public string Password { get; set; }
-
-        /// <summary>
-        /// Indica si la conexión debe utilizar SSL.
-        /// </summary>
-        public bool UseSSL { get; set; }
+        public bool UseTLS { get; set; }
     }
 }
