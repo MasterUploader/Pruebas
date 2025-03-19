@@ -1,23 +1,23 @@
 using System;
 using System.Data.Common;
-using System.Data.SqlClient;
 using System.Threading.Tasks;
+using Oracle.ManagedDataAccess.Client;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Database
 {
     /// <summary>
-    /// Proveedor de conexión para Microsoft SQL Server.
+    /// Proveedor de conexión para Oracle Database.
     /// </summary>
-    public class MSSQLConnectionProvider : IDatabaseConnection
+    public class OracleConnectionProvider : IDatabaseConnection
     {
         private readonly string _connectionString;
-        private SqlConnection _connection;
+        private OracleConnection _connection;
 
-        public MSSQLConnectionProvider(string connectionString)
+        public OracleConnectionProvider(string connectionString)
         {
             _connectionString = connectionString;
-            _connection = new SqlConnection(_connectionString);
+            _connection = new OracleConnection(_connectionString);
         }
 
         public async Task OpenAsync()
@@ -35,14 +35,14 @@ namespace RestUtilities.Connections.Providers.Database
         public async Task<DbDataReader> ExecuteQueryAsync(string query)
         {
             await OpenAsync();
-            using var command = new SqlCommand(query, _connection);
+            using var command = new OracleCommand(query, _connection);
             return await command.ExecuteReaderAsync();
         }
 
         public async Task<int> ExecuteNonQueryAsync(string query)
         {
             await OpenAsync();
-            using var command = new SqlCommand(query, _connection);
+            using var command = new OracleCommand(query, _connection);
             return await command.ExecuteNonQueryAsync();
         }
 
