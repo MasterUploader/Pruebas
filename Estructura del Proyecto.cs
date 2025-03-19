@@ -1,46 +1,87 @@
 using System;
-using System.IO;
-using System.Net;
+using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Services
 {
     /// <summary>
-    /// Cliente para conexiones FTP/SFTP.
+    /// Proveedor de conexión para RabbitMQ en .NET 8 basado en la documentación oficial.
     /// </summary>
-    public class FtpConnectionProvider : IFtpConnection
+    public class RabbitMQConnectionProvider : IMessageQueueConnection, IDisposable
     {
-        private readonly string _server;
-        private readonly NetworkCredential _credentials;
+        private readonly IConnection _connection;
+        private readonly IChannel _channel;
 
-        public FtpConnectionProvider(string server, string user, string password)
+        /// <summary>
+        /// Inicializa una nueva instancia de la clase <see cref="RabbitMQConnectionProvider"/>.
+        /// </summary>
+        /// <param name="hostName">Dirección del servidor RabbitMQ.</param>
+        /// <param name="userName">Nombre de usuario para autenticación.</param>
+        /// <param name="password">Contraseña para autenticación.</param>
+        public RabbitMQConnectionProvider(string hostName, string userName, string password)
         {
-            _server = server;
-            _credentials = new NetworkCredential(user, password);
+            var factory = new ConnectionFactory
+            {
+                HostName = hostName,
+                UserName = userName,
+                Password = password
+            };
+
+            _connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
+            _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
         }
 
-        public async Task UploadFileAsync(string filePath, string destinationPath)
+        /// <summary>
+        /// Publica un mensaje en la cola especificada de manera asincrónica.
+        /// </summary>
+        /// <param name="queueName">Nombre de la cola donde se publicará el mensaje.</param>
+        /// <param name="message">Contenido del mensaje a publicar.</param>
+        /// <returns>Una tarea que representa la operación asincrónica.</returns>
+        public async Task PublishMessageAsync(string queueName, string message)
         {
-            var request = (FtpWebRequest)WebRequest.Create($"{_server}/{destinationPath}");
-            request.Method = WebRequestMethods.Ftp.UploadFile;
-            request.Credentials = _credentials;
+            await _channel.QueueDeclareAsync(queueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
 
-            using var fileStream = File.OpenRead(filePath);
-            using var requestStream = await request.GetRequestStreamAsync();
-            await fileStream.CopyToAsync(requestStream);
+            var body = Encoding.UTF8.GetBytes(message);
+
+            await _channel.BasicPublishAsync(exchange: "", routingKey: queueName, mandatory: false, basicProperties: null, body);
         }
 
-        public async Task DownloadFileAsync(string remotePath, string localPath)
+        /// <summary>
+        /// Consume un mensaje de la cola especificada de manera asincrónica.
+        /// </summary>
+        /// <param name="queueName">Nombre de la cola desde donde se consumirá el mensaje.</param>
+        /// <returns>Una tarea que representa la operación asincrónica y contiene el mensaje consumido.</returns>
+        public async Task<string> ConsumeMessageAsync(string queueName)
         {
-            var request = (FtpWebRequest)WebRequest.Create($"{_server}/{remotePath}");
-            request.Method = WebRequestMethods.Ftp.DownloadFile;
-            request.Credentials = _credentials;
+            await _channel.QueueDeclareAsync(queueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
 
-            using var response = (FtpWebResponse)await request.GetResponseAsync();
-            using var responseStream = response.GetResponseStream();
-            using var fileStream = File.Create(localPath);
-            await responseStream.CopyToAsync(fileStream);
+            var consumer = new AsyncEventingBasicConsumer(_channel);
+            var tcs = new TaskCompletionSource<string>();
+
+            consumer.Received += async (model, ea) =>
+            {
+                var body = ea.Body.ToArray();
+                var message = Encoding.UTF8.GetString(body);
+                tcs.SetResult(message);
+                await _channel.BasicAckAsync(ea.DeliveryTag, false);
+            };
+
+            await _channel.BasicConsumeAsync(queueName, autoAck: false, consumer);
+
+            return await tcs.Task;
+        }
+
+        /// <summary>
+        /// Libera los recursos asociados con la conexión a RabbitMQ.
+        /// </summary>
+        public void Dispose()
+        {
+            _channel?.CloseAsync().GetAwaiter().GetResult();
+            _connection?.CloseAsync().GetAwaiter().GetResult();
         }
     }
 }
