@@ -1,23 +1,23 @@
 using System;
 using System.Data.Common;
+using System.Data.SqlClient;
 using System.Threading.Tasks;
-using IBM.Data.DB2.Core;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Database
 {
     /// <summary>
-    /// Proveedor de conexión para AS400, permitiendo consultas SQL y ejecución de CLLE/RPG.
+    /// Proveedor de conexión para Microsoft SQL Server.
     /// </summary>
-    public class AS400ConnectionProvider : IDatabaseConnection
+    public class MSSQLConnectionProvider : IDatabaseConnection
     {
         private readonly string _connectionString;
-        private DB2Connection _connection;
+        private SqlConnection _connection;
 
-        public AS400ConnectionProvider(string connectionString)
+        public MSSQLConnectionProvider(string connectionString)
         {
             _connectionString = connectionString;
-            _connection = new DB2Connection(_connectionString);
+            _connection = new SqlConnection(_connectionString);
         }
 
         public async Task OpenAsync()
@@ -35,14 +35,14 @@ namespace RestUtilities.Connections.Providers.Database
         public async Task<DbDataReader> ExecuteQueryAsync(string query)
         {
             await OpenAsync();
-            using var command = new DB2Command(query, _connection);
+            using var command = new SqlCommand(query, _connection);
             return await command.ExecuteReaderAsync();
         }
 
         public async Task<int> ExecuteNonQueryAsync(string query)
         {
             await OpenAsync();
-            using var command = new DB2Command(query, _connection);
+            using var command = new SqlCommand(query, _connection);
             return await command.ExecuteNonQueryAsync();
         }
 
