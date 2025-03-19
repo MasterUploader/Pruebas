@@ -1,41 +1,31 @@
 using System;
-using System.Net.WebSockets;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
+using Grpc.Net.Client;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Services
 {
     /// <summary>
-    /// Cliente para conexiones WebSocket.
+    /// Cliente para conexiones gRPC.
     /// </summary>
-    public class WebSocketConnectionProvider : IWebSocketConnection
+    public class GrpcConnectionProvider : IGrpcConnection
     {
-        private ClientWebSocket _webSocket;
+        private readonly GrpcChannel _channel;
 
-        public async Task ConnectAsync(string uri)
+        public GrpcConnectionProvider(string baseUrl)
         {
-            _webSocket = new ClientWebSocket();
-            await _webSocket.ConnectAsync(new Uri(uri), CancellationToken.None);
+            _channel = GrpcChannel.ForAddress(baseUrl);
         }
 
-        public async Task SendMessageAsync(string message)
+        public async Task<TResponse> CallGrpcServiceAsync<TRequest, TResponse>(string method, TRequest request)
         {
-            var buffer = Encoding.UTF8.GetBytes(message);
-            await _webSocket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
-        }
-
-        public async Task<string> ReceiveMessageAsync()
-        {
-            var buffer = new byte[1024];
-            var result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-            return Encoding.UTF8.GetString(buffer, 0, result.Count);
+            // Implementación de gRPC con cliente dinámico
+            throw new NotImplementedException("El método debe ser implementado según el contrato gRPC.");
         }
 
         public void Dispose()
         {
-            _webSocket?.Dispose();
+            _channel.ShutdownAsync().Wait();
         }
     }
 }
