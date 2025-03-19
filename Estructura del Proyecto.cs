@@ -1,15 +1,62 @@
-namespace RestUtilities.Connections.Interfaces
+namespace RestUtilities.Connections.Models
 {
     /// <summary>
-    /// Interfaz para la fábrica de conexiones a servicios.
+    /// Representa la información general de una conexión.
     /// </summary>
-    public interface IServiceConnectionFactory
+    public class ConnectionInfo
     {
         /// <summary>
-        /// Crea una conexión genérica según el tipo especificado.
+        /// Nombre de la conexión.
         /// </summary>
-        /// <typeparam name="T">Tipo de conexión a crear.</typeparam>
-        /// <returns>Instancia de la conexión solicitada.</returns>
-        T CreateConnection<T>() where T : class;
+        public string Name { get; set; }
+
+        /// <summary>
+        /// Tipo de conexión (Ejemplo: "MSSQL", "AS400", "Redis", "RabbitMQ").
+        /// </summary>
+        public string Type { get; set; }
+
+        /// <summary>
+        /// Cadena de conexión completa si aplica.
+        /// </summary>
+        public string ConnectionString { get; set; }
+    }
+}
+
+
+
+
+
+
+namespace RestUtilities.Connections.Models
+{
+    /// <summary>
+    /// Configuración específica para conexiones a bases de datos relacionales.
+    /// </summary>
+    public class DatabaseSettings
+    {
+        /// <summary>
+        /// Dirección del servidor de base de datos.
+        /// </summary>
+        public string Host { get; set; }
+
+        /// <summary>
+        /// Nombre de la base de datos.
+        /// </summary>
+        public string DatabaseName { get; set; }
+
+        /// <summary>
+        /// Nombre de usuario para autenticación.
+        /// </summary>
+        public string Username { get; set; }
+
+        /// <summary>
+        /// Contraseña de acceso a la base de datos.
+        /// </summary>
+        public string Password { get; set; }
+
+        /// <summary>
+        /// Indica si la conexión debe utilizar SSL.
+        /// </summary>
+        public bool UseSSL { get; set; }
     }
 }
