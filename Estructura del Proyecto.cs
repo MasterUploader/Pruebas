@@ -1,71 +1,28 @@
 namespace RestUtilities.Connections.Models
 {
     /// <summary>
-    /// Configuración para servicios externos REST y SOAP.
+    /// Configuración para conexiones Redis.
     /// </summary>
-    public class ServiceSettings
+    public class RedisSettings
     {
         /// <summary>
-        /// URL base del servicio.
+        /// Dirección del servidor Redis.
         /// </summary>
-        public string BaseUrl { get; set; }
+        public string Host { get; set; }
 
         /// <summary>
-        /// Tipo de servicio (Ejemplo: "REST", "SOAP").
+        /// Puerto del servidor Redis.
         /// </summary>
-        public string ServiceType { get; set; }
+        public int Port { get; set; }
 
         /// <summary>
-        /// API Key si aplica.
+        /// Contraseña para autenticación en Redis.
         /// </summary>
-        public string ApiKey { get; set; }
+        public string Password { get; set; }
 
         /// <summary>
-        /// Indica si debe usarse autenticación OAuth.
+        /// Base de datos a utilizar en Redis.
         /// </summary>
-        public bool UseOAuth { get; set; }
-    }
-}
-
-
-
-namespace RestUtilities.Connections.Models
-{
-    /// <summary>
-    /// Configuración para conexiones WebSocket.
-    /// </summary>
-    public class WebSocketSettings
-    {
-        /// <summary>
-        /// URL del servidor WebSocket.
-        /// </summary>
-        public string Url { get; set; }
-
-        /// <summary>
-        /// Indica si la conexión debe mantenerse abierta.
-        /// </summary>
-        public bool KeepAlive { get; set; }
-    }
-}
-
-
-
-
-namespace RestUtilities.Connections.Models
-{
-    /// <summary>
-    /// Configuración para conexiones gRPC.
-    /// </summary>
-    public class GrpcSettings
-    {
-        /// <summary>
-        /// Dirección del servidor gRPC.
-        /// </summary>
-        public string ServerAddress { get; set; }
-
-        /// <summary>
-        /// Indica si debe usarse autenticación TLS.
-        /// </summary>
-        public bool UseTLS { get; set; }
+        public int Database { get; set; }
     }
 }
