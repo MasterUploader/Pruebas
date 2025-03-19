@@ -1,56 +1,46 @@
 using System;
-using System.Text;
+using System.IO;
+using System.Net;
 using System.Threading.Tasks;
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Services
 {
     /// <summary>
-    /// Cliente para conexiones a RabbitMQ.
+    /// Cliente para conexiones FTP/SFTP.
     /// </summary>
-    public class RabbitMQConnectionProvider : IMessageQueueConnection
+    public class FtpConnectionProvider : IFtpConnection
     {
-        private readonly IConnection _connection;
-        private readonly IModel _channel;
+        private readonly string _server;
+        private readonly NetworkCredential _credentials;
 
-        public RabbitMQConnectionProvider(string hostName)
+        public FtpConnectionProvider(string server, string user, string password)
         {
-            var factory = new ConnectionFactory() { HostName = hostName };
-            _connection = factory.CreateConnection();
-            _channel = _connection.CreateModel();
+            _server = server;
+            _credentials = new NetworkCredential(user, password);
         }
 
-        public Task PublishMessageAsync(string queueName, string message)
+        public async Task UploadFileAsync(string filePath, string destinationPath)
         {
-            _channel.QueueDeclare(queueName, false, false, false, null);
-            var body = Encoding.UTF8.GetBytes(message);
-            _channel.BasicPublish("", queueName, null, body);
-            return Task.CompletedTask;
+            var request = (FtpWebRequest)WebRequest.Create($"{_server}/{destinationPath}");
+            request.Method = WebRequestMethods.Ftp.UploadFile;
+            request.Credentials = _credentials;
+
+            using var fileStream = File.OpenRead(filePath);
+            using var requestStream = await request.GetRequestStreamAsync();
+            await fileStream.CopyToAsync(requestStream);
         }
 
-        public Task<string> ConsumeMessageAsync(string queueName)
+        public async Task DownloadFileAsync(string remotePath, string localPath)
         {
-            _channel.QueueDeclare(queueName, false, false, false, null);
-            var consumer = new EventingBasicConsumer(_channel);
-            var tcs = new TaskCompletionSource<string>();
+            var request = (FtpWebRequest)WebRequest.Create($"{_server}/{remotePath}");
+            request.Method = WebRequestMethods.Ftp.DownloadFile;
+            request.Credentials = _credentials;
 
-            consumer.Received += (model, ea) =>
-            {
-                var body = ea.Body.ToArray();
-                var message = Encoding.UTF8.GetString(body);
-                tcs.SetResult(message);
-            };
-
-            _channel.BasicConsume(queueName, true, consumer);
-            return tcs.Task;
-        }
-
-        public void Dispose()
-        {
-            _channel?.Close();
-            _connection?.Close();
+            using var response = (FtpWebResponse)await request.GetResponseAsync();
+            using var responseStream = response.GetResponseStream();
+            using var fileStream = File.Create(localPath);
+            await responseStream.CopyToAsync(fileStream);
         }
     }
 }
