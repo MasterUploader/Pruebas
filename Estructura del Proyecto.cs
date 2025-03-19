@@ -1,24 +1,29 @@
 using System;
+using System.Threading.Tasks;
 
 namespace RestUtilities.Connections.Interfaces
 {
     /// <summary>
-    /// Define la gestión de conexiones en la aplicación.
+    /// Define los métodos estándar para conexiones WebSocket.
     /// </summary>
-    public interface IConnectionManager
+    public interface IWebSocketConnection : IDisposable
     {
         /// <summary>
-        /// Obtiene una conexión de base de datos según el nombre configurado.
+        /// Conecta con un servidor WebSocket.
         /// </summary>
-        /// <param name="connectionName">Nombre de la conexión.</param>
-        /// <returns>Instancia de `IDatabaseConnection`.</returns>
-        IDatabaseConnection GetDatabaseConnection(string connectionName);
+        /// <param name="uri">URL del servidor WebSocket.</param>
+        Task ConnectAsync(string uri);
 
         /// <summary>
-        /// Obtiene una conexión a un servicio externo según el nombre configurado.
+        /// Envía un mensaje al servidor WebSocket.
         /// </summary>
-        /// <param name="serviceName">Nombre del servicio.</param>
-        /// <returns>Instancia de `IExternalServiceConnection`.</returns>
-        IExternalServiceConnection GetServiceConnection(string serviceName);
+        /// <param name="message">Mensaje a enviar.</param>
+        Task SendMessageAsync(string message);
+
+        /// <summary>
+        /// Recibe un mensaje del servidor WebSocket.
+        /// </summary>
+        /// <returns>Mensaje recibido.</returns>
+        Task<string> ReceiveMessageAsync();
     }
 }
