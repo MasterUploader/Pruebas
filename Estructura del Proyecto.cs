@@ -1,33 +1,41 @@
 using System;
-using System.Net.Http;
+using System.Net.WebSockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Services
 {
     /// <summary>
-    /// Cliente para conexiones a servicios SOAP.
+    /// Cliente para conexiones WebSocket.
     /// </summary>
-    public class SoapServiceClient : IExternalServiceConnection
+    public class WebSocketConnectionProvider : IWebSocketConnection
     {
-        private readonly HttpClient _httpClient;
+        private ClientWebSocket _webSocket;
 
-        public SoapServiceClient(string baseUrl)
+        public async Task ConnectAsync(string uri)
         {
-            _httpClient = new HttpClient { BaseAddress = new Uri(baseUrl) };
+            _webSocket = new ClientWebSocket();
+            await _webSocket.ConnectAsync(new Uri(uri), CancellationToken.None);
         }
 
-        public async Task<HttpResponseMessage> CallSoapServiceAsync(string soapAction, string xmlBody)
+        public async Task SendMessageAsync(string message)
         {
-            var content = new StringContent(xmlBody, Encoding.UTF8, "text/xml");
-            content.Headers.Add("SOAPAction", soapAction);
-            return await _httpClient.PostAsync("", content);
+            var buffer = Encoding.UTF8.GetBytes(message);
+            await _webSocket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
+        }
+
+        public async Task<string> ReceiveMessageAsync()
+        {
+            var buffer = new byte[1024];
+            var result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+            return Encoding.UTF8.GetString(buffer, 0, result.Count);
         }
 
         public void Dispose()
         {
-            _httpClient.Dispose();
+            _webSocket?.Dispose();
         }
     }
 }
