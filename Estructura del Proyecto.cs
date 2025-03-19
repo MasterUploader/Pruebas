@@ -5,49 +5,37 @@ using RestUtilities.Connections.Interfaces;
 namespace RestUtilities.Connections.Managers
 {
     /// <summary>
-    /// Administra todas las conexiones disponibles en la aplicación.
+    /// Administra las conexiones a bases de datos y permite reutilizar instancias activas.
     /// </summary>
-    public class ConnectionManager : IConnectionManager
+    public class DatabaseManager : IDisposable
     {
-        private readonly IServiceConnectionFactory _serviceConnectionFactory;
-        private readonly ConcurrentDictionary<string, object> _activeConnections = new();
+        private readonly IConnectionManager _connectionManager;
+        private readonly ConcurrentDictionary<string, IDatabaseConnection> _databaseConnections = new();
 
-        public ConnectionManager(IServiceConnectionFactory serviceConnectionFactory)
+        public DatabaseManager(IConnectionManager connectionManager)
         {
-            _serviceConnectionFactory = serviceConnectionFactory;
+            _connectionManager = connectionManager;
         }
 
         /// <summary>
-        /// Obtiene una conexión de base de datos según el nombre configurado.
+        /// Obtiene una conexión a base de datos, reutilizando si ya existe.
         /// </summary>
         public IDatabaseConnection GetDatabaseConnection(string connectionName)
         {
-            return _activeConnections.GetOrAdd(connectionName, _ =>
-                _serviceConnectionFactory.CreateConnection<IDatabaseConnection>()) as IDatabaseConnection;
+            return _databaseConnections.GetOrAdd(connectionName, _ =>
+                _connectionManager.GetDatabaseConnection(connectionName));
         }
 
         /// <summary>
-        /// Obtiene una conexión a un servicio externo según el nombre configurado.
-        /// </summary>
-        public IExternalServiceConnection GetServiceConnection(string serviceName)
-        {
-            return _activeConnections.GetOrAdd(serviceName, _ =>
-                _serviceConnectionFactory.CreateConnection<IExternalServiceConnection>()) as IExternalServiceConnection;
-        }
-
-        /// <summary>
-        /// Libera todas las conexiones activas.
+        /// Libera todas las conexiones a bases de datos activas.
         /// </summary>
         public void Dispose()
         {
-            foreach (var connection in _activeConnections.Values)
+            foreach (var connection in _databaseConnections.Values)
             {
-                if (connection is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
+                connection.Dispose();
             }
-            _activeConnections.Clear();
+            _databaseConnections.Clear();
         }
     }
 }
