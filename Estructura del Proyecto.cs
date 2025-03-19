@@ -1,87 +1,62 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
-using RestUtilities.Connections.Interfaces;
+using System.Data.SqlClient;
+using StackExchange.Redis;
 
 namespace RestUtilities.Connections.Providers.Services
 {
     /// <summary>
-    /// Proveedor de conexión para RabbitMQ en .NET 8 basado en la documentación oficial.
+    /// Fábrica de conexiones para múltiples servicios, incluyendo RabbitMQ, SQL Server y Redis.
+    /// Permite la creación dinámica de conexiones según el tipo requerido.
     /// </summary>
-    public class RabbitMQConnectionProvider : IMessageQueueConnection, IDisposable
+    public class ServiceConnectionFactory : IServiceConnectionFactory
     {
-        private readonly IConnection _connection;
-        private readonly IChannel _channel;
+        private readonly IConfiguration _configuration;
 
         /// <summary>
-        /// Inicializa una nueva instancia de la clase <see cref="RabbitMQConnectionProvider"/>.
+        /// Constructor que inyecta la configuración de la aplicación.
         /// </summary>
-        /// <param name="hostName">Dirección del servidor RabbitMQ.</param>
-        /// <param name="userName">Nombre de usuario para autenticación.</param>
-        /// <param name="password">Contraseña para autenticación.</param>
-        public RabbitMQConnectionProvider(string hostName, string userName, string password)
+        /// <param name="configuration">Objeto de configuración para obtener cadenas de conexión.</param>
+        public ServiceConnectionFactory(IConfiguration configuration)
         {
-            var factory = new ConnectionFactory
+            _configuration = configuration;
+        }
+
+        /// <summary>
+        /// Crea una conexión a un servicio específico basado en el tipo genérico `T`.
+        /// </summary>
+        /// <typeparam name="T">Tipo de la conexión a crear (ejemplo: IConnection para RabbitMQ, SqlConnection para SQL Server).</typeparam>
+        /// <returns>Una instancia de la conexión especificada o lanza una excepción si no es compatible.</returns>
+        public T CreateConnection<T>() where T : class
+        {
+            // Conexión a RabbitMQ
+            if (typeof(T) == typeof(IConnection))
             {
-                HostName = hostName,
-                UserName = userName,
-                Password = password
-            };
-
-            _connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
-            _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
-        }
-
-        /// <summary>
-        /// Publica un mensaje en la cola especificada de manera asincrónica.
-        /// </summary>
-        /// <param name="queueName">Nombre de la cola donde se publicará el mensaje.</param>
-        /// <param name="message">Contenido del mensaje a publicar.</param>
-        /// <returns>Una tarea que representa la operación asincrónica.</returns>
-        public async Task PublishMessageAsync(string queueName, string message)
-        {
-            await _channel.QueueDeclareAsync(queueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
-
-            var body = Encoding.UTF8.GetBytes(message);
-
-            await _channel.BasicPublishAsync(exchange: "", routingKey: queueName, mandatory: false, basicProperties: null, body);
-        }
-
-        /// <summary>
-        /// Consume un mensaje de la cola especificada de manera asincrónica.
-        /// </summary>
-        /// <param name="queueName">Nombre de la cola desde donde se consumirá el mensaje.</param>
-        /// <returns>Una tarea que representa la operación asincrónica y contiene el mensaje consumido.</returns>
-        public async Task<string> ConsumeMessageAsync(string queueName)
-        {
-            await _channel.QueueDeclareAsync(queueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
-
-            var consumer = new AsyncEventingBasicConsumer(_channel);
-            var tcs = new TaskCompletionSource<string>();
-
-            consumer.Received += async (model, ea) =>
+                var factory = new ConnectionFactory
+                {
+                    Uri = new Uri(_configuration.GetConnectionString("RabbitMQ")), // Obtiene la URI desde la configuración
+                    AutomaticRecoveryEnabled = true // Habilita la recuperación automática de la conexión
+                };
+                return factory.CreateConnection() as T;
+            }
+            // Conexión a SQL Server
+            else if (typeof(T) == typeof(SqlConnection))
             {
-                var body = ea.Body.ToArray();
-                var message = Encoding.UTF8.GetString(body);
-                tcs.SetResult(message);
-                await _channel.BasicAckAsync(ea.DeliveryTag, false);
-            };
-
-            await _channel.BasicConsumeAsync(queueName, autoAck: false, consumer);
-
-            return await tcs.Task;
-        }
-
-        /// <summary>
-        /// Libera los recursos asociados con la conexión a RabbitMQ.
-        /// </summary>
-        public void Dispose()
-        {
-            _channel?.CloseAsync().GetAwaiter().GetResult();
-            _connection?.CloseAsync().GetAwaiter().GetResult();
+                var connectionString = _configuration.GetConnectionString("SqlServer");
+                return new SqlConnection(connectionString) as T;
+            }
+            // Conexión a Redis
+            else if (typeof(T) == typeof(ConnectionMultiplexer))
+            {
+                var configurationOptions = ConfigurationOptions.Parse(_configuration.GetConnectionString("Redis"));
+                return ConnectionMultiplexer.Connect(configurationOptions) as T;
+            }
+            else
+            {
+                // Si el tipo de conexión solicitado no está soportado, lanza una excepción
+                throw new NotSupportedException($"El tipo de conexión '{typeof(T).Name}' no es compatible.");
+            }
         }
     }
 }
