@@ -1,36 +1,35 @@
 using System;
 using System.Threading.Tasks;
-using System.Data.Common;
+using System.Net.Http;
 
 namespace RestUtilities.Connections.Interfaces
 {
     /// <summary>
-    /// Define los métodos estándar para una conexión a bases de datos.
+    /// Define los métodos estándar para conexiones a servicios externos REST o SOAP.
     /// </summary>
-    public interface IDatabaseConnection : IDisposable
+    public interface IExternalServiceConnection : IDisposable
     {
         /// <summary>
-        /// Abre la conexión a la base de datos.
+        /// Realiza una solicitud GET a un servicio externo.
         /// </summary>
-        Task OpenAsync();
+        /// <param name="endpoint">URL del endpoint.</param>
+        /// <returns>Respuesta en formato `HttpResponseMessage`.</returns>
+        Task<HttpResponseMessage> GetAsync(string endpoint);
 
         /// <summary>
-        /// Cierra la conexión a la base de datos.
+        /// Realiza una solicitud POST a un servicio externo.
         /// </summary>
-        void Close();
+        /// <param name="endpoint">URL del endpoint.</param>
+        /// <param name="data">Datos en formato JSON.</param>
+        /// <returns>Respuesta en formato `HttpResponseMessage`.</returns>
+        Task<HttpResponseMessage> PostAsync(string endpoint, object data);
 
         /// <summary>
-        /// Ejecuta una consulta SQL y devuelve los resultados.
+        /// Realiza una solicitud SOAP a un servicio externo.
         /// </summary>
-        /// <param name="query">Consulta SQL a ejecutar.</param>
-        /// <returns>Resultado en un `DbDataReader`.</returns>
-        Task<DbDataReader> ExecuteQueryAsync(string query);
-
-        /// <summary>
-        /// Ejecuta una consulta SQL sin devolver datos.
-        /// </summary>
-        /// <param name="query">Consulta SQL a ejecutar.</param>
-        /// <returns>Número de filas afectadas.</returns>
-        Task<int> ExecuteNonQueryAsync(string query);
+        /// <param name="soapAction">Acción SOAP.</param>
+        /// <param name="xmlBody">Cuerpo de la petición en XML.</param>
+        /// <returns>Respuesta en formato `HttpResponseMessage`.</returns>
+        Task<HttpResponseMessage> CallSoapServiceAsync(string soapAction, string xmlBody);
     }
 }
