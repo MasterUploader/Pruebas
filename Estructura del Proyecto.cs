@@ -1,21 +1,17 @@
-using System.Xml.Serialization;
-
 /// <summary>
-/// Clase base para todas las solicitudes SOAP.
-/// Permite manejar diferentes tipos de REQUEST de forma genérica.
+/// Representa una solicitud para obtener servicios permitidos en el sistema.
 /// </summary>
-[XmlInclude(typeof(GetServiceRequest))]
-[XmlInclude(typeof(GetProductsRequest))]
-[XmlInclude(typeof(GetPaymentAgentsRequest))]
-[XmlInclude(typeof(GetWholesaleExchangeRateRequest))]
-[XmlInclude(typeof(GetForeignExchangeRateRequest))]
-[XmlInclude(typeof(GetIdentificationsRequest))]
-public abstract class BaseRequest
+[XmlRoot(ElementName = "REQUEST")]
+public class GetServiceRequest : BaseRequest
 {
-    /// <summary>
-    /// Define el tipo de la solicitud (Ej: "GET_SERVICES", "GET_PRODUCTS", etc.).
-    /// Este atributo se usa para la serialización en XML.
-    /// </summary>
-    [XmlAttribute(AttributeName = "xsi:type")]
-    public string Type { get; set; }
+    public GetServiceRequest() { Type = "GET_SERVICES"; }
+
+    [XmlElement(ElementName = "AGENT_TRANS_TYPE_CODE")]
+    public string AgentTransactionTypeCode { get; set; }
+
+    [XmlElement(ElementName = "AGENT_CD")]
+    public string AgentCode { get; set; }
+
+    [XmlElement(ElementName = "ORIG_COUNTRY_CD")]
+    public string OriginCountryCode { get; set; }
 }
