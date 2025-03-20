@@ -1,10 +1,10 @@
 /// <summary>
-/// Representa una solicitud para obtener la tasa de cambio extranjera.
+/// Representa una solicitud para obtener tipos de identificación permitidos.
 /// </summary>
 [XmlRoot(ElementName = "REQUEST")]
-public class GetForeignExchangeRateRequest : BaseRequest
+public class GetIdentificationsRequest : BaseRequest
 {
-    public GetForeignExchangeRateRequest() { Type = "FOREIGN_EXCHANGE_RATE"; }
+    public GetIdentificationsRequest() { Type = "GET_IDENTIFICATIONS"; }
 
     [XmlElement(ElementName = "AGENT_TRANS_TYPE_CODE")]
     public string AgentTransactionTypeCode { get; set; }
@@ -12,6 +12,6 @@ public class GetForeignExchangeRateRequest : BaseRequest
     [XmlElement(ElementName = "AGENT_CD")]
     public string AgentCode { get; set; }
 
-    [XmlElement(ElementName = "CURRENCY_CD")]
-    public string BaseCurrencyCode { get; set; }
+    [XmlElement(ElementName = "ORIG_COUNTRY_CD")]
+    public string OriginCountryCode { get; set; }
 }
