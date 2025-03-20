@@ -1,10 +1,10 @@
 /// <summary>
-/// Representa una solicitud para obtener servicios permitidos en el sistema.
+/// Representa una solicitud para obtener productos disponibles según código de servicio.
 /// </summary>
 [XmlRoot(ElementName = "REQUEST")]
-public class GetServiceRequest : BaseRequest
+public class GetProductsRequest : BaseRequest
 {
-    public GetServiceRequest() { Type = "GET_SERVICES"; }
+    public GetProductsRequest() { Type = "GET_PRODUCTS"; }
 
     [XmlElement(ElementName = "AGENT_TRANS_TYPE_CODE")]
     public string AgentTransactionTypeCode { get; set; }
@@ -14,4 +14,10 @@ public class GetServiceRequest : BaseRequest
 
     [XmlElement(ElementName = "ORIG_COUNTRY_CD")]
     public string OriginCountryCode { get; set; }
+
+    [XmlElement(ElementName = "ORIG_CURRENCY_CD")]
+    public string OriginCurrencyCode { get; set; }
+
+    [XmlElement(ElementName = "SERVICE_CD")]
+    public string ServiceCode { get; set; }
 }
