@@ -9,15 +9,6 @@ using System;
 public class BaseRequestConverter : JsonConverter<BaseRequest>
 {
     /// <summary>
-    /// Determina si este convertidor puede manejar la conversión del tipo proporcionado.
-    /// En este caso, siempre devuelve true si el tipo es BaseRequest.
-    /// </summary>
-    public override bool CanConvert(Type objectType)
-    {
-        return typeof(BaseRequest).IsAssignableFrom(objectType);
-    }
-
-    /// <summary>
     /// Convierte un objeto JSON en una instancia de una subclase de BaseRequest.
     /// </summary>
     /// <param name="reader">El lector JSON que contiene los datos.</param>
