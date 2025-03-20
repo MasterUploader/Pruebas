@@ -1,17 +1,22 @@
 /// <summary>
-/// Representa una solicitud para obtener tipos de identificación permitidos.
+/// DTO global para recibir cualquier tipo de solicitud en la API REST.
 /// </summary>
-[XmlRoot(ElementName = "REQUEST")]
-public class GetIdentificationsRequest : BaseRequest
+public class SoapRequestDto
 {
-    public GetIdentificationsRequest() { Type = "GET_IDENTIFICATIONS"; }
+    /// <summary>
+    /// Tipo de transacción (Ej: GSRV, GPRD, GPAA, etc.).
+    /// </summary>
+    public string TransactionType { get; set; }
 
-    [XmlElement(ElementName = "AGENT_TRANS_TYPE_CODE")]
-    public string AgentTransactionTypeCode { get; set; }
-
-    [XmlElement(ElementName = "AGENT_CD")]
+    /// <summary>
+    /// Código del agente solicitante.
+    /// </summary>
     public string AgentCode { get; set; }
 
-    [XmlElement(ElementName = "ORIG_COUNTRY_CD")]
-    public string OriginCountryCode { get; set; }
+    /// <summary>
+    /// Contiene la solicitud específica, puede ser de diferentes tipos.
+    /// Se convierte dinámicamente con un `JsonConverter`.
+    /// </summary>
+    [JsonConverter(typeof(BaseRequestConverter))]
+    public BaseRequest Request { get; set; }
 }
