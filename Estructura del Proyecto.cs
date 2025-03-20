@@ -1,10 +1,10 @@
 /// <summary>
-/// Representa una solicitud para obtener agentes de pago permitidos.
+/// Representa una solicitud para obtener la tasa de cambio mayorista.
 /// </summary>
 [XmlRoot(ElementName = "REQUEST")]
-public class GetPaymentAgentsRequest : BaseRequest
+public class GetWholesaleExchangeRateRequest : BaseRequest
 {
-    public GetPaymentAgentsRequest() { Type = "GET_PAYMENT_AGENTS"; }
+    public GetWholesaleExchangeRateRequest() { Type = "GET_WHOLESALE_EXCHANGE_RATE"; }
 
     [XmlElement(ElementName = "AGENT_TRANS_TYPE_CODE")]
     public string AgentTransactionTypeCode { get; set; }
@@ -29,4 +29,7 @@ public class GetPaymentAgentsRequest : BaseRequest
 
     [XmlElement(ElementName = "PAYMENT_TYPE_CD")]
     public string PaymentTypeCode { get; set; }
+
+    [XmlElement(ElementName = "PAY_AGENT_CD")]
+    public string PaymentAgentCode { get; set; }
 }
