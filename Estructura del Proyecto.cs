@@ -1,22 +1,51 @@
-/// <summary>
-/// DTO global para recibir cualquier tipo de solicitud en la API REST.
-/// </summary>
-public class SoapRequestDto
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
+
+public class BaseRequestConverter : JsonConverter
 {
-    /// <summary>
-    /// Tipo de transacción (Ej: GSRV, GPRD, GPAA, etc.).
-    /// </summary>
-    public string TransactionType { get; set; }
+    public override bool CanConvert(Type objectType)
+    {
+        return objectType == typeof(BaseRequest);
+    }
 
-    /// <summary>
-    /// Código del agente solicitante.
-    /// </summary>
-    public string AgentCode { get; set; }
+    public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+    {
+        JObject jsonObject = JObject.Load(reader);
+        string type = jsonObject["Type"]?.ToString();
 
-    /// <summary>
-    /// Contiene la solicitud específica, puede ser de diferentes tipos.
-    /// Se convierte dinámicamente con un `JsonConverter`.
-    /// </summary>
-    [JsonConverter(typeof(BaseRequestConverter))]
-    public BaseRequest Request { get; set; }
+        BaseRequest request;
+        switch (type)
+        {
+            case "GET_SERVICES":
+                request = new GetServiceRequest();
+                break;
+            case "GET_PRODUCTS":
+                request = new GetProductsRequest();
+                break;
+            case "GET_PAYMENT_AGENTS":
+                request = new GetPaymentAgentsRequest();
+                break;
+            case "GET_WHOLESALE_EXCHANGE_RATE":
+                request = new GetWholesaleExchangeRateRequest();
+                break;
+            case "FOREIGN_EXCHANGE_RATE":
+                request = new GetForeignExchangeRateRequest();
+                break;
+            case "GET_IDENTIFICATIONS":
+                request = new GetIdentificationsRequest();
+                break;
+            default:
+                throw new Exception($"Tipo de solicitud desconocido: {type}");
+        }
+
+        serializer.Populate(jsonObject.CreateReader(), request);
+        return request;
+    }
+
+    public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+    {
+        JObject jsonObject = JObject.FromObject(value);
+        jsonObject.WriteTo(writer);
+    }
 }
