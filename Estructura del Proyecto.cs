@@ -2,166 +2,199 @@ using System.Xml.Serialization;
 using Newtonsoft.Json;
 
 /// <summary>
-/// Representa la sección ADDRESSING en el encabezado SOAP.
+/// Clase base para las respuestas SOAP.
+/// Define un tipo general que se especializa en clases hijas.
 /// </summary>
-[XmlRoot(ElementName = "ADDRESSING", Namespace = "http://www.btsincusa.com/gp")]
-public class Addressing
+[XmlInclude(typeof(GetServiceResponse))]
+[XmlInclude(typeof(GetProductsResponse))]
+[XmlInclude(typeof(GetPaymentAgentsResponse))]
+[XmlInclude(typeof(GetWholesaleExchangeRateResponse))]
+[XmlInclude(typeof(GetForeignExchangeRateResponse))]
+[XmlInclude(typeof(GetIdentificationsResponse))]
+public abstract class BaseSoapResponse
 {
-    [XmlElement(ElementName = "FROM", Namespace = "http://www.btsincusa.com/gp")]
-    [JsonProperty("From")]
-    public string From { get; set; }
-
-    [XmlElement(ElementName = "TO", Namespace = "http://www.btsincusa.com/gp")]
-    [JsonProperty("To")]
-    public string To { get; set; }
+    /// <summary>
+    /// Tipo de respuesta recibida, por ejemplo, "GET_SERVICES".
+    /// </summary>
+    [XmlAttribute(AttributeName = "xsi:type")]
+    [JsonProperty("type")]
+    public string Type { get; set; }
 }
 
 
 
-using System.Xml.Serialization;
-using Newtonsoft.Json;
-
-/// <summary>
-/// Representa el Header de la solicitud SOAP, compuesto por Seguridad y Addressing.
-/// </summary>
-[XmlRoot(ElementName = "Header", Namespace = "http://schemas.xmlsoap.org/soap/envelope/")]
-public class Header
+[XmlRoot(ElementName = "RESPONSE", Namespace = "http://www.btsincusa.com/gp")]
+public class GetServiceResponse : BaseSoapResponse
 {
-    [XmlElement(ElementName = "SECURITY", Namespace = "http://www.btsincusa.com/gp")]
-    [JsonProperty("Security")]
-    public Security Security { get; set; }
+    public GetServiceResponse() { Type = "GET_SERVICES"; }
 
-    [XmlElement(ElementName = "ADDRESSING", Namespace = "http://www.btsincusa.com/gp")]
-    [JsonProperty("Addressing")]
-    public Addressing Addressing { get; set; }
-}
+    /// <summary>
+    /// Código de operación (4 caracteres).
+    /// </summary>
+    [XmlElement(ElementName = "OPCODE", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("OperationalCode")]
+    public string OperationalCode { get; set; }
 
-
-
-using System.Xml.Serialization;
-using Newtonsoft.Json;
-
-/// <summary>
-/// Representa la solicitud dentro del cuerpo SOAP.
-/// Contiene los datos específicos de la operación.
-/// </summary>
-[XmlRoot(ElementName = "REQUEST", Namespace = "http://www.btsincusa.com/gp")]
-public class GetDataRequest
-{
-    [XmlElement(ElementName = "AGENT_CD", Namespace = "http://www.btsincusa.com/gp")]
-    [JsonProperty("AgentCode")]
-    public string AgentCode { get; set; }
-
-    [XmlElement(ElementName = "AGENT_TRANS_TYPE_CODE", Namespace = "http://www.btsincusa.com/gp")]
-    [JsonProperty("AgentTransactionTypeCode")]
-    public string AgentTransactionTypeCode { get; set; }
+    /// <summary>
+    /// Mensaje del proceso (hasta 255 caracteres).
+    /// </summary>
+    [XmlElement(ElementName = "PROCESS_MSG", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("ProcessMessage")]
+    public string ProcessMessage { get; set; }
 }
 
 
 
 
-using System.Xml.Serialization;
-using Newtonsoft.Json;
-
-/// <summary>
-/// Representa la estructura del método GetData dentro del Body de la solicitud SOAP.
-/// </summary>
-[XmlRoot(ElementName = "GetData", Namespace = "http://www.btsincusa.com/gp")]
-public class GetData
+[XmlRoot(ElementName = "RESPONSE", Namespace = "http://www.btsincusa.com/gp")]
+public class GetProductsResponse : BaseSoapResponse
 {
-    [XmlElement(ElementName = "REQUEST", Namespace = "http://www.btsincusa.com/gp")]
-    [JsonProperty("Request")]
-    public GetDataRequest Request { get; set; }
+    public GetProductsResponse() { Type = "GET_PRODUCTS"; }
+
+    [XmlElement(ElementName = "OPCODE", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("OperationalCode")]
+    public string OperationalCode { get; set; }
+
+    [XmlElement(ElementName = "PROCESS_MSG", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("ProcessMessage")]
+    public string ProcessMessage { get; set; }
+
+    /// <summary>
+    /// Código de servicio relacionado.
+    /// </summary>
+    [XmlElement(ElementName = "SERVICE_CD", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("ServiceCode")]
+    public string ServiceCode { get; set; }
 }
 
 
 
-
-using System.Xml.Serialization;
-using Newtonsoft.Json;
-
-/// <summary>
-/// Representa el cuerpo de la solicitud SOAP.
-/// Contiene el método GetData con su respectiva solicitud.
-/// </summary>
-[XmlRoot(ElementName = "Body", Namespace = "http://schemas.xmlsoap.org/soap/envelope/")]
-public class Body
+[XmlRoot(ElementName = "RESPONSE", Namespace = "http://www.btsincusa.com/gp")]
+public class GetPaymentAgentsResponse : BaseSoapResponse
 {
-    [XmlElement(ElementName = "GetData", Namespace = "http://www.btsincusa.com/gp")]
-    [JsonProperty("GetData")]
-    public GetData GetData { get; set; }
+    public GetPaymentAgentsResponse() { Type = "GET_PAYMENT_AGENTS"; }
+
+    [XmlElement(ElementName = "OPCODE", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("OperationalCode")]
+    public string OperationalCode { get; set; }
+
+    [XmlElement(ElementName = "PROCESS_MSG", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("ProcessMessage")]
+    public string ProcessMessage { get; set; }
+
+    /// <summary>
+    /// Código del agente de pago.
+    /// </summary>
+    [XmlElement(ElementName = "PAY_AGENT_CD", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("PaymentAgentCode")]
+    public string PaymentAgentCode { get; set; }
+}
+
+[XmlRoot(ElementName = "RESPONSE", Namespace = "http://www.btsincusa.com/gp")]
+public class GetWholesaleExchangeRateResponse : BaseSoapResponse
+{
+    public GetWholesaleExchangeRateResponse() { Type = "GET_WHOLESALE_EXCHANGE_RATE"; }
+
+    [XmlElement(ElementName = "OPCODE", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("OperationalCode")]
+    public string OperationalCode { get; set; }
+
+    [XmlElement(ElementName = "WHOLESALE_FX", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("WholesaleExchangeRate")]
+    public string WholesaleExchangeRate { get; set; }
+}
 
 
+[XmlRoot(ElementName = "RESPONSE", Namespace = "http://www.btsincusa.com/gp")]
+public class GetForeignExchangeRateResponse : BaseSoapResponse
+{
+    public GetForeignExchangeRateResponse() { Type = "FOREIGN_EXCHANGE_RATE"; }
 
-    using System.Xml.Serialization;
-using Newtonsoft.Json;
+    [XmlElement(ElementName = "OPCODE", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("OperationalCode")]
+    public string OperationalCode { get; set; }
 
-/// <summary>
-/// Representa el Envelope completo de la solicitud SOAP.
-/// </summary>
+    [XmlElement(ElementName = "EXCH_RATE_FX", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("ExchangeRate")]
+    public string ExchangeRate { get; set; }
+}
+
+
+[XmlRoot(ElementName = "RESPONSE", Namespace = "http://www.btsincusa.com/gp")]
+public class GetIdentificationsResponse : BaseSoapResponse
+{
+    public GetIdentificationsResponse() { Type = "GET_IDENTIFICATIONS"; }
+
+    [XmlElement(ElementName = "OPCODE", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("OperationalCode")]
+    public string OperationalCode { get; set; }
+
+    [XmlElement(ElementName = "ISSUER_CD", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("IdentificationIssuerCode")]
+    public string IdentificationIssuerCode { get; set; }
+
+    [XmlElement(ElementName = "TYPE_CD", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("IdentificationTypeCode")]
+    public string IdentificationTypeCode { get; set; }
+}
+
+
 [XmlRoot(ElementName = "Envelope", Namespace = "http://schemas.xmlsoap.org/soap/envelope/")]
-public class SoapEnvelope
+public class SoapResponseEnvelope
 {
-    [XmlElement(ElementName = "Header", Namespace = "http://schemas.xmlsoap.org/soap/envelope/")]
-    [JsonProperty("Header")]
-    public Header Header { get; set; }
-
     [XmlElement(ElementName = "Body", Namespace = "http://schemas.xmlsoap.org/soap/envelope/")]
     [JsonProperty("Body")]
-    public Body Body { get; set; }
+    public SoapResponseBody Body { get; set; }
+}
 
-    [XmlAttribute(AttributeName = "xmlns:soapenv")]
-    public string SoapEnv { get; set; } = "http://schemas.xmlsoap.org/soap/envelope/";
-
-    [XmlAttribute(AttributeName = "xmlns:gp")]
-    public string Gp { get; set; } = "http://www.btsincusa.com/gp";
+public class SoapResponseBody
+{
+    [XmlElement(ElementName = "RESPONSE", Namespace = "http://www.btsincusa.com/gp")]
+    [JsonProperty("Response")]
+    [JsonConverter(typeof(BaseSoapResponseConverter))] // Usa el convertidor dinámico
+    public BaseSoapResponse Response { get; set; }
 }
 
 
-    using System.IO;
-using System.Xml.Serialization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
 
-public static class XmlHelper
+public class BaseSoapResponseConverter : JsonConverter<BaseSoapResponse>
 {
-    public static string SerializeToXml<T>(T obj)
+    public override BaseSoapResponse ReadJson(JsonReader reader, Type objectType, BaseSoapResponse existingValue, bool hasExistingValue, JsonSerializer serializer)
     {
-        var xmlSerializer = new XmlSerializer(typeof(T));
-        using var stringWriter = new StringWriter();
-        xmlSerializer.Serialize(stringWriter, obj);
-        return stringWriter.ToString();
+        JObject jsonObject = JObject.Load(reader);
+        string type = jsonObject["type"]?.ToString();
+
+        BaseSoapResponse response = type switch
+        {
+            "GET_SERVICES" => new GetServiceResponse(),
+            "GET_PRODUCTS" => new GetProductsResponse(),
+            "GET_PAYMENT_AGENTS" => new GetPaymentAgentsResponse(),
+            "GET_WHOLESALE_EXCHANGE_RATE" => new GetWholesaleExchangeRateResponse(),
+            "FOREIGN_EXCHANGE_RATE" => new GetForeignExchangeRateResponse(),
+            "GET_IDENTIFICATIONS" => new GetIdentificationsResponse(),
+            _ => throw new JsonSerializationException($"Tipo de respuesta desconocido: {type}")
+        };
+
+        serializer.Populate(jsonObject.CreateReader(), response);
+        return response;
+    }
+
+    public override void WriteJson(JsonWriter writer, BaseSoapResponse value, JsonSerializer serializer)
+    {
+        JObject jsonObject = JObject.FromObject(value, serializer);
+        jsonObject.WriteTo(writer);
     }
 }
 
-// Ejemplo de uso:
-var soapRequest = new SoapEnvelope
-{
-    Header = new Header
-    {
-        Security = new Security
-        {
-            SessionId = "1234",
-            UserName = "1111",
-            UserDomain = "BTS_lkkjxk",
-            UserPass = "lkljkjk@!"
-        },
-        Addressing = new Addressing
-        {
-            From = "",
-            To = ""
-        }
-    },
-    Body = new Body
-    {
-        GetData = new GetData
-        {
-            Request = new GetDataRequest
-            {
-                AgentCode = "HSK",
-                AgentTransactionTypeCode = "USR1"
-            }
-        }
-    }
-};
 
-string xmlRequest = XmlHelper.SerializeToXml(soapRequest);
-Console.WriteLine(xmlRequest);
+
+
+
+
+
+
+
+
