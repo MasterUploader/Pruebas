@@ -1,41 +1,35 @@
-using System.Xml.Serialization;
-using Newtonsoft.Json;
-
-/// <summary>
-/// DTO que representa la solicitud SOAP genérica.
-/// </summary>
-[XmlRoot(ElementName = "Envelope", Namespace = "http://schemas.xmlsoap.org/soap/envelope/")]
-public class SoapRequestDto
+private string SerializeToXml<T>(T obj)
 {
-    [XmlElement(ElementName = "AgentCode")]
-    [JsonProperty("AgentCode")]
-    public string AgentCode { get; set; }
+    try
+    {
+        XmlSerializerNamespaces ns = new XmlSerializerNamespaces();
+        ns.Add("xsi", "http://www.w3.org/2001/XMLSchema-instance");
+        ns.Add("gp", "http://www.btsincusa.com/gp");
 
-    /// <summary>
-    /// Define la estructura de la solicitud, que puede variar (GetServiceRequest, GetProductsRequest, etc.)
-    /// </summary>
-    [XmlElement(ElementName = "Request")]
-    [JsonProperty("Request")]
-    [XmlInclude(typeof(GetServiceRequest))]
-    [XmlInclude(typeof(GetProductsRequest))]
-    [XmlInclude(typeof(GetPaymentAgentsRequest))]
-    public BaseRequest Request { get; set; } // ⬅️ Solución: BaseRequest con XmlInclude
+        // Forzar que el campo Type tenga el valor correcto antes de serializar
+        if (obj is BaseRequest baseRequest)
+        {
+            baseRequest.Type = obj.GetType().Name; 
+        }
 
-    public SoapRequestDto() { }
-}
+        XmlSerializer serializer = new XmlSerializer(typeof(T), new Type[]
+        {
+            typeof(GetServiceRequest),
+            typeof(GetForeignExchangeRateRequest),
+            typeof(GetIdentificationsRequest),
+            typeof(GetPaymentAgentsRequest),
+            typeof(GetProductsRequest),
+            typeof(GetWholesaleExchangeRateRequest)
+        });
 
-
-
-
-/// <summary>
-/// Clase base para todas las solicitudes específicas (GetServiceRequest, GetProductsRequest, etc.)
-/// </summary>
-[XmlInclude(typeof(GetServiceRequest))]
-[XmlInclude(typeof(GetProductsRequest))]
-[XmlInclude(typeof(GetPaymentAgentsRequest))]
-public abstract class BaseRequest
-{
-    [XmlAttribute(AttributeName = "xsi:type")]
-    [JsonProperty("Type")]
-    public string Type { get; set; }
+        using (StringWriter stringWriter = new StringWriter())
+        {
+            serializer.Serialize(stringWriter, obj, ns);
+            return stringWriter.ToString();
+        }
+    }
+    catch (Exception ex)
+    {
+        throw new Exception($"Error serializando XML: {ex.Message}");
+    }
 }
