@@ -1,67 +1,85 @@
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using System;
+using Microsoft.AspNetCore.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.IO;
+using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>
-/// Convertidor de JSON a la clase base BaseRequest.
-/// Permite la deserialización automática de JSON en diferentes subclases de BaseRequest.
+/// Middleware para validar que la solicitud contenga un "header" en el JSON del cuerpo de la petición.
+/// Evita deserializar todo el JSON y solo revisa si la clave "header" está presente.
 /// </summary>
-public class BaseRequestConverter : JsonConverter<BaseRequest>
+public class HeaderValidationMiddleware
 {
+    private readonly RequestDelegate _next;
+
     /// <summary>
-    /// Convierte un objeto JSON en una instancia de una subclase de BaseRequest.
+    /// Constructor que recibe el siguiente middleware en la cadena de ejecución.
     /// </summary>
-    /// <param name="reader">El lector JSON que contiene los datos.</param>
-    /// <param name="objectType">El tipo del objeto a convertir.</param>
-    /// <param name="existingValue">Valor existente (ignorado en este caso).</param>
-    /// <param name="serializer">El serializador JSON a usar.</param>
-    /// <returns>Una instancia de la subclase correcta de BaseRequest.</returns>
-    public override BaseRequest? ReadJson(JsonReader reader, Type objectType, BaseRequest? existingValue, bool hasExistingValue, JsonSerializer serializer)
+    /// <param name="next">Delegate que representa el siguiente middleware en la cadena.</param>
+    public HeaderValidationMiddleware(RequestDelegate next)
     {
-        // Cargar el objeto JSON en un JObject
-        JObject jsonObject = JObject.Load(reader);
-
-        // Obtener el tipo de solicitud desde el JSON
-        string? type = jsonObject["Type"]?.ToString();
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new JsonSerializationException("El campo 'Type' es obligatorio para determinar el tipo de solicitud.");
-        }
-
-        // Determinar la subclase correcta de BaseRequest según el valor de "Type"
-        BaseRequest? request = type switch
-        {
-            "GET_SERVICES" => new GetServiceRequest(),
-            "GET_PRODUCTS" => new GetProductsRequest(),
-            "GET_PAYMENT_AGENTS" => new GetPaymentAgentsRequest(),
-            "GET_WHOLESALE_EXCHANGE_RATE" => new GetWholesaleExchangeRateRequest(),
-            "FOREIGN_EXCHANGE_RATE" => new GetForeignExchangeRateRequest(),
-            "GET_IDENTIFICATIONS" => new GetIdentificationsRequest(),
-            _ => throw new JsonSerializationException($"Tipo de solicitud desconocido: {type}")
-        };
-
-        // Poblar la instancia con los datos del JSON
-        serializer.Populate(jsonObject.CreateReader(), request);
-
-        return request;
+        _next = next;
     }
 
     /// <summary>
-    /// Convierte una instancia de BaseRequest en un objeto JSON.
+    /// Método principal que se ejecuta en cada solicitud HTTP.
+    /// Valida que el "header" esté presente en el JSON del `body`.
     /// </summary>
-    /// <param name="writer">El escritor JSON donde se escribirá la salida.</param>
-    /// <param name="value">El objeto BaseRequest a serializar.</param>
-    /// <param name="serializer">El serializador JSON a usar.</param>
-    public override void WriteJson(JsonWriter writer, BaseRequest? value, JsonSerializer serializer)
+    public async Task Invoke(HttpContext context)
     {
-        if (value == null)
+        // **1️⃣ Habilitar el reposicionamiento del cuerpo**
+        // Esto permite leer el `body` sin que se consuma completamente, 
+        // para que otros middlewares y el controlador puedan acceder a él.
+        context.Request.EnableBuffering();
+
+        // **2️⃣ Leer el body sin bloquear la ejecución**
+        using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
+        var bodyContent = await reader.ReadToEndAsync();
+        context.Request.Body.Position = 0; // Resetear la posición del `body` para que otros lo puedan leer.
+
+        // **3️⃣ Intentar parsear el JSON sin afectar el modelo original**
+        try
         {
-            writer.WriteNull();
+            using var jsonDoc = JsonDocument.Parse(bodyContent);
+
+            // **4️⃣ Validar si el JSON contiene la propiedad "header"**
+            if (!jsonDoc.RootElement.TryGetProperty("header", out var headerElement))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                {
+                    Message = "El 'header' es obligatorio en el body."
+                }));
+                return;
+            }
+        }
+        catch (JsonException)
+        {
+            // **5️⃣ Manejo de error si el JSON es inválido**
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new
+            {
+                Message = "Formato de solicitud inválido."
+            }));
             return;
         }
 
-        // Serializar la instancia como un JObject
-        JObject jsonObject = JObject.FromObject(value, serializer);
-        jsonObject.WriteTo(writer);
+        // **6️⃣ Si la validación pasa, continuar con la ejecución del siguiente middleware o controlador**
+        await _next(context);
+    }
+}
+
+/// <summary>
+/// Extensión para registrar el middleware en la aplicación.
+/// </summary>
+public static class HeaderValidationMiddlewareExtensions
+{
+    /// <summary>
+    /// Método de extensión para agregar el `HeaderValidationMiddleware` en la cadena de middlewares.
+    /// </summary>
+    public static IApplicationBuilder UseHeaderValidation(this IApplicationBuilder builder)
+    {
+        return builder.UseMiddleware<HeaderValidationMiddleware>();
     }
 }
