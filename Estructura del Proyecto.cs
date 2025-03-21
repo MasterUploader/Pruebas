@@ -1,85 +1,89 @@
-using Microsoft.AspNetCore.Http;
-using System.Text.Json;
+using System;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Serialization;
+using Newtonsoft.Json;
 using System.IO;
-using System.Collections.Generic;
-using System.Linq;
 
-/// <summary>
-/// Middleware para validar que la solicitud contenga un "header" en el JSON del cuerpo de la petición.
-/// Evita deserializar todo el JSON y solo revisa si la clave "header" está presente.
-/// </summary>
-public class HeaderValidationMiddleware
+public class SoapService
 {
-    private readonly RequestDelegate _next;
+    private readonly HttpClient _httpClient;
 
     /// <summary>
-    /// Constructor que recibe el siguiente middleware en la cadena de ejecución.
+    /// Constructor que inicializa el cliente HTTP.
     /// </summary>
-    /// <param name="next">Delegate que representa el siguiente middleware en la cadena.</param>
-    public HeaderValidationMiddleware(RequestDelegate next)
+    public SoapService(HttpClient httpClient)
     {
-        _next = next;
+        _httpClient = httpClient;
     }
 
     /// <summary>
-    /// Método principal que se ejecuta en cada solicitud HTTP.
-    /// Valida que el "header" esté presente en el JSON del `body`.
+    /// Método para enviar una solicitud SOAP basada en el objeto recibido.
+    /// Convierte la solicitud JSON a XML, la envía y devuelve la respuesta en JSON.
     /// </summary>
-    public async Task Invoke(HttpContext context)
+    public async Task<string> SendSoapRequestAsync(SoapRequestDto requestDto, string soapEndpoint, string soapAction)
     {
-        // **1️⃣ Habilitar el reposicionamiento del cuerpo**
-        // Esto permite leer el `body` sin que se consuma completamente, 
-        // para que otros middlewares y el controlador puedan acceder a él.
-        context.Request.EnableBuffering();
-
-        // **2️⃣ Leer el body sin bloquear la ejecución**
-        using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
-        var bodyContent = await reader.ReadToEndAsync();
-        context.Request.Body.Position = 0; // Resetear la posición del `body` para que otros lo puedan leer.
-
-        // **3️⃣ Intentar parsear el JSON sin afectar el modelo original**
         try
         {
-            using var jsonDoc = JsonDocument.Parse(bodyContent);
+            // **1️⃣ Convertir el DTO de la solicitud a XML**
+            string xmlRequest = SerializeToXml(requestDto.Request);
 
-            // **4️⃣ Validar si el JSON contiene la propiedad "header"**
-            if (!jsonDoc.RootElement.TryGetProperty("header", out var headerElement))
+            // **2️⃣ Construir el envelope SOAP**
+            string soapEnvelope = $@"
+            <soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/'>
+                <soapenv:Header/>
+                <soapenv:Body>
+                    {xmlRequest}
+                </soapenv:Body>
+            </soapenv:Envelope>";
+
+            // **3️⃣ Configurar la solicitud HTTP**
+            var content = new StringContent(soapEnvelope, Encoding.UTF8, "text/xml");
+            var request = new HttpRequestMessage(HttpMethod.Post, soapEndpoint)
             {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                {
-                    Message = "El 'header' es obligatorio en el body."
-                }));
-                return;
-            }
+                Content = content
+            };
+            request.Headers.Add("SOAPAction", soapAction);
+
+            // **4️⃣ Enviar la petición SOAP**
+            HttpResponseMessage response = await _httpClient.SendAsync(request);
+            string xmlResponse = await response.Content.ReadAsStringAsync();
+
+            // **5️⃣ Convertir la respuesta XML a JSON**
+            var soapResponse = DeserializeFromXml<SoapResponse>(xmlResponse);
+            string jsonResponse = JsonConvert.SerializeObject(soapResponse, Formatting.Indented);
+
+            return jsonResponse;
         }
-        catch (JsonException)
+        catch (Exception ex)
         {
-            // **5️⃣ Manejo de error si el JSON es inválido**
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new
-            {
-                Message = "Formato de solicitud inválido."
-            }));
-            return;
+            return JsonConvert.SerializeObject(new { Error = ex.Message });
         }
-
-        // **6️⃣ Si la validación pasa, continuar con la ejecución del siguiente middleware o controlador**
-        await _next(context);
     }
-}
 
-/// <summary>
-/// Extensión para registrar el middleware en la aplicación.
-/// </summary>
-public static class HeaderValidationMiddlewareExtensions
-{
     /// <summary>
-    /// Método de extensión para agregar el `HeaderValidationMiddleware` en la cadena de middlewares.
+    /// Método para serializar un objeto a XML.
     /// </summary>
-    public static IApplicationBuilder UseHeaderValidation(this IApplicationBuilder builder)
+    private string SerializeToXml<T>(T obj)
     {
-        return builder.UseMiddleware<HeaderValidationMiddleware>();
+        var xmlSerializer = new XmlSerializer(typeof(T));
+        using (var stringWriter = new StringWriter())
+        {
+            xmlSerializer.Serialize(stringWriter, obj);
+            return stringWriter.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Método para deserializar XML a un objeto.
+    /// </summary>
+    private T DeserializeFromXml<T>(string xml)
+    {
+        var xmlSerializer = new XmlSerializer(typeof(T));
+        using (var stringReader = new StringReader(xml))
+        {
+            return (T)xmlSerializer.Deserialize(stringReader);
+        }
     }
 }
