@@ -1,53 +1,28 @@
 public static class XmlJsonHelper
 {
     /// <summary>
-    /// Convierte un XML deserializado (ya sea objeto o string) directamente a un JObject limpio.
+    /// Convierte un XML en una representación JSON limpia (sin xmlns, xsi, etc.)
     /// </summary>
-    /// <param name="deserializedObject">Objeto deserializado desde XML</param>
-    /// <param name="includeOnlyData">Si se desea extraer solo el nodo RESPONSE</param>
-    public static JObject ToCleanJson(object deserializedObject, bool includeOnlyData = false)
+    /// <typeparam name="T">Tipo del modelo de respuesta</typeparam>
+    /// <param name="xml">XML de entrada</param>
+    /// <returns>JObject con la estructura limpia del modelo</returns>
+    public static JObject ToJsonFromModel<T>(string xml) where T : class
     {
-        if (deserializedObject == null)
-            return JObject.FromObject(new { error = "Objeto nulo" });
+        if (string.IsNullOrWhiteSpace(xml))
+            return new JObject();
 
-        var fullJson = JObject.FromObject(deserializedObject);
+        // Deserializar el XML al tipo de modelo
+        var serializer = new XmlSerializer(typeof(T));
+        using var stringReader = new StringReader(xml);
+        var deserializedObject = serializer.Deserialize(stringReader);
 
-        // Opcional: limpiar @xmlns, @xsi:type, etc.
-        RemoveXmlMetadata(fullJson);
-
-        // Si se desea devolver únicamente el contenido de RESPONSE
-        if (includeOnlyData)
+        // Convertir el objeto deserializado a JSON y luego a JObject
+        var json = JsonConvert.SerializeObject(deserializedObject, new JsonSerializerSettings
         {
-            var response = fullJson
-                .SelectToken("Body.ExecTRResponse.ExecTRResult.RESPONSE");
+            NullValueHandling = NullValueHandling.Ignore,
+            Formatting = Formatting.Indented
+        });
 
-            return response != null
-                ? JObject.FromObject(response)
-                : fullJson;
-        }
-
-        return fullJson;
-    }
-
-    private static void RemoveXmlMetadata(JToken token)
-    {
-        if (token.Type == JTokenType.Object)
-        {
-            var propsToRemove = ((JObject)token)
-                .Properties()
-                .Where(p => p.Name.StartsWith("@"))
-                .ToList();
-
-            foreach (var prop in propsToRemove)
-                prop.Remove();
-
-            foreach (var child in token.Children())
-                RemoveXmlMetadata(child);
-        }
-        else if (token.Type == JTokenType.Array)
-        {
-            foreach (var item in token.Children())
-                RemoveXmlMetadata(item);
-        }
+        return JObject.Parse(json);
     }
 }
