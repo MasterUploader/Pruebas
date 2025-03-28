@@ -1,49 +1,53 @@
-using System;
-using System.IO;
-using System.Xml;
-using System.Xml.Linq;
-using Newtonsoft.Json;
-
-public static class SoapXmlToJsonHelper
+public static class XmlJsonHelper
 {
-    public static string ConvertXmlToJsonAuto(string xmlContent)
+    /// <summary>
+    /// Convierte un XML deserializado (ya sea objeto o string) directamente a un JObject limpio.
+    /// </summary>
+    /// <param name="deserializedObject">Objeto deserializado desde XML</param>
+    /// <param name="includeOnlyData">Si se desea extraer solo el nodo RESPONSE</param>
+    public static JObject ToCleanJson(object deserializedObject, bool includeOnlyData = false)
     {
-        try
-        {
-            var document = XDocument.Parse(xmlContent);
-            XElement execNode = FindRelevantNode(document.Root);
+        if (deserializedObject == null)
+            return JObject.FromObject(new { error = "Objeto nulo" });
 
-            if (execNode == null)
-                throw new InvalidOperationException("No se encontró un nodo ExecTR, GetData, ExecTRResponse o GetDataResponse.");
+        var fullJson = JObject.FromObject(deserializedObject);
 
-            string json = JsonConvert.SerializeXNode(execNode, Formatting.Indented, omitRootObject: false);
-            return json;
-        }
-        catch (Exception ex)
+        // Opcional: limpiar @xmlns, @xsi:type, etc.
+        RemoveXmlMetadata(fullJson);
+
+        // Si se desea devolver únicamente el contenido de RESPONSE
+        if (includeOnlyData)
         {
-            return JsonConvert.SerializeObject(new { error = ex.Message });
+            var response = fullJson
+                .SelectToken("Body.ExecTRResponse.ExecTRResult.RESPONSE");
+
+            return response != null
+                ? JObject.FromObject(response)
+                : fullJson;
         }
+
+        return fullJson;
     }
 
-    private static XElement FindRelevantNode(XElement element)
+    private static void RemoveXmlMetadata(JToken token)
     {
-        if (element == null)
-            return null;
-
-        string localName = element.Name.LocalName.ToLower();
-        if (localName == "exectr" || localName == "getdata" ||
-            localName == "exectrresponse" || localName == "getdataresponse")
+        if (token.Type == JTokenType.Object)
         {
-            return element;
-        }
+            var propsToRemove = ((JObject)token)
+                .Properties()
+                .Where(p => p.Name.StartsWith("@"))
+                .ToList();
 
-        foreach (var child in element.Elements())
+            foreach (var prop in propsToRemove)
+                prop.Remove();
+
+            foreach (var child in token.Children())
+                RemoveXmlMetadata(child);
+        }
+        else if (token.Type == JTokenType.Array)
         {
-            var result = FindRelevantNode(child);
-            if (result != null)
-                return result;
+            foreach (var item in token.Children())
+                RemoveXmlMetadata(item);
         }
-
-        return null;
     }
 }
