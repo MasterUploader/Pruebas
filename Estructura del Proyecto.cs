@@ -1,59 +1,53 @@
 public static class XmlJsonHelper
 {
-    public static JObject ToCleanJson(string xml, string targetNode = null, bool returnAsString = false, out string json)
+    public static JObject ToCleanJson(string xml, string targetNode = null, bool includeOnlyData = false)
     {
-        var doc = XDocument.Parse(xml);
-
-        // Eliminar todos los atributos xmlns, xsi, etc.
-        foreach (var el in doc.Descendants())
-        {
-            el.ReplaceAttributes(el.Attributes().Where(a =>
-                !a.IsNamespaceDeclaration &&
-                !a.Name.LocalName.StartsWith("xmlns") &&
-                !a.Name.LocalName.StartsWith("xsi") &&
-                !a.Name.LocalName.StartsWith("type")));
-        }
-
-        // Buscar el nodo deseado
-        XElement selectedNode = doc.Root;
-        if (!string.IsNullOrEmpty(targetNode))
-        {
-            selectedNode = doc.Descendants().FirstOrDefault(x => x.Name.LocalName == targetNode) ?? doc.Root;
-        }
-
-        // Convertir a XmlDocument
         var xmlDoc = new XmlDocument();
-        xmlDoc.LoadXml(selectedNode.ToString(SaveOptions.DisableFormatting));
+        xmlDoc.LoadXml(xml);
 
-        // Convertir a JSON
-        json = JsonConvert.SerializeXmlNode(xmlDoc.DocumentElement, Formatting.Indented, true);
+        // Elimina atributos como xmlns, xsi
+        RemoveAllAttributes(xmlDoc.DocumentElement);
+
+        // Selecciona el nodo deseado si se indicó
+        XmlNode nodeToConvert = xmlDoc.DocumentElement;
+        if (!string.IsNullOrWhiteSpace(targetNode))
+        {
+            nodeToConvert = xmlDoc.GetElementsByTagName(targetNode)?.Item(0);
+        }
+
+        if (nodeToConvert == null)
+            throw new Exception($"No se encontró el nodo '{targetNode}' en el XML.");
+
+        // Convierte el nodo a JSON
+        var json = JsonConvert.SerializeXmlNode(nodeToConvert, Formatting.None, true);
+
+        // Convierte a JObject y remueve atributos extras (si aplica)
         var jObj = JObject.Parse(json);
 
-        // Limpieza final de cualquier @xmlns o @xsi aún presente
-        CleanJsonNamespaces(jObj);
+        if (includeOnlyData)
+        {
+            // Retorna directamente el contenido del nodo
+            return jObj.First?.First as JObject ?? jObj;
+        }
 
-        json = jObj.ToString(Formatting.Indented);
         return jObj;
     }
 
-    private static void CleanJsonNamespaces(JToken token)
+    private static void RemoveAllAttributes(XmlNode node)
     {
-        if (token.Type == JTokenType.Object)
+        if (node.Attributes != null)
         {
-            var propsToRemove = ((JObject)token).Properties()
-                .Where(p => p.Name.StartsWith("@xmlns") || p.Name.StartsWith("@xsi") || p.Name.StartsWith("@"))
-                .ToList();
-
-            foreach (var prop in propsToRemove)
-                prop.Remove();
-
-            foreach (var child in ((JObject)token).Properties())
-                CleanJsonNamespaces(child.Value);
+            for (int i = node.Attributes.Count - 1; i >= 0; i--)
+            {
+                var attr = node.Attributes[i];
+                if (attr.Name.StartsWith("xmlns") || attr.Name.StartsWith("xsi") || attr.Name.StartsWith("xsd"))
+                    node.Attributes.Remove(attr);
+            }
         }
-        else if (token.Type == JTokenType.Array)
+
+        foreach (XmlNode child in node.ChildNodes)
         {
-            foreach (var item in (JArray)token)
-                CleanJsonNamespaces(item);
+            RemoveAllAttributes(child);
         }
     }
 }
