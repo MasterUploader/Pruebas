@@ -1,27 +1,25 @@
+using System.Xml;
+using Newtonsoft.Json;
+
 public static class XmlJsonHelper
 {
     /// <summary>
-    /// Convierte un XML en una representación JSON limpia (sin xmlns, xsi, etc.)
+    /// Convierte el nodo RESPONSE (u otro nodo raíz deseado) de un XML en un JObject limpio.
     /// </summary>
-    /// <typeparam name="T">Tipo del modelo de respuesta</typeparam>
-    /// <param name="xml">XML de entrada</param>
-    /// <returns>JObject con la estructura limpia del modelo</returns>
-    public static JObject ToJsonFromModel<T>(string xml) where T : class
+    /// <param name="rawXml">El XML completo como string.</param>
+    /// <param name="targetNodeName">El nombre del nodo que se desea convertir, por defecto "RESPONSE".</param>
+    /// <returns>JObject con los datos del nodo convertido.</returns>
+    public static JObject ExtractNodeAsJson(string rawXml, string targetNodeName = "RESPONSE")
     {
-        if (string.IsNullOrWhiteSpace(xml))
-            return new JObject();
+        var xmlDoc = new XmlDocument();
+        xmlDoc.LoadXml(rawXml);
 
-        // Deserializar el XML al tipo de modelo
-        var serializer = new XmlSerializer(typeof(T));
-        using var stringReader = new StringReader(xml);
-        var deserializedObject = serializer.Deserialize(stringReader);
+        var node = xmlDoc.GetElementsByTagName(targetNodeName)[0];
 
-        // Convertir el objeto deserializado a JSON y luego a JObject
-        var json = JsonConvert.SerializeObject(deserializedObject, new JsonSerializerSettings
-        {
-            NullValueHandling = NullValueHandling.Ignore,
-            Formatting = Formatting.Indented
-        });
+        if (node == null)
+            throw new Exception($"No se encontró el nodo '{targetNodeName}' en el XML.");
+
+        string json = JsonConvert.SerializeXmlNode(node, Formatting.None, true);
 
         return JObject.Parse(json);
     }
