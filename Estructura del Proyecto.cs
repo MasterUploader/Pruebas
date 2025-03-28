@@ -1,26 +1,32 @@
-using System.Xml;
-using Newtonsoft.Json;
-
 public static class XmlJsonHelper
 {
-    /// <summary>
-    /// Convierte el nodo RESPONSE (u otro nodo raíz deseado) de un XML en un JObject limpio.
-    /// </summary>
-    /// <param name="rawXml">El XML completo como string.</param>
-    /// <param name="targetNodeName">El nombre del nodo que se desea convertir, por defecto "RESPONSE".</param>
-    /// <returns>JObject con los datos del nodo convertido.</returns>
-    public static JObject ExtractNodeAsJson(string rawXml, string targetNodeName = "RESPONSE")
+    public static JObject ToCleanJson(string xml, string targetNode = null, bool asString = false, out string jsonString)
     {
+        var doc = XDocument.Parse(xml);
+
+        // Eliminar atributos xmlns, xsi, etc.
+        foreach (var el in doc.Descendants())
+        {
+            el.Attributes().Where(a =>
+                a.IsNamespaceDeclaration ||
+                a.Name.LocalName.StartsWith("xmlns") ||
+                a.Name.LocalName.StartsWith("xsi") ||
+                a.Name.LocalName == "type").Remove();
+        }
+
+        // Buscar nodo deseado
+        XElement selectedNode = doc.Root;
+        if (!string.IsNullOrEmpty(targetNode))
+        {
+            selectedNode = doc.Descendants().FirstOrDefault(x => x.Name.LocalName == targetNode) ?? doc.Root;
+        }
+
+        // Convertir a JSON
+        string cleanedXml = selectedNode.ToString(SaveOptions.DisableFormatting);
         var xmlDoc = new XmlDocument();
-        xmlDoc.LoadXml(rawXml);
+        xmlDoc.LoadXml(cleanedXml);
+        jsonString = JsonConvert.SerializeXmlNode(xmlDoc.DocumentElement, Newtonsoft.Json.Formatting.Indented, true);
 
-        var node = xmlDoc.GetElementsByTagName(targetNodeName)[0];
-
-        if (node == null)
-            throw new Exception($"No se encontró el nodo '{targetNodeName}' en el XML.");
-
-        string json = JsonConvert.SerializeXmlNode(node, Formatting.None, true);
-
-        return JObject.Parse(json);
+        return JObject.Parse(jsonString);
     }
 }
