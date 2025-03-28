@@ -1,116 +1,187 @@
 using System;
-using System.IO;
-using System.Text;
-using System.Xml;
 using System.Xml.Serialization;
 
-namespace Utilities
+/// <summary>
+/// Modelo que representa los datos del nodo RESPONSE de la respuesta MONEY_TRANSFER_QUERY_RESPONSE.
+/// </summary>
+[Serializable]
+[XmlRoot("RESPONSE", Namespace = "http://www.btsincusa.com/gp/")]
+public class ConsultaResponseData
 {
-    /// <summary>
-    /// Clase estática que proporciona métodos para serializar y deserializar objetos a/from XML,
-    /// con soporte específico para estructuras SOAP y ajustes personalizados.
-    /// </summary>
-    public static class XmlHelper
-    {
-        /// <summary>
-        /// Serializa un objeto a una cadena XML codificada en UTF-8.
-        /// Postprocesa el XML para ajustar el nodo <gp:REQUEST> a <REQUEST xmlns="http://www.btsincusa.com/gp">.
-        /// </summary>
-        /// <typeparam name="T">Tipo del objeto a serializar.</typeparam>
-        /// <param name="obj">Instancia del objeto a serializar.</param>
-        /// <param name="namespaces">Namespaces XML opcionales (no usados en este caso para evitar conflictos).</param>
-        /// <returns>Cadena en formato XML con el ajuste aplicado.</returns>
-        public static string SerializeToXml<T>(T obj, XmlSerializerNamespaces namespaces = null)
-        {
-            // Validación: asegura que el objeto no sea null
-            if (obj == null)
-                throw new ArgumentNullException(nameof(obj), "El objeto no puede ser null.");
+    [XmlElement("OPCODE")]
+    public string OpCode { get; set; }
 
-            // Crea un serializador XML para el tipo T
-            var xmlSerializer = new XmlSerializer(typeof(T));
+    [XmlElement("PROCESS_MSG")]
+    public string ProcessMsg { get; set; }
 
-            // Configura las opciones de escritura XML
-            var settings = new XmlWriterSettings
-            {
-                Encoding = Encoding.UTF8,        // Codificación UTF-8
-                Indent = true,                  // Indentación para legibilidad
-                OmitXmlDeclaration = false      // Incluye la declaración XML
-            };
+    [XmlElement("ERROR_PARAM_FULL_NAME")]
+    public string ErrorParamFullName { get; set; }
 
-            // Usa un StringWriter personalizado para capturar el XML
-            using var stringWriter = new Utf8StringWriter();
-            using var writer = XmlWriter.Create(stringWriter, settings);
+    [XmlElement("TRANS_STATUS_CD_ONP")]
+    public string TransStatusCdOnp { get; set; }
 
-            // Serializa el objeto sin pasar namespaces explícitos, dejando que la clase defina los namespaces
-            xmlSerializer.Serialize(writer, obj);
+    [XmlElement("TRANS_STATUS_CD")]
+    public string TransStatusCd { get; set; }
 
-            // Obtiene el XML generado
-            var xml = stringWriter.ToString();
+    [XmlElement("PROCESS_DT")]
+    public string ProcessDt { get; set; }
 
-            // Aplica el postprocesamiento para ajustar <gp:REQUEST>
-            return AdjustRequestNamespace(xml);
-        }
+    [XmlElement("PROCESS_TM")]
+    public string ProcessTm { get; set; }
 
-        /// <summary>
-        /// Postprocesa el XML generado para reemplazar <gp:REQUEST> por <REQUEST xmlns="http://www.btsincusa.com/gp">.
-        /// </summary>
-        /// <param name="xml">Cadena XML generada por el serializador.</param>
-        /// <returns>Cadena XML ajustada.</returns>
-        private static string AdjustRequestNamespace(string xml)
-        {
-            // Carga el XML en un XmlDocument
-            var doc = new XmlDocument();
-            doc.LoadXml(xml);
-
-            // Crea un administrador de namespaces para trabajar con gp:
-            var nsmgr = new XmlNamespaceManager(doc.NameTable);
-            nsmgr.AddNamespace("gp", "http://www.btsincusa.com/gp");
-
-            // Busca el nodo <gp:REQUEST>
-            var requestNode = doc.SelectSingleNode("//gp:REQUEST", nsmgr);
-            if (requestNode != null)
-            {
-                // Crea un nuevo nodo <REQUEST> con namespace por defecto
-                var newRequestNode = doc.CreateElement("REQUEST", "http://www.btsincusa.com/gp");
-
-                // Copia los nodos hijos
-                foreach (XmlNode child in requestNode.ChildNodes)
-                {
-                    newRequestNode.AppendChild(child.Clone());
-                }
-
-                // Reemplaza el nodo original
-                requestNode.ParentNode?.ReplaceChild(newRequestNode, requestNode);
-            }
-
-            // Guarda el XML ajustado
-            using var writer = new StringWriter();
-            doc.Save(writer);
-            return writer.ToString();
-        }
-
-        /// <summary>
-        /// Deserializa una cadena XML a una instancia del tipo especificado.
-        /// </summary>
-        /// <typeparam name="T">Tipo de destino.</typeparam>
-        /// <param name="xml">XML como cadena.</param>
-        /// <returns>Instancia deserializada del tipo especificado.</returns>
-        public static T DeserializeFromXml<T>(string xml)
-        {
-            if (string.IsNullOrWhiteSpace(xml))
-                throw new ArgumentNullException(nameof(xml), "El XML no puede ser null o vacío.");
-
-            var xmlSerializer = new XmlSerializer(typeof(T));
-            using var stringReader = new StringReader(xml);
-            return (T)xmlSerializer.Deserialize(stringReader)!;
-        }
-
-        /// <summary>
-        /// Implementación de StringWriter que asegura la codificación en UTF-8.
-        /// </summary>
-        private class Utf8StringWriter : StringWriter
-        {
-            public override Encoding Encoding => Encoding.UTF8;
-        }
-    }
+    [XmlElement("DATA")]
+    public ConsultaData Data { get; set; }
 }
+
+/// <summary>
+/// Modelo que representa los datos dentro del nodo DATA.
+/// </summary>
+public class ConsultaData
+{
+    [XmlElement("SALE_DT")]
+    public string SaleDt { get; set; }
+
+    [XmlElement("SALE_TM")]
+    public string SaleTm { get; set; }
+
+    [XmlElement("SERVICE_CD")]
+    public string ServiceCd { get; set; }
+
+    [XmlElement("PAYMENT_TYPE_CD")]
+    public string PaymentTypeCd { get; set; }
+
+    [XmlElement("ORIG_COUNTRY_CD")]
+    public string OrigCountryCd { get; set; }
+
+    [XmlElement("ORIG_CURR_CD")]
+    public string OrigCurrencyCd { get; set; }
+
+    [XmlElement("ORIG_AM")]
+    public string OrigAmount { get; set; }
+
+    [XmlElement("DEST_COUNTRY_CD")]
+    public string DestCountryCd { get; set; }
+
+    [XmlElement("DEST_CURR_CD")]
+    public string DestCurrencyCd { get; set; }
+
+    [XmlElement("DEST_AM")]
+    public string DestAmount { get; set; }
+
+    [XmlElement("EX_RATE_CURR_CD")]
+    public string ExchangeRateCurrencyCd { get; set; }
+
+    [XmlElement("EX_RATE")]
+    public string ExchangeRate { get; set; }
+
+    [XmlElement("MARKET_REF_CURRENCY_CD")]
+    public string MarketRefCurrencyCd { get; set; }
+
+    [XmlElement("MARKET_REF_CURRENCY_FX")]
+    public string MarketRefCurrencyFx { get; set; }
+
+    [XmlElement("MARKET_REF_CURRENCY_AM")]
+    public string MarketRefCurrencyAm { get; set; }
+
+    [XmlElement("CS_AGENT_CD")]
+    public string CsAgentCd { get; set; }
+
+    [XmlElement("CS_ACCOUNT_NO")]
+    public string CsAccountNo { get; set; }
+
+    [XmlElement("CS_ACCOUNT_TYPE_CD")]
+    public string CsAccountTypeCd { get; set; }
+
+    [XmlElement("R_ACCOUNT_NO")]
+    public string RAccountNo { get; set; }
+
+    [XmlElement("R_ACCOUNT_TYPE_CD")]
+    public string RAccountTypeCd { get; set; }
+
+    [XmlElement("R_ACCOUNT_NM")]
+    public string RAccountName { get; set; }
+
+    [XmlElement("R_AGENT_CD")]
+    public string RAgentCd { get; set; }
+
+    [XmlElement("R_AGENT_REGION_SD")]
+    public string RAgentRegionSd { get; set; }
+
+    [XmlElement("R_AGENT_BRANCH_SD")]
+    public string RAgentBranchSd { get; set; }
+
+    [XmlElement("SENDER")]
+    public ConsultaPersona Sender { get; set; }
+
+    [XmlElement("RECIPIENT")]
+    public ConsultaPersona Recipient { get; set; }
+
+    [XmlElement("RECIPIENT_IDENTIFICATION")]
+    public ConsultaIdentificacion RecipientIdentification { get; set; }
+
+    [XmlElement("SENDER_IDENTIFICATION")]
+    public ConsultaIdentificacion SenderIdentification { get; set; }
+}
+
+/// <summary>
+/// Modelo común para remitente o destinatario.
+/// </summary>
+public class ConsultaPersona
+{
+    [XmlElement("FIRST_NAME")]
+    public string FirstName { get; set; }
+
+    [XmlElement("MIDDLE_NAME")]
+    public string MiddleName { get; set; }
+
+    [XmlElement("LAST_NAME")]
+    public string LastName { get; set; }
+
+    [XmlElement("MOTHER_M_NAME")]
+    public string MotherMName { get; set; }
+
+    [XmlElement("ADDRESS")]
+    public string Address { get; set; }
+
+    [XmlElement("CITY")]
+    public string City { get; set; }
+
+    [XmlElement("STATE_CD")]
+    public string StateCd { get; set; }
+
+    [XmlElement("COUNTRY_CD")]
+    public string CountryCd { get; set; }
+
+    [XmlElement("ZIP_CODE")]
+    public string ZipCode { get; set; }
+
+    [XmlElement("PHONE")]
+    public string Phone { get; set; }
+}
+
+/// <summary>
+/// Modelo común para identificaciones del remitente o destinatario.
+/// </summary>
+public class ConsultaIdentificacion
+{
+    [XmlElement("TYPE_CD")]
+    public string TypeCd { get; set; }
+
+    [XmlElement("ISSUER_CD")]
+    public string IssuerCd { get; set; }
+
+    [XmlElement("ISSUER_STATE_CD")]
+    public string IssuerStateCd { get; set; }
+
+    [XmlElement("ISSUER_COUNTRY_CD")]
+    public string IssuerCountryCd { get; set; }
+
+    [XmlElement("IDENT_FNUM")]
+    public string IdentFnum { get; set; }
+
+    [XmlElement("EXPIRATION_DT")]
+    public string ExpirationDt { get; set; }
+}
+
+
+
