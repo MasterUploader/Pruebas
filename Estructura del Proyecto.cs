@@ -1,64 +1,76 @@
-begsr EnviarPost;
+begsr ProcesarRespuesta;
 
-  dcl-s rc int(10);
+  dcl-s rootNode pointer;
+  dcl-s headerNode pointer;
+  dcl-s dataNode pointer;
+  dcl-s innerDataNode pointer;
 
-  // 🟡 Preparar punteros dinámicos con datos de GetApiConfig
-  urlPtr = %addr(pUrlPost);
-  headers = 'Content-Type: application/json';
-  hdrPtr = %addr(headers);
-  reqPtr = %addr(jsonBuffer);
-  resPtr = %addr(response);
-  responseLen = %len(response);
+  // Cargar el JSON desde variable de respuesta
+  rootNode = yajl_buf_load_tree(%addr(response): %len(%trim(response)));
 
-  // 🟢 Realizar el POST usando libhttp_post
-  rc = libhttp_post(reqPtr: %len(%trim(jsonBuffer)): resPtr: responseLen: hdrPtr: urlPtr);
-
-  // ============================================
-  // 🔍 Validaciones del resultado
-  // ============================================
-  if rc < 0;
-     // Error grave de conexión, red, DNS, etc.
-     response = '{ "error": "Fallo de conexión o red. RC=' + %char(rc) + '" }';
-  elseIf rc > 0;
-     // Error HTTP 4xx o 5xx
-     response = '{ "error": "Error HTTP. Código RC=' + %char(rc) + '" }';
-  elseIf %trim(response) = *blanks;
-     // Respuesta vacía
-     response = '{ "error": "Respuesta vacía de la API. RC=0" }';
-  elseIf %scan('error' : %xlate('"': '': %trim(response))) > 0;
-     // Contenido contiene palabra "error" (posible error lógico)
-     response = '{ "warning": "La API respondió con posible error. Verificar contenido." , "original": ' + %trim(response) + ' }';
+  // ============================
+  // 🔹 HEADER
+  // ============================
+  headerNode = yajl_object_find(rootNode: %addr('Header'));
+  if headerNode <> *null;
+     FullResponseDS.header.responseId =
+       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('ResponseId')))): 1: 40);
+     FullResponseDS.header.timestamp =
+       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('Timestamp')))): 1: 30);
+     FullResponseDS.header.processingTime =
+       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('ProcessingTime')))): 1: 20);
+     FullResponseDS.header.statusCode =
+       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('StatusCode')))): 1: 10);
+     FullResponseDS.header.message =
+       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('Message')))): 1: 100);
   endif;
 
-  // ============================================
-  // 📂 Guardar la respuesta en un archivo en IFS
-  // ============================================
-  dcl-pr IFS_WRITE extproc('_C_IFS_write');
-    fileName pointer value;
-    buffer   pointer value;
-    length   int(10) value;
-  end-pr;
+  // Mapeo a parámetros de salida
+  HDR_RSPID  = FullResponseDS.header.responseId;
+  HDR_TMSTMP = FullResponseDS.header.timestamp;
+  HDR_PRTIME = FullResponseDS.header.processingTime;
+  HDR_STSCD  = FullResponseDS.header.statusCode;
+  HDR_MSG    = FullResponseDS.header.message;
 
-  dcl-pr IFS_OPEN extproc('_C_IFS_open');
-    pathName pointer value;
-    flags    int(10) value;
-    mode     int(10) value;
-    options  int(10) value;
-  end-pr;
+  // ============================
+  // 🔹 DATA (nivel 1)
+  // ============================
+  dataNode = yajl_object_find(rootNode: %addr('Data'));
+  if dataNode <> *null;
+     FullResponseDS.data.opCode =
+       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('OPCODE')))): 1: 10);
+     FullResponseDS.data.processMsg =
+       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('PROCESS_MSG')))): 1: 100);
+     FullResponseDS.data.transStatusCd =
+       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('TRANS_STATUS_CD')))): 1: 10);
+     FullResponseDS.data.transStatusDt =
+       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('TRANS_STATUS_DT')))): 1: 8);
+     FullResponseDS.data.processDt =
+       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('PROCESS_DT')))): 1: 8);
+     FullResponseDS.data.processTm =
+       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('PROCESS_TM')))): 1: 6);
 
-  dcl-pr IFS_CLOSE extproc('_C_IFS_close');
-    fd int(10) value;
-  end-pr;
+     // Mapeo de salida
+     DAT_OPCODE = FullResponseDS.data.opCode;
+     DAT_PRCMSG = FullResponseDS.data.processMsg;
 
-  dcl-s fd int(10);
-  dcl-s filePath pointer;
+     // ============================
+     // 🔸 DATA.DATA (detalle anidado)
+     // ============================
+     innerDataNode = yajl_object_find(dataNode: %addr('DATA'));
+     if innerDataNode <> *null;
 
-  filePath = %addr(vFullFile);
-  fd = IFS_OPEN(filePath: 577: 0: 0); // O_WRONLY+O_CREAT+O_TRUNC
+        // Llamadas a subrutinas para descomponer detalle
+        exsr ProcesarDataGenerales;
+        exsr ProcesarSender;
+        exsr ProcesarRecipient;
+        exsr ProcesarSenderIdentification;
+        exsr ProcesarRecipientIdentification;
 
-  if fd >= 0;
-     callp IFS_WRITE(fd: %addr(response): %len(%trim(response)));
-     callp IFS_CLOSE(fd);
+     endif;
   endif;
+
+  // Liberar memoria
+  callp yajl_tree_free(rootNode);
 
 endsr;
