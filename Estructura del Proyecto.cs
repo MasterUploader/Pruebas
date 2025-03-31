@@ -1,5 +1,13 @@
 **FREE
-ctl-opt dftactgrp(*no) actgrp(*caller);
+ctl-opt dftactgrp(*no)
+        actgrp(*new)
+        bnddir('HTTPAPI':'QILE')
+        bnddir('YAJL')
+        decedit('0.');
+
+/copy qgpl/qrpglesrc,httpapi_h
+/copy qgpl/qrpglesrc,ifsio_h
+/include yajl_h
 
 // =======================================
 // Programa: BTS01POST
