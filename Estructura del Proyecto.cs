@@ -1,13 +1,50 @@
-// =======================================================
-// Procedimiento que guarda la respuesta JSON en el IFS
-// =======================================================
-dcl-proc GuardarResponseJson;
+// ========================================================
+// Procedimiento Enviar Posteo al API
+// ========================================================
+dcl-proc EnviarPost;
 
+   dcl-s rc int(10);
    dcl-s fd int(10);
    dcl-s filePath pointer;
 
-   filePath = %addr(vFullFile);  // Se asume que vFullFile ya tiene el path completo
-   fd = IFS_OPEN(filePath: 577: 0: 0); // O_WRONLY+O_CREAT+O_TRUNC
+   dcl-s headers varchar(200);
+   dcl-s responseLen int(10);
+
+   // Preparar punteros dinámicos con datos de GetApiConfig
+   urlPtr = %addr(pUrlPost);
+   headers = 'Content-Type: application/json';
+   hdrPtr = %addr(headers);
+   reqPtr = %addr(jsonBuffer);
+   resPtr = %addr(response);
+   responseLen = %len(response);
+
+   // Realizar el POST usando libhttp_post
+   rc = libhttp_post(
+         reqPtr: %len(%trim(jsonBuffer)):
+         resPtr:
+         responseLen:
+         hdrPtr:
+         urlPtr
+       );
+
+   // Validaciones del resultado
+   if rc < 0;
+      // Error grave de conexión
+      response = '{ "error": "Fallo de conexión o red." }';
+   elseif rc > 0;
+      // Error HTTP
+      response = '{ "error": "Error HTTP. Código RC=' + %char(rc) + '" }';
+   elseif %trim(response) = *blanks;
+      // Respuesta vacía
+      response = '{ "error": "Respuesta vacía de la API. RC=0" }';
+   elseif %scan('error': %xlate('":,{}[]' : '        ' : %trim(response))) > 0;
+      // Contenido contiene palabra error
+      response = '{ "warning": "La API respondió con posible error" }';
+   endif;
+
+   // Guardar la respuesta en un archivo
+   filePath = %addr(vFullFile);
+   fd = IFS_OPEN(filePath: O_WRONLY+O_CREAT+O_TRUNC: 0);
 
    if fd >= 0;
       callp IFS_WRITE(fd: %addr(response): %len(%trim(response)));
@@ -15,25 +52,3 @@ dcl-proc GuardarResponseJson;
    endif;
 
 end-proc;
-
-
-dcl-pr IFS_OPEN int(10) extproc('_C_IFS_open');
-  path pointer value;
-  oflag int(10) value;
-  mode int(10) value;
-  ccsid int(10) value;
-end-pr;
-
-dcl-pr IFS_WRITE int(10) extproc('_C_IFS_write');
-  fd int(10) value;
-  buffer pointer value;
-  length int(10) value;
-end-pr;
-
-dcl-pr IFS_CLOSE int(10) extproc('_C_IFS_close');
-  fd int(10) value;
-end-pr;
-
-dcl-s vFullFile varchar(300);
-
-GuardarResponseJson();
