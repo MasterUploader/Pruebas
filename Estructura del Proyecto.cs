@@ -1,24 +1,39 @@
-// ==============================================
-// Devuelve una cadena desde un nodo JSON
-// Si el nodo o valor es nulo, retorna *blanks
-// ==============================================
 dcl-proc SafeGetString;
    dcl-pi *n char(100);
       jsonPtr pointer value;
    end-pi;
 
-   // Validamos primero que el puntero no sea nulo
+   dcl-s tempStrPtr pointer;
+
    if jsonPtr <> *null;
+      tempStrPtr = yajl_get_string(jsonPtr);
 
-      // Luego validamos que yajl_get_string también devuelva un puntero no nulo
-      if yajl_get_string(jsonPtr) <> *null;
-         return %str(yajl_get_string(jsonPtr));
-      else;
-         return *blanks;
+      if tempStrPtr <> *null;
+         return %str(tempStrPtr);
       endif;
-
-   else;
-      return *blanks;
    endif;
 
+   return *blanks;
+end-proc;
+
+
+dcl-proc SafeGetDecimal;
+   dcl-pi *n packed(15:4);
+      jsonPtr pointer value;
+   end-pi;
+
+   dcl-s result packed(15:4);
+   dcl-s tempNumPtr pointer;
+
+   result = 0;
+
+   if jsonPtr <> *null;
+      tempNumPtr = yajl_get_number(jsonPtr);
+
+      if tempNumPtr <> *null;
+         result = %dec(%str(tempNumPtr): 15: 4);
+      endif;
+   endif;
+
+   return result;
 end-proc;
