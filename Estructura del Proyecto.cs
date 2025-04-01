@@ -1,76 +1,68 @@
-begsr ProcesarRespuesta;
+// ---------- DATA.DATA (detalle) -------
+dcl-ds DataDetailDS qualified;
+  saleDt         char(8);
+  saleTm         char(6);
+  serviceCd      char(10);
+  paymentTypeCd  char(10);
+  origCountryCd  char(5);
+  origCurrencyCd char(5);
+  destCountryCd  char(5);
+  destCurrencyCd char(5);
+  originAm       char(20);
+  destinationAm  char(20);
+  exchRateFx     char(20);
+  marketRefCurrencyCd  char(5);
+  marketRefCurrencyAm  char(20);
+  sAgentCd       char(10);
+  rAccountTypeCd char(10);
+  rAccountNm     char(50);
+  rAgentCd       char(10);
+  rAgentRegionSd char(10);
+  rAgentBranchSd char(10);
 
-  dcl-s rootNode pointer;
-  dcl-s headerNode pointer;
-  dcl-s dataNode pointer;
-  dcl-s innerDataNode pointer;
+  sender         likeds(PersonDS);
+  recipient      likeds(RecipientDS);
+  senderIdent    likeds(IdentificationDS);
+  recipientIdent likeds(IdentificationDS);
+end-ds;
 
-  // Cargar el JSON desde variable de respuesta
-  rootNode = yajl_buf_load_tree(%addr(response): %len(%trim(response)));
+// ---------- PERSONA BASE (Sender, ForeignName) ----------
+dcl-ds PersonDS qualified;
+  firstName     char(20);
+  middleName    char(20);
+  lastName      char(20);
+  motherMName   char(20);
+  address       likeds(AddressDS);
+end-ds;
 
-  // ============================
-  // 🔹 HEADER
-  // ============================
-  headerNode = yajl_object_find(rootNode: %addr('Header'));
-  if headerNode <> *null;
-     FullResponseDS.header.responseId =
-       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('ResponseId')))): 1: 40);
-     FullResponseDS.header.timestamp =
-       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('Timestamp')))): 1: 30);
-     FullResponseDS.header.processingTime =
-       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('ProcessingTime')))): 1: 20);
-     FullResponseDS.header.statusCode =
-       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('StatusCode')))): 1: 10);
-     FullResponseDS.header.message =
-       %subst(%str(yajl_get_string(yajl_object_find(headerNode: %addr('Message')))): 1: 100);
-  endif;
+// ---------- RECIPIENT (con ForeignName) ----------
+dcl-ds RecipientDS qualified;
+  firstName     char(20);
+  middleName    char(20);
+  lastName      char(20);
+  motherMName   char(20);
+  identifTypeCd char(10);
+  identifNm     char(30);
+  foreignName   likeds(PersonDS);
+  address       likeds(AddressDS);
+end-ds;
 
-  // Mapeo a parámetros de salida
-  HDR_RSPID  = FullResponseDS.header.responseId;
-  HDR_TMSTMP = FullResponseDS.header.timestamp;
-  HDR_PRTIME = FullResponseDS.header.processingTime;
-  HDR_STSCD  = FullResponseDS.header.statusCode;
-  HDR_MSG    = FullResponseDS.header.message;
+// ---------- ADDRESS ----------
+dcl-ds AddressDS qualified;
+  address    char(50);
+  city       char(30);
+  stateCd    char(5);
+  countryCd  char(5);
+  zipCode    char(10);
+  phone      char(20);
+end-ds;
 
-  // ============================
-  // 🔹 DATA (nivel 1)
-  // ============================
-  dataNode = yajl_object_find(rootNode: %addr('Data'));
-  if dataNode <> *null;
-     FullResponseDS.data.opCode =
-       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('OPCODE')))): 1: 10);
-     FullResponseDS.data.processMsg =
-       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('PROCESS_MSG')))): 1: 100);
-     FullResponseDS.data.transStatusCd =
-       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('TRANS_STATUS_CD')))): 1: 10);
-     FullResponseDS.data.transStatusDt =
-       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('TRANS_STATUS_DT')))): 1: 8);
-     FullResponseDS.data.processDt =
-       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('PROCESS_DT')))): 1: 8);
-     FullResponseDS.data.processTm =
-       %subst(%str(yajl_get_string(yajl_object_find(dataNode: %addr('PROCESS_TM')))): 1: 6);
-
-     // Mapeo de salida
-     DAT_OPCODE = FullResponseDS.data.opCode;
-     DAT_PRCMSG = FullResponseDS.data.processMsg;
-
-     // ============================
-     // 🔸 DATA.DATA (detalle anidado)
-     // ============================
-     innerDataNode = yajl_object_find(dataNode: %addr('DATA'));
-     if innerDataNode <> *null;
-
-        // Llamadas a subrutinas para descomponer detalle
-        exsr ProcesarDataGenerales;
-        exsr ProcesarSender;
-        exsr ProcesarRecipient;
-        exsr ProcesarSenderIdentification;
-        exsr ProcesarRecipientIdentification;
-
-     endif;
-  endif;
-
-  // Liberar memoria
-  callp yajl_tree_free(rootNode);
-
-endsr;
+// ---------- IDENTIFICACIONES ----------
+dcl-ds IdentificationDS qualified;
+  typeCd           char(10);
+  issuerCd         char(10);
+  issuerStateCd    char(10);
+  issuerCountryCd  char(10);
+  identifNm        char(30);
+  expirationDt     char(8);
+end-ds;
