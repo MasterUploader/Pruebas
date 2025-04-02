@@ -1,26 +1,20 @@
-// ============================================
-// Procedimiento que obtiene una cadena de un campo JSON
-// Si el valor no existe o es nulo, retorna blanks
-// ============================================
 dcl-proc GetStringFromJson;
-  dcl-pi *n char(100); // Valor a retornar (máximo 100 caracteres)
-    parentNode pointer value;     // Nodo padre donde buscar
-    fieldName varchar(50) const;  // Nombre del campo
-    maxLength int(5) const;       // Longitud máxima del campo
+  dcl-pi *n char(100);
+    parentNode pointer value;
+    fieldName varchar(50) const;
+    maxLength int(5) const;
   end-pi;
 
   dcl-s result char(100);
   dcl-s tempPtr pointer;
-  dcl-s tempStrPtr pointer;
+  dcl-s tempStr char(500) based(tempPtr); // Puede ajustar tamaño
 
   result = *blanks;
 
   tempPtr = yajl_object_find(parentNode: %trim(fieldName));
-  tempStrPtr = yajl_get_string(tempPtr);
 
-  if tempPtr <> *null and tempStrPtr <> *null;
-     // Tomar la menor longitud entre el valor y el máximo permitido
-     result = %subst(%str(tempStrPtr): 1: %min(maxLength: %len(%str(tempStrPtr))));
+  if tempPtr <> *null;
+     result = %subst(%str(%addr(tempStr)): 1: maxLength);
   endif;
 
   return result;
