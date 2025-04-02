@@ -1,52 +1,23 @@
-// yajl_get_string: retorna un puntero a char
-dcl-pr yajl_get_string pointer extproc('yajl_get_string');
-  node pointer value;
-end-pr;
-
-// yajl_get_number: retorna un puntero a número (cadena que contiene el número)
-dcl-pr yajl_get_number pointer extproc('yajl_get_number');
-  node pointer value;
-end-pr;
-
-// Devuelve una cadena desde un nodo JSON
-// Si el nodo o valor es nulo, retorna *blanks
-dcl-proc SafeGetString;
-  dcl-pi *n char(100);
-    jsonPtr pointer value;
+// ================================================
+// Devuelve una cadena desde un campo JSON si existe
+// Si no existe o es nulo, retorna *blanks
+// ================================================
+dcl-proc GetStringFromJson;
+  dcl-pi *n char(100); // Longitud máxima por defecto
+    parentNode pointer value; // Nodo padre donde buscar
+    fieldName  varchar(50) const; // Campo a buscar
+    maxLength  int(5) const;      // Longitud máxima a retornar
   end-pi;
 
-  dcl-s tempStrPtr pointer;
+  dcl-s result char(100);
+  dcl-s tempPtr pointer;
 
-  if jsonPtr <> *null;
-     tempStrPtr = yajl_get_string(jsonPtr);
-     if tempStrPtr <> *null;
-        return %str(tempStrPtr);
-     endif;
-  endif;
+  result = *blanks;
 
-  return *blanks;
-end-proc;
+  tempPtr = yajl_object_find(parentNode: %trim(fieldName));
 
-
-
-// Devuelve un valor decimal desde un nodo JSON
-// Si el nodo o valor es nulo, retorna cero
-dcl-proc SafeGetDecimal;
-  dcl-pi *n packed(15:4);
-    jsonPtr pointer value;
-  end-pi;
-
-  dcl-s result packed(15:4);
-  dcl-s tempNumPtr pointer;
-  dcl-s tempNum char(64) based(tempNumPtr);
-
-  result = 0;
-
-  if jsonPtr <> *null;
-     tempNumPtr = yajl_get_number(jsonPtr);
-     if tempNumPtr <> *null;
-        result = %dec(%str(tempNumPtr): 15: 4);
-     endif;
+  if tempPtr <> *null and yajl_get_string(tempPtr) <> *null;
+    result = %subst(%str(yajl_get_string(tempPtr)): 1: maxLength);
   endif;
 
   return result;
