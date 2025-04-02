@@ -1,27 +1,53 @@
-// ===========================
-// Prototipos YAJL Generator
-// ===========================
-dcl-pr yajl_genOpen pointer extproc('yajl_genOpen');
-  escape char(1) value;
+// yajl_get_string: retorna un puntero a char
+dcl-pr yajl_get_string pointer extproc('yajl_get_string');
+  node pointer value;
 end-pr;
 
-dcl-pr yajl_genClose pointer extproc('yajl_genClose');
-  gen pointer value;
+// yajl_get_number: retorna un puntero a número (cadena que contiene el número)
+dcl-pr yajl_get_number pointer extproc('yajl_get_number');
+  node pointer value;
 end-pr;
 
-dcl-pr yajl_beginObj pointer extproc('yajl_beginObj');
-  gen pointer value;
-end-pr;
+// Devuelve una cadena desde un nodo JSON
+// Si el nodo o valor es nulo, retorna *blanks
+dcl-proc SafeGetString;
+  dcl-pi *n char(100);
+    jsonPtr pointer value;
+  end-pi;
 
-dcl-pr yajl_endObj pointer extproc('yajl_endObj');
-  gen pointer value;
-end-pr;
+  dcl-s tempStrPtr pointer;
 
-dcl-pr yajl_addChar pointer extproc('yajl_addChar');
-  gen pointer value;
-  text pointer value;
-end-pr;
+  if jsonPtr <> *null;
+     tempStrPtr = yajl_get_string(jsonPtr);
+     if tempStrPtr <> *null;
+        return %str(tempStrPtr);
+     endif;
+  endif;
 
-dcl-pr yajl_writeBufStr pointer extproc('yajl_writeBufStr');
-  gen pointer value;
-end-pr;
+  return *blanks;
+end-proc;
+
+
+
+// Devuelve un valor decimal desde un nodo JSON
+// Si el nodo o valor es nulo, retorna cero
+dcl-proc SafeGetDecimal;
+  dcl-pi *n packed(15:4);
+    jsonPtr pointer value;
+  end-pi;
+
+  dcl-s result packed(15:4);
+  dcl-s tempNumPtr pointer;
+  dcl-s tempNum char(64) based(tempNumPtr);
+
+  result = 0;
+
+  if jsonPtr <> *null;
+     tempNumPtr = yajl_get_number(jsonPtr);
+     if tempNumPtr <> *null;
+        result = %dec(%str(tempNumPtr): 15: 4);
+     endif;
+  endif;
+
+  return result;
+end-proc;
