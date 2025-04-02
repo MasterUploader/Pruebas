@@ -1,39 +1,27 @@
-dcl-proc SafeGetDecimal;
-  dcl-pi *n packed(15:4);
-    jsonPtr pointer value;
-  end-pi;
+// ===========================
+// Prototipos YAJL Generator
+// ===========================
+dcl-pr yajl_genOpen pointer extproc('yajl_genOpen');
+  escape char(1) value;
+end-pr;
 
-  dcl-s result packed(15:4);
-  dcl-s tempNumPtr pointer;
-  dcl-s tempNum char(64) based(tempNumPtr); // o tamaño que consideres seguro
+dcl-pr yajl_genClose pointer extproc('yajl_genClose');
+  gen pointer value;
+end-pr;
 
-  result = 0;
+dcl-pr yajl_beginObj pointer extproc('yajl_beginObj');
+  gen pointer value;
+end-pr;
 
-  if jsonPtr <> *null;
-    tempNumPtr = yajl_get_number(jsonPtr);
-    if tempNumPtr <> *null;
-      result = %dec(%str(tempNumPtr): 15: 4);
-    endif;
-  endif;
+dcl-pr yajl_endObj pointer extproc('yajl_endObj');
+  gen pointer value;
+end-pr;
 
-  return result;
-end-proc;
+dcl-pr yajl_addChar pointer extproc('yajl_addChar');
+  gen pointer value;
+  text pointer value;
+end-pr;
 
-
-dcl-proc SafeGetString;
-  dcl-pi *n char(100);
-    jsonPtr pointer value;
-  end-pi;
-
-  dcl-s tempStrPtr pointer;
-  dcl-s tempStr char(100) based(tempStrPtr);
-
-  if jsonPtr <> *null;
-    tempStrPtr = yajl_get_string(jsonPtr);
-    if tempStrPtr <> *null;
-      return %str(tempStrPtr);
-    endif;
-  endif;
-
-  return *blanks;
-end-proc;
+dcl-pr yajl_writeBufStr pointer extproc('yajl_writeBufStr');
+  gen pointer value;
+end-pr;
