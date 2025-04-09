@@ -1,48 +1,19 @@
 /// <summary>
-/// Genera automáticamente un archivo CSV complementario al archivo de log TXT.
-/// El contenido se transforma en una sola línea, separando cada línea por '|'.
-/// Si el archivo CSV no existe, se agrega el encabezado.
+/// Escribe una línea de log en el archivo .txt y automáticamente en un .csv del mismo nombre base.
 /// </summary>
-private void GenerateCsvLog(string traceId, string logContent)
+/// <param name="context">Contexto HTTP para extraer el archivo actual.</param>
+/// <param name="logContent">Contenido del log a registrar.</param>
+public void WriteLog(HttpContext context, string logContent)
 {
     try
     {
-        var context = _httpContextAccessor.HttpContext;
-        var hostEnvironment = context?.RequestServices.GetService<IHostEnvironment>();
-        var request = context?.Request;
+        string logFilePath = GetCurrentLogFile();
 
-        string applicationName = hostEnvironment?.ApplicationName ?? "Desconocido";
-        string endpoint = request?.Path.Value ?? "Desconocido";
-        string fecha = DateTime.Now.ToString("yyyy-MM-dd");
-        string hora = DateTime.Now.ToString("HH:mm:ss");
+        // Escribir log en archivo .txt (formato detallado y multilinea)
+        LogHelper.WriteLogToFile(_logDirectory, logFilePath, logContent.Indent(LogScope.CurrentLevel));
 
-        // Reemplaza saltos de línea por separador '|' y comas por punto y coma para evitar conflictos
-        string contenidoPlano = logContent.Replace(Environment.NewLine, "|").Replace(",", ";").Replace("\r", "").Replace("\n", "").Replace("|", "¦");
-
-        var campos = new[]
-        {
-            traceId,
-            fecha,
-            hora,
-            applicationName,
-            endpoint,
-            contenidoPlano
-        };
-
-        string lineaCsv = string.Join(",", campos);
-        string csvFileName = Path.Combine(_logDirectory, $"Log_{traceId}.csv");
-
-        var sb = new StringBuilder();
-
-        // Si el archivo no existe, escribe encabezado
-        if (!File.Exists(csvFileName))
-        {
-            sb.AppendLine("TraceId,Fecha,Hora,NombreApi,Endpoint,Log");
-        }
-
-        sb.AppendLine(lineaCsv);
-
-        File.AppendAllText(csvFileName, sb.ToString(), Encoding.UTF8);
+        // Guardar log también como CSV (en una sola línea, separado por comas)
+        LogHelper.SaveLogAsCsv(_logDirectory, logFilePath, logContent);
     }
     catch (Exception ex)
     {
@@ -52,26 +23,91 @@ private void GenerateCsvLog(string traceId, string logContent)
 
 
 
+
+
 /// <summary>
-/// Escribe un log completo para la petición actual en un archivo único.
-/// El nombre del archivo se basa en el TraceIdentifier del HttpContext.
-/// También genera automáticamente un archivo .csv con los mismos datos.
+/// Guarda una entrada de log en formato CSV (una línea por log con campos separados por coma).
+/// Utiliza el mismo nombre base del archivo .txt pero con extensión .csv.
 /// </summary>
-public void WriteLog(HttpContext context, string logContent)
+/// <param name="logDirectory">Directorio donde se almacenan los logs.</param>
+/// <param name="txtFilePath">Ruta del archivo .txt original (para extraer nombre base).</param>
+/// <param name="logContent">Contenido del log a registrar en CSV.</param>
+public static void SaveLogAsCsv(string logDirectory, string txtFilePath, string logContent)
 {
     try
     {
-        string traceId = context.TraceIdentifier;
-        var fileName = Path.Combine(_logDirectory, $"Log_{traceId}.txt");
+        // Obtener el nombre base sin extensión (ej. "Log_trace123_Controller_20250408_150000")
+        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(txtFilePath);
+        var csvFilePath = Path.Combine(logDirectory, fileNameWithoutExtension + ".csv");
 
-        // Escribe en archivo TXT
-        File.AppendAllText(fileName, logContent.Indent(LogScope.CurrentLevel) + Environment.NewLine + Environment.NewLine);
+        // Extraer los campos obligatorios para el CSV
+        var traceId = fileNameWithoutExtension.Split('_').FirstOrDefault() ?? "Desconocido";
+        var fecha = DateTime.Now.ToString("yyyy-MM-dd");
+        var hora = DateTime.Now.ToString("HH:mm:ss");
+        var apiName = AppDomain.CurrentDomain.FriendlyName;
+        var endpoint = fileNameWithoutExtension.Contains("_") ? fileNameWithoutExtension.Split('_').Skip(1).FirstOrDefault() ?? "Desconocido" : "Desconocido";
 
-        // También escribe en archivo CSV
-        GenerateCsvLog(traceId, logContent);
+        // Convertir el contenido del log en una sola línea
+        string singleLineLog = ConvertLogToCsvLine(logContent);
+
+        // Crear la línea CSV completa
+        string csvLine = $"{traceId},{fecha},{hora},{apiName},{endpoint},\"{singleLineLog}\"";
+
+        // Guardar en el archivo .csv
+        WriteCsvLog(csvFilePath, csvLine);
     }
-    catch (Exception ex)
+    catch
     {
-        LogInternalError(ex);
+        // Silenciar cualquier error para no afectar al API
     }
+}
+
+
+
+
+/// <summary>
+/// Escribe una línea en un archivo CSV. Si el archivo no existe, lo crea con cabecera.
+/// </summary>
+/// <param name="csvFilePath">Ruta del archivo CSV.</param>
+/// <param name="csvLine">Línea a escribir.</param>
+public static void WriteCsvLog(string csvFilePath, string csvLine)
+{
+    try
+    {
+        bool fileExists = File.Exists(csvFilePath);
+
+        using var writer = new StreamWriter(csvFilePath, append: true, encoding: Encoding.UTF8);
+
+        // Escribir cabecera si el archivo no existe
+        if (!fileExists)
+        {
+            writer.WriteLine("TraceId,Fecha,Hora,ApiName,Endpoint,LogCompleto");
+        }
+
+        writer.WriteLine(csvLine);
+    }
+    catch
+    {
+        // Silenciar para no afectar la ejecución
+    }
+}
+
+
+
+/// <summary>
+/// Convierte el contenido de un log multilinea a una sola línea, separando líneas con un símbolo (ej. '|').
+/// También escapa caracteres especiales para evitar errores en CSV.
+/// </summary>
+/// <param name="logContent">Contenido del log en texto plano.</param>
+/// <returns>Log transformado en una sola línea.</returns>
+private static string ConvertLogToCsvLine(string logContent)
+{
+    if (string.IsNullOrWhiteSpace(logContent)) return "Sin contenido";
+
+    return logContent
+        .Replace("\r\n", "|")
+        .Replace("\n", "|")
+        .Replace("\r", "|")
+        .Replace("\"", "'") // Escapar comillas dobles
+        .Trim();
 }
