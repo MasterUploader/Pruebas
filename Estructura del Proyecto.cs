@@ -1,71 +1,36 @@
-// Services/LoginService.cs using SitiosIntranet.Web.Models; using SitiosIntranet.Web.Helpers; using RestUtilities.Connections.Interfaces; using System.Data; using IBM.Data.DB2.iSeries;
+using RestUtilities.Connections;
+using RestUtilities.Connections.Interfaces;
+using RestUtilities.Connections.Providers.Database;
+using RestUtilities.Logging;
 
-namespace SitiosIntranet.Web.Services { public class LoginService : ILoginService { private readonly IAS400ConnectionProvider _as400;
+var builder = WebApplication.CreateBuilder(args);
 
-public LoginService(IAS400ConnectionProvider as400)
-    {
-        _as400 = as400;
-    }
+// Cargar configuración desde Connection.json por ambiente (DEV, UAT, PROD)
+builder.Configuration.AddJsonFile("Connection.json", optional: false, reloadOnChange: true);
 
-    public LoginResult ValidateUser(string username, string password)
-    {
-        var result = new LoginResult();
-        string query = $"SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN WHERE USUARIO = '{username}'";
+// Registrar ConnectionSettings para leer configuración dinámica
+builder.Services.AddSingleton<ConnectionSettings>();
 
-        using var conn = _as400.GetDbConnection();
-        try
-        {
-            conn.Open();
-            var adapter = new iDB2DataAdapter(query, (iDB2Connection)conn);
-            var table = new DataTable();
-            adapter.Fill(table);
+// Registrar tu sistema de logging (si lo estás usando)
+builder.Services.AddSingleton<ILogger, Logger>();
 
-            if (table.Rows.Count == 0)
-            {
-                result.ErrorMessage = "Usuario Incorrecto";
-                return result;
-            }
+// Registrar proveedor de conexión a AS400 usando la configuración del ambiente actual
+builder.Services.AddSingleton<IDatabaseConnection>(sp =>
+{
+    var settings = sp.GetRequiredService<ConnectionSettings>();
+    var logger = sp.GetRequiredService<ILogger>();
 
-            var tipoUsuario = table.Rows[0]["TIPUSU"].ToString();
-            var estado = table.Rows[0]["ESTADO"].ToString();
-            var passEncriptada = table.Rows[0]["PASS"].ToString();
+    string connectionString = settings.GetConnectionString("AS400");
 
-            string passDesencriptada = OperacionesVarias.DesencriptarAuto(passEncriptada);
+    logger.LogInformation($"[AS400] Usando cadena de conexión: {connectionString}");
 
-            if (!password.Equals(passDesencriptada))
-            {
-                result.ErrorMessage = "Contraseña Incorrecta";
-                return result;
-            }
+    return new AS400ConnectionProvider(connectionString);
+});
 
-            if (estado != "A")
-            {
-                result.ErrorMessage = "Usuario Inhabilitado";
-                return result;
-            }
+builder.Services.AddControllers();
 
-            // Migrar si es formato antiguo
-            if (!OperacionesVarias.EsFormatoNuevo(passEncriptada))
-            {
-                string nuevoFormato = OperacionesVarias.EncriptarCadenaAES(password);
-                string updateQuery = $"UPDATE BCAH96DTA.USUADMIN SET PASS = '{nuevoFormato}' WHERE USUARIO = '{username}'";
+var app = builder.Build();
 
-                using var cmd = new iDB2Command(updateQuery, (iDB2Connection)conn);
-                cmd.ExecuteNonQuery();
-            }
+app.MapControllers();
 
-            result.IsSuccessful = true;
-            result.Username = username;
-            result.TipoUsuario = tipoUsuario;
-            return result;
-        }
-        catch (Exception ex)
-        {
-            result.ErrorMessage = ex.Message;
-            return result;
-        }
-    }
-}
-
-}
-
+app.Run();
