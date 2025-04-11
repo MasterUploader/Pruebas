@@ -1,61 +1,52 @@
-namespace RestUtilities.Connections.Interfaces
-{
-    /// <summary>
-    /// Contrato para manejar una conexión a base de datos, incluyendo soporte para DbContext.
-    /// </summary>
-    public interface IDatabaseConnection
-    {
-        /// <summary>
-        /// Abre la conexión, si aplica.
-        /// </summary>
-        void Open();
-
-        /// <summary>
-        /// Cierra la conexión, si aplica.
-        /// </summary>
-        void Close();
-
-        /// <summary>
-        /// Devuelve el DbContext asociado a la conexión.
-        /// </summary>
-        DbContext GetDbContext();
-    }
-}
-
-
-
+using CAUAdministracion.Data;
 using Microsoft.EntityFrameworkCore;
+using RestUtilities.Connections;
 using RestUtilities.Connections.Interfaces;
+using RestUtilities.Connections.Providers.Database;
 
-namespace RestUtilities.Connections.Providers.Database
+var builder = WebApplication.CreateBuilder(args);
+
+// Cargar configuración dinámica desde Connection.json
+builder.Configuration.AddJsonFile("Connection.json", optional: false, reloadOnChange: true);
+
+// Registrar clase que gestiona ambientes y conexiones
+builder.Services.AddSingleton<ConnectionSettings>();
+
+// Registrar tu propio As400DbContext con la cadena de conexión del ambiente actual
+builder.Services.AddDbContext<As400DbContext>(options =>
 {
-    /// <summary>
-    /// Proveedor de conexión para usar un DbContext externo gestionado por el consumidor del paquete.
-    /// </summary>
-    /// <typeparam name="TContext">Tipo del DbContext definido externamente.</typeparam>
-    public class ExternalDbContextConnectionProvider<TContext> : IDatabaseConnection
-        where TContext : DbContext
+    var config = new ConnectionSettings(builder.Configuration);
+    var connectionString = config.GetAS400ConnectionString("AS400");
+
+    options.UseDb2(connectionString, o => o.SetServerInfo(IBMDBServerType.AS400));
+});
+
+// Adaptar el DbContext a IDatabaseConnection
+builder.Services.AddScoped<IDatabaseConnection>(sp =>
+{
+    var ctx = sp.GetRequiredService<As400DbContext>();
+    return new ExternalDbContextConnectionProvider<As400DbContext>(ctx);
+});
+
+// Servicios propios de tu API
+builder.Services.AddControllersWithViews();
+builder.Services.AddScoped<ILoginService, LoginService>();
+builder.Services.AddSession();
+
+builder.Services.AddAuthentication("Cookies")
+    .AddCookie("Cookies", options =>
     {
-        private readonly TContext _dbContext;
+        options.LoginPath = "/Account/Login";
+        options.LogoutPath = "/Account/Logout";
+    });
 
-        public ExternalDbContextConnectionProvider(TContext dbContext)
-        {
-            _dbContext = dbContext;
-        }
+var app = builder.Build();
 
-        public void Open()
-        {
-            // No se requiere acción al usar un DbContext externo
-        }
+app.UseStaticFiles();
+app.UseRouting();
+app.UseSession();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapDefaultControllerRoute();
 
-        public void Close()
-        {
-            _dbContext?.Dispose();
-        }
-
-        public DbContext GetDbContext()
-        {
-            return _dbContext;
-        }
-    }
-}
+app.Run();
