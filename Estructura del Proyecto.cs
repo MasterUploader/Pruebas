@@ -1,64 +1,10 @@
-// Views/Shared/_Layout.cshtml @using System.Security.Claims @{ var usuario = User.Identity?.Name; var tipoUsuario = User.Claims.FirstOrDefault(c => c.Type == "TipoUsuario")?.Value ?? ""; var esAutenticado = User.Identity?.IsAuthenticated ?? false; }
+// Controllers/HomeController.cs using Microsoft.AspNetCore.Authorization; using Microsoft.AspNetCore.Mvc;
 
-<!DOCTYPE html><html lang="es">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>@ViewData["Title"] - Sitios Intranet</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
-</head>
-<body>
-    @if (esAutenticado)
-    {
-        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-            <div class="container-fluid">
-                <a class="navbar-brand" href="/Home/Index">Sitios Intranet</a>
-                <div class="collapse navbar-collapse">
-                    <ul class="navbar-nav me-auto">
-                        @* Menú de configuración *@
-                        @if (tipoUsuario == "Admin" || tipoUsuario == "Configuracion")
-                        {
-                            <li class="nav-item dropdown">
-                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Configuración</a>
-                                <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item" href="/Configuracion/Usuarios">Administración General</a></li>
-                                    <li><a class="dropdown-item" href="/Configuracion/Agencias">Administración de Agencias</a></li>
-                                </ul>
-                            </li>
-                        }@* Menú de mensajes *@
-                    @if (tipoUsuario == "Admin" || tipoUsuario == "Mensajes")
-                    {
-                        <li class="nav-item">
-                            <a class="nav-link" href="/Mensajes/Agregar">Agregar Mensajes</a>
-                        </li>
-                    }
+namespace SitiosIntranet.Web.Controllers { [Authorize] public class HomeController : Controller { public IActionResult Index() { return View(); } } }
 
-                    @* Menú de videos *@
-                    @if (tipoUsuario == "Admin" || tipoUsuario == "Videos")
-                    {
-                        <li class="nav-item">
-                            <a class="nav-link" href="/Videos/Agregar">Agregar Videos</a>
-                        </li>
-                    }
-                </ul>
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <span class="navbar-text text-white me-3">@usuario</span>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/Account/Logout">Cerrar sesión</a>
-                    </li>
-                </ul>
-            </div>
-        </div>
-    </nav>
-}
+// Views/Home/Index.cshtml @{ ViewData["Title"] = "Inicio"; }
 
-<div class="container mt-4">
-    @RenderBody()
+<div class="text-center">
+    <h1 class="display-5">Bienvenido a Sitios Intranet</h1>
+    <p class="lead">Desde aquí puedes acceder a los módulos disponibles según tu perfil.</p>
 </div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-</body>
-</html>
