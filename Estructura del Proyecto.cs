@@ -1,54 +1,102 @@
-using System;
-using System.Text;
-using System.Security.Cryptography;
+// Program.cs using Microsoft.AspNetCore.Authentication.Cookies;
 
-namespace SitiosIntranet.Web.Helpers
-{
-    /// <summary>
-    /// Clase utilitaria para realizar operaciones generales como desencriptar cadenas.
-    /// </summary>
-    public static class OperacionesVarias
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container builder.Services.AddControllersWithViews();
+
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme) .AddCookie(options => { options.LoginPath = "/Account/Login"; options.LogoutPath = "/Account/Logout"; });
+
+builder.Services.AddSession(); builder.Services.AddScoped<ILoginService, LoginService>();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline if (!app.Environment.IsDevelopment()) { app.UseExceptionHandler("/Home/Error"); app.UseHsts(); }
+
+app.UseHttpsRedirection(); app.UseStaticFiles();
+
+app.UseRouting();
+
+app.UseAuthentication(); app.UseAuthorization(); app.UseSession();
+
+app.MapControllerRoute( name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
+
+app.Run();
+
+// Helpers/OperacionesVarias.cs using System; using System.Text;
+
+namespace SitiosIntranet.Web.Helpers { /// <summary> /// Clase utilitaria para encriptar y desencriptar cadenas compatibles con el sistema anterior. /// </summary> public static class OperacionesVarias { public static string EncriptarCadena(string cadenaEncriptar) { byte[] encrypted = Encoding.Unicode.GetBytes(cadenaEncriptar); return Convert.ToBase64String(encrypted); }
+
+public static string DesencriptarCadena(string cadenaDesencriptar)
     {
-        /// <summary>
-        /// Método que desencripta una cadena encriptada.
-        /// Aquí se utiliza una lógica simulada. Puedes reemplazarla por AES, TripleDES, etc.
-        /// </summary>
-        /// <param name="cadenaEncriptada">Texto encriptado recibido desde la base de datos.</param>
-        /// <returns>Texto desencriptado.</returns>
-        public static string DesencriptarCadena(string cadenaEncriptada)
+        try
         {
-            // Esta implementación es solo simbólica. Debes reemplazar por tu algoritmo real de desencriptación.
-            // Si usas AES, puede ser algo como esto:
-
-            // Clave y vector de inicialización (ejemplo, deben ser seguros y coincidir con lo usado al encriptar)
-            string clave = "claveSecreta1234"; // 16 caracteres para AES-128
-            string iv = "vectorInicial1234";   // 16 caracteres también
-
-            try
-            {
-                using Aes aesAlg = Aes.Create();
-                aesAlg.Key = Encoding.UTF8.GetBytes(clave);
-                aesAlg.IV = Encoding.UTF8.GetBytes(iv);
-
-                ICryptoTransform decryptor = aesAlg.CreateDecryptor(aesAlg.Key, aesAlg.IV);
-
-                byte[] buffer = Convert.FromBase64String(cadenaEncriptada);
-
-                string resultado;
-                using (var ms = new System.IO.MemoryStream(buffer))
-                using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
-                using (var reader = new System.IO.StreamReader(cs))
-                {
-                    resultado = reader.ReadToEnd();
-                }
-
-                return resultado;
-            }
-            catch
-            {
-                // Si falla la desencriptación, devuelve la misma cadena o un error
-                return string.Empty;
-            }
+            byte[] decrypted = Convert.FromBase64String(cadenaDesencriptar);
+            return Encoding.Unicode.GetString(decrypted);
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 }
+
+}
+
+// Services/LoginService.cs using SitiosIntranet.Web.Models; using SitiosIntranet.Web.Helpers; using System.Data; using IBM.Data.DB2.iSeries;
+
+namespace SitiosIntranet.Web.Services { public class LoginService : ILoginService { public LoginResult ValidateUser(string username, string password) { var result = new LoginResult(); string query = $"SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN WHERE USUARIO = '{username}'";
+
+using var conn = new iDB2Connection("<cadena-conexion-AS400>");
+        try
+        {
+            conn.Open();
+            var adapter = new iDB2DataAdapter(query, conn);
+            var table = new DataTable();
+            adapter.Fill(table);
+
+            if (table.Rows.Count == 0)
+            {
+                result.ErrorMessage = "Usuario Incorrecto";
+                return result;
+            }
+
+            var tipoUsuario = table.Rows[0]["TIPUSU"].ToString();
+            var estado = table.Rows[0]["ESTADO"].ToString();
+            var passEncriptada = table.Rows[0]["PASS"].ToString();
+
+            string passDesencriptada = OperacionesVarias.DesencriptarCadena(passEncriptada);
+
+            if (!password.Equals(passDesencriptada))
+            {
+                result.ErrorMessage = "Contraseña Incorrecta";
+                return result;
+            }
+
+            if (estado != "A")
+            {
+                result.ErrorMessage = "Usuario Inhabilitado";
+                return result;
+            }
+
+            // Si validó correctamente con formato viejo, migrar al nuevo formato (encriptado fuerte si se desea)
+            string nuevoFormato = OperacionesVarias.EncriptarCadena(password); // mismo método actual (puedes cambiarlo luego)
+            string updateQuery = $"UPDATE BCAH96DTA.USUADMIN SET PASS = '{nuevoFormato}' WHERE USUARIO = '{username}'";
+
+            using var cmd = new iDB2Command(updateQuery, conn);
+            cmd.ExecuteNonQuery();
+
+            result.IsSuccessful = true;
+            result.Username = username;
+            result.TipoUsuario = tipoUsuario;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.ErrorMessage = ex.Message;
+            return result;
+        }
+    }
+}
+
+}
+
