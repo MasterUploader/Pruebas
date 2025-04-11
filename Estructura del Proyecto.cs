@@ -1,62 +1,56 @@
-// Services/LoginService.cs using SitiosIntranet.Web.Models; using SitiosIntranet.Web.Helpers; using System.Data; using IBM.Data.DB2.iSeries;
+@model SitiosIntranet.Web.Models.UserLogin
 
-namespace SitiosIntranet.Web.Services { public class LoginService : ILoginService { public LoginResult ValidateUser(string username, string password) { var result = new LoginResult(); string query = $"SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN WHERE USUARIO = '{username}'";
-
-using var conn = new iDB2Connection("<cadena-conexion-AS400>");
-        try
-        {
-            conn.Open();
-            var adapter = new iDB2DataAdapter(query, conn);
-            var table = new DataTable();
-            adapter.Fill(table);
-
-            if (table.Rows.Count == 0)
-            {
-                result.ErrorMessage = "Usuario Incorrecto";
-                return result;
-            }
-
-            var tipoUsuario = table.Rows[0]["TIPUSU"].ToString();
-            var estado = table.Rows[0]["ESTADO"].ToString();
-            var passEncriptada = table.Rows[0]["PASS"].ToString();
-
-            // Detecta y desencripta automáticamente
-            string passDesencriptada = OperacionesVarias.DesencriptarAuto(passEncriptada);
-
-            if (!password.Equals(passDesencriptada))
-            {
-                result.ErrorMessage = "Contraseña Incorrecta";
-                return result;
-            }
-
-            if (estado != "A")
-            {
-                result.ErrorMessage = "Usuario Inhabilitado";
-                return result;
-            }
-
-            // Migrar solo si es formato antiguo
-            if (!OperacionesVarias.EsFormatoNuevo(passEncriptada))
-            {
-                string nuevoFormato = OperacionesVarias.EncriptarCadenaAES(password);
-                string updateQuery = $"UPDATE BCAH96DTA.USUADMIN SET PASS = '{nuevoFormato}' WHERE USUARIO = '{username}'";
-
-                using var cmd = new iDB2Command(updateQuery, conn);
-                cmd.ExecuteNonQuery();
-            }
-
-            result.IsSuccessful = true;
-            result.Username = username;
-            result.TipoUsuario = tipoUsuario;
-            return result;
-        }
-        catch (Exception ex)
-        {
-            result.ErrorMessage = ex.Message;
-            return result;
-        }
-    }
+@{
+    ViewData["Title"] = "Iniciar Sesión";
+    Layout = null; // O usar "_LoginLayout" si defines uno para login
 }
 
-}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>@ViewData["Title"]</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+</head>
+<body class="bg-light">
 
+    <div class="container">
+        <div class="row justify-content-center align-items-center vh-100">
+            <div class="col-md-4">
+                <div class="card shadow">
+                    <div class="card-header text-center bg-primary text-white">
+                        <h5 class="mb-0">Iniciar Sesión</h5>
+                    </div>
+                    <div class="card-body">
+                        <form asp-action="Login" method="post">
+                            <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+                            <div class="mb-3">
+                                <label asp-for="Username" class="form-label">Usuario</label>
+                                <input asp-for="Username" class="form-control" autocomplete="username" />
+                                <span asp-validation-for="Username" class="text-danger"></span>
+                            </div>
+
+                            <div class="mb-3">
+                                <label asp-for="Password" class="form-label">Contraseña</label>
+                                <input asp-for="Password" class="form-control" type="password" autocomplete="current-password" />
+                                <span asp-validation-for="Password" class="text-danger"></span>
+                            </div>
+
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary">Ingresar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.5/jquery.validate.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/4.0.0/jquery.validate.unobtrusive.min.js"></script>
+</body>
+</html>
