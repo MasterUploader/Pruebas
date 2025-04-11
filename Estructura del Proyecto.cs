@@ -1,77 +1,61 @@
-using Microsoft.EntityFrameworkCore;
-
-namespace RestUtilities.Helpers
+namespace RestUtilities.Connections.Interfaces
 {
     /// <summary>
-    /// Helper especializado para operaciones CRUD sobre AS400 usando Entity Framework Core.
-    /// Incluye validación previa antes de guardar cambios.
+    /// Contrato para manejar una conexión a base de datos, incluyendo soporte para DbContext.
     /// </summary>
-    public static class As400EntityHelper
+    public interface IDatabaseConnection
     {
         /// <summary>
-        /// Inserta una entidad en AS400 y guarda si hay cambios.
+        /// Abre la conexión, si aplica.
         /// </summary>
-        public static async Task<bool> InsertAsync<T>(DbContext context, T entity) where T : class
-        {
-            context.Set<T>().Add(entity);
-
-            if (!HasPendingChanges(context))
-                return false;
-
-            return await context.SaveChangesAsync() > 0;
-        }
+        void Open();
 
         /// <summary>
-        /// Actualiza una entidad existente si hay cambios.
+        /// Cierra la conexión, si aplica.
         /// </summary>
-        public static async Task<bool> UpdateAsync<T>(DbContext context, T entity) where T : class
-        {
-            context.Set<T>().Update(entity);
-
-            if (!HasPendingChanges(context))
-                return false;
-
-            return await context.SaveChangesAsync() > 0;
-        }
+        void Close();
 
         /// <summary>
-        /// Elimina una entidad de AS400 si es válida.
+        /// Devuelve el DbContext asociado a la conexión.
         /// </summary>
-        public static async Task<bool> DeleteAsync<T>(DbContext context, T entity) where T : class
+        DbContext GetDbContext();
+    }
+}
+
+
+
+using Microsoft.EntityFrameworkCore;
+using RestUtilities.Connections.Interfaces;
+
+namespace RestUtilities.Connections.Providers.Database
+{
+    /// <summary>
+    /// Proveedor de conexión para usar un DbContext externo gestionado por el consumidor del paquete.
+    /// </summary>
+    /// <typeparam name="TContext">Tipo del DbContext definido externamente.</typeparam>
+    public class ExternalDbContextConnectionProvider<TContext> : IDatabaseConnection
+        where TContext : DbContext
+    {
+        private readonly TContext _dbContext;
+
+        public ExternalDbContextConnectionProvider(TContext dbContext)
         {
-            context.Set<T>().Remove(entity);
-
-            if (!HasPendingChanges(context))
-                return false;
-
-            return await context.SaveChangesAsync() > 0;
+            _dbContext = dbContext;
         }
 
-        /// <summary>
-        /// Verifica si hay cambios pendientes en el contexto antes de guardar.
-        /// </summary>
-        private static bool HasPendingChanges(DbContext context)
+        public void Open()
         {
-            return context.ChangeTracker.Entries()
-                .Any(e => e.State == EntityState.Added
-                       || e.State == EntityState.Modified
-                       || e.State == EntityState.Deleted);
+            // No se requiere acción al usar un DbContext externo
         }
 
-        /// <summary>
-        /// Obtiene todos los registros de una tabla.
-        /// </summary>
-        public static async Task<List<T>> GetAllAsync<T>(DbContext context) where T : class
+        public void Close()
         {
-            return await context.Set<T>().AsNoTracking().ToListAsync();
+            _dbContext?.Dispose();
         }
 
-        /// <summary>
-        /// Obtiene una entidad por clave primaria.
-        /// </summary>
-        public static async Task<T?> GetByIdAsync<T>(DbContext context, object id) where T : class
+        public DbContext GetDbContext()
         {
-            return await context.Set<T>().FindAsync(id);
+            return _dbContext;
         }
     }
 }
