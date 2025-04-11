@@ -1,81 +1,59 @@
-// Usando RestUtilities.Connection y Microsoft.EntityFrameworkCore
-
 using Microsoft.EntityFrameworkCore;
-using SitiosIntranet.Web.Helpers;
 using SitiosIntranet.Web.Models;
-using RestUtilities.Connections.Interfaces;
 
-namespace SitiosIntranet.Web.Services
+namespace SitiosIntranet.Web.Data
 {
-    public class LoginService : ILoginService
+    /// <summary>
+    /// DbContext que representa la conexión al sistema AS400.
+    /// Contiene las entidades necesarias para consultar/modificar datos.
+    /// </summary>
+    public class As400DbContext : DbContext
     {
-        private readonly IDatabaseConnection _as400;
-
-        public LoginService(IDatabaseConnection as400)
+        public As400DbContext(DbContextOptions<As400DbContext> options)
+            : base(options)
         {
-            _as400 = as400;
         }
 
-        public LoginResult ValidateUser(string username, string password)
+        /// <summary>
+        /// Representa la tabla USUADMIN en AS400.
+        /// Este modelo se usa para autenticación de usuarios.
+        /// </summary>
+        public DbSet<Usuario> Usuarios { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            var result = new LoginResult();
-            _as400.Open();
+            base.OnModelCreating(modelBuilder);
 
-            try
+            // Mapea manualmente la tabla y columnas si es necesario
+            modelBuilder.Entity<Usuario>(entity =>
             {
-                var context = _as400.GetDbContext();
+                entity.HasNoKey(); // Como estás usando FromSqlRaw, puedes usar sin clave
+                entity.ToTable("USUADMIN", "BCAH96DTA"); // esquema y tabla reales en AS400
 
-                var query = $"SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN WHERE USUARIO = '{username}'";
-
-                var datos = context.Usuarios
-                    .FromSqlRaw(query)
-                    .AsEnumerable()
-                    .FirstOrDefault();
-
-                if (datos == null)
-                {
-                    result.ErrorMessage = "Usuario Incorrecto";
-                    return result;
-                }
-
-                var passDesencriptada = OperacionesVarias.DesencriptarAuto(datos.PASS);
-
-                if (!password.Equals(passDesencriptada))
-                {
-                    result.ErrorMessage = "Contraseña Incorrecta";
-                    return result;
-                }
-
-                if (datos.ESTADO != "A")
-                {
-                    result.ErrorMessage = "Usuario Inhabilitado";
-                    return result;
-                }
-
-                // Migrar si es formato antiguo
-                if (!OperacionesVarias.EsFormatoNuevo(datos.PASS))
-                {
-                    var nuevoFormato = OperacionesVarias.EncriptarCadenaAES(password);
-                    context.Database.ExecuteSqlRaw($@"
-                        UPDATE BCAH96DTA.USUADMIN SET PASS = '{nuevoFormato}' WHERE USUARIO = '{username}'
-                    ");
-                }
-
-                result.IsSuccessful = true;
-                result.Username = username;
-                result.TipoUsuario = datos.TIPUSU;
-
-                return result;
-            }
-            catch (Exception ex)
-            {
-                result.ErrorMessage = ex.Message;
-                return result;
-            }
-            finally
-            {
-                _as400.Close();
-            }
+                entity.Property(e => e.USUARIO).HasColumnName("USUARIO");
+                entity.Property(e => e.TIPUSU).HasColumnName("TIPUSU");
+                entity.Property(e => e.ESTADO).HasColumnName("ESTADO");
+                entity.Property(e => e.PASS).HasColumnName("PASS");
+            });
         }
     }
 }
+
+
+
+
+namespace SitiosIntranet.Web.Models
+{
+    /// <summary>
+    /// Representa un registro de la tabla USUADMIN en AS400.
+    /// Se usa para validar credenciales y roles del usuario.
+    /// </summary>
+    public class Usuario
+    {
+        public string USUARIO { get; set; }
+        public string TIPUSU { get; set; }
+        public string ESTADO { get; set; }
+        public string PASS { get; set; }
+    }
+}
+
