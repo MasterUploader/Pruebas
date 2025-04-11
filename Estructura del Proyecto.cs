@@ -1,23 +1,71 @@
-// Controllers/VideosController.cs using Microsoft.AspNetCore.Authorization; using Microsoft.AspNetCore.Mvc;
+// Services/LoginService.cs using SitiosIntranet.Web.Models; using SitiosIntranet.Web.Helpers; using RestUtilities.Connections.Interfaces; using System.Data; using IBM.Data.DB2.iSeries;
 
-namespace SitiosIntranet.Web.Controllers { [Authorize] public class VideosController : Controller { public IActionResult Agregar() { return View(); } } }
+namespace SitiosIntranet.Web.Services { public class LoginService : ILoginService { private readonly IAS400ConnectionProvider _as400;
 
-// Views/Videos/Agregar.cshtml @{ ViewData["Title"] = "Agregar Video"; }
+public LoginService(IAS400ConnectionProvider as400)
+    {
+        _as400 = as400;
+    }
 
-<h2 class="mb-4">Agregar nuevo video</h2><form method="post" enctype="multipart/form-data">
-    <div class="mb-3">
-        <label for="titulo" class="form-label">Título del video</label>
-        <input type="text" id="titulo" name="titulo" class="form-control" required />
-    </div><div class="mb-3">
-    <label for="descripcion" class="form-label">Descripción</label>
-    <textarea id="descripcion" name="descripcion" class="form-control" rows="4"></textarea>
-</div>
+    public LoginResult ValidateUser(string username, string password)
+    {
+        var result = new LoginResult();
+        string query = $"SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN WHERE USUARIO = '{username}'";
 
-<div class="mb-3">
-    <label for="archivo" class="form-label">Archivo de video</label>
-    <input type="file" id="archivo" name="archivo" class="form-control" accept="video/*" required />
-</div>
+        using var conn = _as400.GetDbConnection();
+        try
+        {
+            conn.Open();
+            var adapter = new iDB2DataAdapter(query, (iDB2Connection)conn);
+            var table = new DataTable();
+            adapter.Fill(table);
 
-<button type="submit" class="btn btn-primary">Subir Video</button>
+            if (table.Rows.Count == 0)
+            {
+                result.ErrorMessage = "Usuario Incorrecto";
+                return result;
+            }
 
-</form>
+            var tipoUsuario = table.Rows[0]["TIPUSU"].ToString();
+            var estado = table.Rows[0]["ESTADO"].ToString();
+            var passEncriptada = table.Rows[0]["PASS"].ToString();
+
+            string passDesencriptada = OperacionesVarias.DesencriptarAuto(passEncriptada);
+
+            if (!password.Equals(passDesencriptada))
+            {
+                result.ErrorMessage = "Contraseña Incorrecta";
+                return result;
+            }
+
+            if (estado != "A")
+            {
+                result.ErrorMessage = "Usuario Inhabilitado";
+                return result;
+            }
+
+            // Migrar si es formato antiguo
+            if (!OperacionesVarias.EsFormatoNuevo(passEncriptada))
+            {
+                string nuevoFormato = OperacionesVarias.EncriptarCadenaAES(password);
+                string updateQuery = $"UPDATE BCAH96DTA.USUADMIN SET PASS = '{nuevoFormato}' WHERE USUARIO = '{username}'";
+
+                using var cmd = new iDB2Command(updateQuery, (iDB2Connection)conn);
+                cmd.ExecuteNonQuery();
+            }
+
+            result.IsSuccessful = true;
+            result.Username = username;
+            result.TipoUsuario = tipoUsuario;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.ErrorMessage = ex.Message;
+            return result;
+        }
+    }
+}
+
+}
+
