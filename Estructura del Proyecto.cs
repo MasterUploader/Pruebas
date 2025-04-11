@@ -1,11 +1,81 @@
-builder.Services.AddSingleton<IDatabaseConnection>(sp =>
+// Usando RestUtilities.Connection y Microsoft.EntityFrameworkCore
+
+using Microsoft.EntityFrameworkCore;
+using SitiosIntranet.Web.Helpers;
+using SitiosIntranet.Web.Models;
+using RestUtilities.Connections.Interfaces;
+
+namespace SitiosIntranet.Web.Services
 {
-    var settings = sp.GetRequiredService<ConnectionSettings>();
-    var logger = sp.GetRequiredService<ILogger>();
+    public class LoginService : ILoginService
+    {
+        private readonly IDatabaseConnection _as400;
 
-    string connectionString = settings.GetAS400ConnectionString("AS400");
+        public LoginService(IDatabaseConnection as400)
+        {
+            _as400 = as400;
+        }
 
-    logger.LogInformation($"[AS400] Cadena de conexión construida dinámicamente.");
+        public LoginResult ValidateUser(string username, string password)
+        {
+            var result = new LoginResult();
+            _as400.Open();
 
-    return new AS400ConnectionProvider(connectionString);
-});
+            try
+            {
+                var context = _as400.GetDbContext();
+
+                var query = $"SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN WHERE USUARIO = '{username}'";
+
+                var datos = context.Usuarios
+                    .FromSqlRaw(query)
+                    .AsEnumerable()
+                    .FirstOrDefault();
+
+                if (datos == null)
+                {
+                    result.ErrorMessage = "Usuario Incorrecto";
+                    return result;
+                }
+
+                var passDesencriptada = OperacionesVarias.DesencriptarAuto(datos.PASS);
+
+                if (!password.Equals(passDesencriptada))
+                {
+                    result.ErrorMessage = "Contraseña Incorrecta";
+                    return result;
+                }
+
+                if (datos.ESTADO != "A")
+                {
+                    result.ErrorMessage = "Usuario Inhabilitado";
+                    return result;
+                }
+
+                // Migrar si es formato antiguo
+                if (!OperacionesVarias.EsFormatoNuevo(datos.PASS))
+                {
+                    var nuevoFormato = OperacionesVarias.EncriptarCadenaAES(password);
+                    context.Database.ExecuteSqlRaw($@"
+                        UPDATE BCAH96DTA.USUADMIN SET PASS = '{nuevoFormato}' WHERE USUARIO = '{username}'
+                    ");
+                }
+
+                result.IsSuccessful = true;
+                result.Username = username;
+                result.TipoUsuario = datos.TIPUSU;
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.ErrorMessage = ex.Message;
+                return result;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+    }
+}
