@@ -1,56 +1,64 @@
-@model SitiosIntranet.Web.Models.UserLogin
+// Views/Shared/_Layout.cshtml @using System.Security.Claims @{ var usuario = User.Identity?.Name; var tipoUsuario = User.Claims.FirstOrDefault(c => c.Type == "TipoUsuario")?.Value ?? ""; var esAutenticado = User.Identity?.IsAuthenticated ?? false; }
 
-@{
-    ViewData["Title"] = "Iniciar Sesión";
-    Layout = null; // O usar "_LoginLayout" si defines uno para login
-}
-
-<!DOCTYPE html>
-<html lang="es">
+<!DOCTYPE html><html lang="es">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
-    <title>@ViewData["Title"]</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>@ViewData["Title"] - Sitios Intranet</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
 </head>
-<body class="bg-light">
+<body>
+    @if (esAutenticado)
+    {
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="/Home/Index">Sitios Intranet</a>
+                <div class="collapse navbar-collapse">
+                    <ul class="navbar-nav me-auto">
+                        @* Menú de configuración *@
+                        @if (tipoUsuario == "Admin" || tipoUsuario == "Configuracion")
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Configuración</a>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item" href="/Configuracion/Usuarios">Administración General</a></li>
+                                    <li><a class="dropdown-item" href="/Configuracion/Agencias">Administración de Agencias</a></li>
+                                </ul>
+                            </li>
+                        }@* Menú de mensajes *@
+                    @if (tipoUsuario == "Admin" || tipoUsuario == "Mensajes")
+                    {
+                        <li class="nav-item">
+                            <a class="nav-link" href="/Mensajes/Agregar">Agregar Mensajes</a>
+                        </li>
+                    }
 
-    <div class="container">
-        <div class="row justify-content-center align-items-center vh-100">
-            <div class="col-md-4">
-                <div class="card shadow">
-                    <div class="card-header text-center bg-primary text-white">
-                        <h5 class="mb-0">Iniciar Sesión</h5>
-                    </div>
-                    <div class="card-body">
-                        <form asp-action="Login" method="post">
-                            <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
-
-                            <div class="mb-3">
-                                <label asp-for="Username" class="form-label">Usuario</label>
-                                <input asp-for="Username" class="form-control" autocomplete="username" />
-                                <span asp-validation-for="Username" class="text-danger"></span>
-                            </div>
-
-                            <div class="mb-3">
-                                <label asp-for="Password" class="form-label">Contraseña</label>
-                                <input asp-for="Password" class="form-control" type="password" autocomplete="current-password" />
-                                <span asp-validation-for="Password" class="text-danger"></span>
-                            </div>
-
-                            <div class="d-grid">
-                                <button type="submit" class="btn btn-primary">Ingresar</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                    @* Menú de videos *@
+                    @if (tipoUsuario == "Admin" || tipoUsuario == "Videos")
+                    {
+                        <li class="nav-item">
+                            <a class="nav-link" href="/Videos/Agregar">Agregar Videos</a>
+                        </li>
+                    }
+                </ul>
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <span class="navbar-text text-white me-3">@usuario</span>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/Account/Logout">Cerrar sesión</a>
+                    </li>
+                </ul>
             </div>
         </div>
-    </div>
+    </nav>
+}
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.5/jquery.validate.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/4.0.0/jquery.validate.unobtrusive.min.js"></script>
+<div class="container mt-4">
+    @RenderBody()
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
 </body>
 </html>
