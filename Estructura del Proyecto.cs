@@ -1,159 +1,54 @@
-// Program.cs using Microsoft.AspNetCore.Authentication.Cookies;
+using System;
+using System.Text;
+using System.Security.Cryptography;
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Add services to the container builder.Services.AddControllersWithViews();
-
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme) .AddCookie(options => { options.LoginPath = "/Account/Login"; options.LogoutPath = "/Account/Logout"; });
-
-builder.Services.AddSession(); builder.Services.AddScoped<ILoginService, LoginService>();
-
-var app = builder.Build();
-
-// Configure the HTTP request pipeline if (!app.Environment.IsDevelopment()) { app.UseExceptionHandler("/Home/Error"); app.UseHsts(); }
-
-app.UseHttpsRedirection(); app.UseStaticFiles();
-
-app.UseRouting();
-
-app.UseAuthentication(); app.UseAuthorization(); app.UseSession();
-
-app.MapControllerRoute( name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
-
-app.Run();
-
-// Models/UserLogin.cs using System.ComponentModel.DataAnnotations;
-
-namespace SitiosIntranet.Web.Models { public class UserLogin { [Required] public string Username { get; set; }
-
-[Required]
-    [DataType(DataType.Password)]
-    public string Password { get; set; }
-}
-
-public class LoginResult
+namespace SitiosIntranet.Web.Helpers
 {
-    public bool IsSuccessful { get; set; }
-    public string ErrorMessage { get; set; }
-    public string Username { get; set; }
-    public string TipoUsuario { get; set; }
-}
-
-}
-
-// Services/ILoginService.cs namespace SitiosIntranet.Web.Services { public interface ILoginService { LoginResult ValidateUser(string username, string password); } }
-
-// Services/LoginService.cs using SitiosIntranet.Web.Models; using System.Data; using IBM.Data.DB2.iSeries;
-
-namespace SitiosIntranet.Web.Services { public class LoginService : ILoginService { public LoginResult ValidateUser(string username, string password) { var result = new LoginResult(); string query = $"SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN WHERE USUARIO = '{username}'";
-
-using var conn = new iDB2Connection("<cadena-conexion-AS400>");
-        try
-        {
-            conn.Open();
-            var adapter = new iDB2DataAdapter(query, conn);
-            var table = new DataTable();
-            adapter.Fill(table);
-
-            if (table.Rows.Count == 0)
-            {
-                result.ErrorMessage = "Usuario Incorrecto";
-                return result;
-            }
-
-            var tipoUsuario = table.Rows[0]["TIPUSU"].ToString();
-            var estado = table.Rows[0]["ESTADO"].ToString();
-            var passEncriptada = table.Rows[0]["PASS"].ToString();
-
-            string passDesencriptada = OperacionesVarias.DesencriptarCadena(passEncriptada);
-
-            if (!password.Equals(passDesencriptada))
-            {
-                result.ErrorMessage = "Contraseña Incorrecta";
-                return result;
-            }
-
-            if (estado != "A")
-            {
-                result.ErrorMessage = "Usuario Inhabilitado";
-                return result;
-            }
-
-            result.IsSuccessful = true;
-            result.Username = username;
-            result.TipoUsuario = tipoUsuario;
-            return result;
-        }
-        catch (Exception ex)
-        {
-            result.ErrorMessage = ex.Message;
-            return result;
-        }
-    }
-}
-
-}
-
-// Helpers/OperacionesVarias.cs namespace SitiosIntranet.Web.Helpers { public static class OperacionesVarias { public static string DesencriptarCadena(string cadenaEncriptada) { // Simulación de desencriptación (reemplaza por la lógica real) return cadenaEncriptada; // ejemplo: return AESDecrypt(cadenaEncriptada); } } }
-
-// Controllers/AccountController.cs using Microsoft.AspNetCore.Mvc; using Microsoft.AspNetCore.Authentication; using Microsoft.AspNetCore.Authentication.Cookies; using System.Security.Claims; using System.Threading.Tasks; using SitiosIntranet.Web.Models; using SitiosIntranet.Web.Services;
-
-namespace SitiosIntranet.Web.Controllers { public class AccountController : Controller { private readonly ILoginService _loginService;
-
-public AccountController(ILoginService loginService)
+    /// <summary>
+    /// Clase utilitaria para realizar operaciones generales como desencriptar cadenas.
+    /// </summary>
+    public static class OperacionesVarias
     {
-        _loginService = loginService;
-    }
-
-    [HttpGet]
-    public IActionResult Login(string returnUrl = null)
-    {
-        ViewData["ReturnUrl"] = returnUrl;
-        return View();
-    }
-
-    [HttpPost]
-    public async Task<IActionResult> Login(UserLogin model, string returnUrl = null)
-    {
-        if (ModelState.IsValid)
+        /// <summary>
+        /// Método que desencripta una cadena encriptada.
+        /// Aquí se utiliza una lógica simulada. Puedes reemplazarla por AES, TripleDES, etc.
+        /// </summary>
+        /// <param name="cadenaEncriptada">Texto encriptado recibido desde la base de datos.</param>
+        /// <returns>Texto desencriptado.</returns>
+        public static string DesencriptarCadena(string cadenaEncriptada)
         {
-            var result = _loginService.ValidateUser(model.Username, model.Password);
+            // Esta implementación es solo simbólica. Debes reemplazar por tu algoritmo real de desencriptación.
+            // Si usas AES, puede ser algo como esto:
 
-            if (result.IsSuccessful)
+            // Clave y vector de inicialización (ejemplo, deben ser seguros y coincidir con lo usado al encriptar)
+            string clave = "claveSecreta1234"; // 16 caracteres para AES-128
+            string iv = "vectorInicial1234";   // 16 caracteres también
+
+            try
             {
-                var claims = new[]
+                using Aes aesAlg = Aes.Create();
+                aesAlg.Key = Encoding.UTF8.GetBytes(clave);
+                aesAlg.IV = Encoding.UTF8.GetBytes(iv);
+
+                ICryptoTransform decryptor = aesAlg.CreateDecryptor(aesAlg.Key, aesAlg.IV);
+
+                byte[] buffer = Convert.FromBase64String(cadenaEncriptada);
+
+                string resultado;
+                using (var ms = new System.IO.MemoryStream(buffer))
+                using (var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
+                using (var reader = new System.IO.StreamReader(cs))
                 {
-                    new Claim(ClaimTypes.Name, result.Username),
-                    new Claim("TipoUsuario", result.TipoUsuario)
-                };
+                    resultado = reader.ReadToEnd();
+                }
 
-                var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-                var principal = new ClaimsPrincipal(identity);
-
-                await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
-                return RedirectToLocal(returnUrl);
+                return resultado;
             }
-
-            ModelState.AddModelError("", result.ErrorMessage);
+            catch
+            {
+                // Si falla la desencriptación, devuelve la misma cadena o un error
+                return string.Empty;
+            }
         }
-        return View(model);
-    }
-
-    [HttpGet]
-    public async Task<IActionResult> Logout()
-    {
-        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        return RedirectToAction("Login");
-    }
-
-    private IActionResult RedirectToLocal(string returnUrl)
-    {
-        if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
-            return Redirect(returnUrl);
-        else
-            return RedirectToAction("Index", "Home");
     }
 }
-
-}
-
