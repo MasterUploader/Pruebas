@@ -1,120 +1,49 @@
+using System;
 using System.Data.Common;
-using Microsoft.EntityFrameworkCore;
-
-namespace RestUtilities.Connections.Interfaces
-{
-    /// <summary>
-    /// Contrato base para conexiones a bases de datos dentro de la librería.
-    /// Soporta tanto Entity Framework como ejecución tradicional con comandos SQL.
-    /// </summary>
-    public interface IDatabaseConnection : IDisposable
-    {
-        /// <summary>
-        /// Inicializa la conexión, ya sea tradicional o mediante DbContext.
-        /// </summary>
-        void Open();
-
-        /// <summary>
-        /// Cierra y libera recursos de la conexión.
-        /// </summary>
-        void Close();
-
-        /// <summary>
-        /// Verifica si la conexión está disponible y funcional.
-        /// </summary>
-        bool IsConnected();
-
-        /// <summary>
-        /// Retorna un DbContext configurado para acceso con modelos y LINQ.
-        /// </summary>
-        DbContext GetDbContext();
-
-        /// <summary>
-        /// Retorna un comando directo para ejecutar sentencias SQL en texto plano (SELECT, UPDATE, CALL, etc.).
-        /// </summary>
-        DbCommand GetDbCommand();
-    }
-}
-
-
-
-
-
-
-
-
-
-
-using System.Data.Common;
-using System.Data;
-using IBM.Data.DB2;
 using Microsoft.EntityFrameworkCore;
 using RestUtilities.Connections.Interfaces;
 
 namespace RestUtilities.Connections.Providers.Database
 {
     /// <summary>
-    /// Proveedor híbrido de conexión para AS400.
-    /// Soporta tanto Entity Framework (DbContext) como comandos tradicionales (DbCommand).
+    /// Adaptador para reutilizar un DbContext externo como una conexión estándar de la librería.
+    /// Este proveedor no implementa comandos tradicionales (DbCommand).
     /// </summary>
-    public class AS400ConnectionProvider : IDatabaseConnection
+    /// <typeparam name="TContext">Tipo del DbContext externo (por ejemplo, As400DbContext).</typeparam>
+    public class ExternalDbContextConnectionProvider<TContext> : IDatabaseConnection
+        where TContext : DbContext
     {
-        private readonly string _connectionString;
-        private DB2Connection _connection;
-        private AS400DbContext _context;
-        private readonly DbContextOptions<AS400DbContext> _options;
+        private readonly TContext _dbContext;
 
         /// <summary>
-        /// Constructor que recibe la cadena de conexión desde la configuración.
+        /// Constructor que recibe el contexto externo ya configurado.
         /// </summary>
-        public AS400ConnectionProvider(string connectionString)
+        public ExternalDbContextConnectionProvider(TContext dbContext)
         {
-            _connectionString = connectionString;
-
-            // Prepara opciones del DbContext para uso con EF Core
-            _options = new DbContextOptionsBuilder<AS400DbContext>()
-                .UseDb2(_connectionString, o => o.SetServerInfo(IBMDBServerType.AS400))
-                .Options;
+            _dbContext = dbContext;
         }
 
         /// <summary>
-        /// Abre ambas conexiones si no están inicializadas.
+        /// No realiza acción porque el DbContext ya está inicializado externamente.
         /// </summary>
-        public void Open()
-        {
-            // Inicializa DbContext para EF Core si no existe
-            if (_context == null)
-                _context = new AS400DbContext(_options);
-
-            // Inicializa conexión tradicional si no existe
-            if (_connection == null)
-                _connection = new DB2Connection(_connectionString);
-
-            if (_connection.State != ConnectionState.Open)
-                _connection.Open();
-        }
+        public void Open() { }
 
         /// <summary>
-        /// Cierra y libera los recursos de ambas conexiones.
+        /// Libera recursos asociados al contexto.
         /// </summary>
         public void Close()
         {
-            _context?.Dispose();
-            _context = null;
-
-            if (_connection?.State == ConnectionState.Open)
-                _connection.Close();
+            _dbContext?.Dispose();
         }
 
         /// <summary>
-        /// Verifica si al menos una de las dos conexiones está operativa.
+        /// Verifica si el contexto puede conectarse al origen de datos.
         /// </summary>
         public bool IsConnected()
         {
             try
             {
-                return (_context?.Database?.CanConnect() ?? false)
-                    || (_connection?.State == ConnectionState.Open);
+                return _dbContext?.Database?.CanConnect() == true;
             }
             catch
             {
@@ -123,48 +52,24 @@ namespace RestUtilities.Connections.Providers.Database
         }
 
         /// <summary>
-        /// Retorna un DbContext configurado con IBM.EntityFrameworkCore para AS400.
+        /// Retorna el DbContext externo para uso con EF Core.
         /// </summary>
-        public DbContext GetDbContext()
-        {
-            if (_context == null)
-                Open();
-
-            return _context;
-        }
+        public DbContext GetDbContext() => _dbContext;
 
         /// <summary>
-        /// Retorna un DbCommand para ejecutar SQL directamente sin EF.
+        /// Este proveedor no soporta acceso por DbCommand.
         /// </summary>
         public DbCommand GetDbCommand()
         {
-            if (_connection == null)
-                _connection = new DB2Connection(_connectionString);
-
-            if (_connection.State != ConnectionState.Open)
-                _connection.Open();
-
-            return _connection.CreateCommand();
+            throw new NotSupportedException("ExternalDbContextConnectionProvider no soporta comandos directos. Usa GetDbContext().");
         }
 
         /// <summary>
-        /// Libera todos los recursos de la conexión.
+        /// Libera el DbContext externo.
         /// </summary>
         public void Dispose()
         {
             Close();
-            _connection?.Dispose();
         }
-    }
-
-    /// <summary>
-    /// DbContext base para AS400. Puedes registrar aquí tus DbSet<> si deseas usar modelos.
-    /// </summary>
-    public class AS400DbContext : DbContext
-    {
-        public AS400DbContext(DbContextOptions<AS400DbContext> options) : base(options) { }
-
-        // Puedes definir DbSet<Usuario> si deseas usar EF directamente:
-        // public DbSet<Usuario> Usuarios { get; set; }
     }
 }
