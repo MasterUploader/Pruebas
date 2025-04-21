@@ -1,95 +1,78 @@
+using System.Data;
 using System.Data.Common;
-using SitiosIntranet.Web.Models;
-using SitiosIntranet.Web.Helpers;
+using IBM.Data.DB2;
 using RestUtilities.Connections.Interfaces;
 
-namespace SitiosIntranet.Web.Services
+namespace RestUtilities.Connections.Providers.Database
 {
     /// <summary>
-    /// Servicio de autenticación utilizando comandos SQL directos en AS400.
+    /// Proveedor de conexión para AS400 utilizando IBM.Data.DB2.
+    /// Soporta conexiones tradicionales y ejecución de comandos SQL.
     /// </summary>
-    public class LoginService : ILoginService
+    public class AS400ConnectionProvider : IDatabaseConnection, IDisposable
     {
-        private readonly IDatabaseConnection _as400;
+        private readonly string _connectionString;
+        private DB2Connection _connection;
 
-        public LoginService(IDatabaseConnection as400)
+        public AS400ConnectionProvider(string connectionString)
         {
-            _as400 = as400;
+            _connectionString = connectionString;
         }
 
-        public LoginResult ValidateUser(string username, string password)
+        /// <summary>
+        /// Abre la conexión al AS400 si no está abierta.
+        /// </summary>
+        public void Open()
         {
-            var result = new LoginResult();
-            _as400.Open();
+            if (_connection == null)
+                _connection = new DB2Connection(_connectionString);
 
-            try
-            {
-                // Usa método GetDbCommand para conexión directa desde la librería
-                using var command = _as400.GetDbCommand();
+            if (_connection.State != ConnectionState.Open)
+                _connection.Open();
+        }
 
-                // Consulta SQL directa para verificar credenciales
-                command.CommandText = $"SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN WHERE USUARIO = '{username}'";
+        /// <summary>
+        /// Cierra la conexión si está abierta.
+        /// </summary>
+        public void Close()
+        {
+            if (_connection?.State == ConnectionState.Open)
+                _connection.Close();
+        }
 
-                if (command.Connection.State == System.Data.ConnectionState.Closed)
-                    command.Connection.Open();
+        /// <summary>
+        /// Verifica si la conexión está abierta y funcional.
+        /// </summary>
+        public bool IsConnected()
+        {
+            return _connection != null && _connection.State == ConnectionState.Open;
+        }
 
-                Usuario datos = null;
+        /// <summary>
+        /// Retorna un DbCommand asociado a la conexión activa.
+        /// Útil para ejecutar SQL directamente (SELECT, UPDATE, CALL, etc.).
+        /// </summary>
+        public DbCommand GetDbCommand()
+        {
+            // Asegura que la conexión esté lista
+            if (_connection == null)
+                _connection = new DB2Connection(_connectionString);
 
-                using var reader = command.ExecuteReader();
-                if (reader.Read())
-                {
-                    datos = new Usuario
-                    {
-                        TIPUSU = reader["TIPUSU"].ToString(),
-                        ESTADO = reader["ESTADO"].ToString(),
-                        PASS = reader["PASS"].ToString()
-                    };
-                }
+            if (_connection.State != ConnectionState.Open)
+                _connection.Open();
 
-                if (datos == null)
-                {
-                    result.ErrorMessage = "Usuario Incorrecto";
-                    return result;
-                }
+            return _connection.CreateCommand();
+        }
 
-                var passDesencriptada = OperacionesVarias.DesencriptarAuto(datos.PASS);
+        public DbContext GetDbContext()
+        {
+            throw new NotImplementedException("Este proveedor no implementa DbContext");
+        }
 
-                if (!password.Equals(passDesencriptada))
-                {
-                    result.ErrorMessage = "Contraseña Incorrecta";
-                    return result;
-                }
-
-                if (datos.ESTADO != "A")
-                {
-                    result.ErrorMessage = "Usuario Inhabilitado";
-                    return result;
-                }
-
-                // Migración de contraseña si el formato es antiguo
-                if (!OperacionesVarias.EsFormatoNuevo(datos.PASS))
-                {
-                    var nuevoFormato = OperacionesVarias.EncriptarCadenaAES(password);
-                    using var updateCommand = _as400.GetDbCommand();
-                    updateCommand.CommandText = $"UPDATE BCAH96DTA.USUADMIN SET PASS = '{nuevoFormato}' WHERE USUARIO = '{username}'";
-                    updateCommand.Connection.Open();
-                    updateCommand.ExecuteNonQuery();
-                }
-
-                result.IsSuccessful = true;
-                result.Username = username;
-                result.TipoUsuario = datos.TIPUSU;
-                return result;
-            }
-            catch (Exception ex)
-            {
-                result.ErrorMessage = ex.Message;
-                return result;
-            }
-            finally
-            {
-                _as400.Close();
-            }
+        public void Dispose()
+        {
+            Close();
+            _connection?.Dispose();
         }
     }
 }
