@@ -1,93 +1,31 @@
-using System;
-using System.Security.Cryptography;
-using System.Text;
-
-namespace RestUtilities.Helpers
+/// <summary>
+/// Genera la cadena de conexión compatible con IBM.EntityFrameworkCore para AS400.
+/// </summary>
+/// <param name="connectionName">Nombre de la conexión (ej. AS400_DBContext)</param>
+public string GetEfCoreConnectionString(string connectionName)
 {
-    /// <summary>
-    /// Proporciona métodos de desencriptación dinámicos según configuración.
-    /// Soporta AES, Base64, Modificado y detección automática de texto plano.
-    /// </summary>
-    public static class EncryptionHelper
-    {
-        /// <summary>
-        /// Desencripta un valor usando el método especificado, o lo devuelve si ya está en texto plano.
-        /// </summary>
-        public static string Decrypt(string encrypted, string method, string? key = null)
-        {
-            if (string.IsNullOrWhiteSpace(encrypted))
-                return string.Empty;
+    var section = CurrentEnvironment.GetSection("ConnectionSettings").GetSection(connectionName);
 
-            if (!IsEncrypted(encrypted))
-                return encrypted;
+    string server = section["Server"];
+    string database = section["Database"];
+    string user = EncryptionHelper.Decrypt(section["User"], section["EncryptionType"], section["KeyDecrypt"]);
+    string password = EncryptionHelper.Decrypt(section["Password"], section["EncryptionType"], section["KeyDecrypt"]);
 
-            return method.ToUpperInvariant() switch
-            {
-                "AES" => DecryptAES(encrypted, key ?? string.Empty),
-                "BASE64" => DecryptBase64(encrypted),
-                "MODIFICADO" => DecryptCustom(encrypted),
-                _ => throw new NotSupportedException($"Método de desencriptación no soportado: {method}")
-            };
-        }
+    return $"Server={server};Database={database};UID={user};PWD={password};";
+}
 
-        /// <summary>
-        /// Valida si el valor parece estar encriptado (por ejemplo, en formato Base64).
-        /// </summary>
-        private static bool IsEncrypted(string value)
-        {
-            try
-            {
-                var buffer = Convert.FromBase64String(value);
-                return buffer.Length > 8;
-            }
-            catch
-            {
-                return false;
-            }
-        }
+/// <summary>
+/// Genera una cadena de conexión tradicional compatible con iDB2Connection o IBM.Data.Db2.
+/// </summary>
+/// <param name="connectionName">Nombre de la conexión (ej. AS400)</param>
+public string GetRawConnectionString(string connectionName)
+{
+    var section = CurrentEnvironment.GetSection("ConnectionSettings").GetSection(connectionName);
 
-        /// <summary>
-        /// Desencripta usando algoritmo AES con clave proporcionada.
-        /// Requiere que la clave esté en Base64 y sea de 16, 24 o 32 bytes.
-        /// </summary>
-        public static string DecryptAES(string encrypted, string base64Key)
-        {
-            if (string.IsNullOrEmpty(base64Key))
-                throw new ArgumentException("La clave AES es requerida para desencriptar.");
+    string driver = section["DriverConnection"];
+    string server = section["ServerName"];
+    string user = EncryptionHelper.Decrypt(section["User"], section["EncryptionType"], section["KeyDecrypt"]);
+    string password = EncryptionHelper.Decrypt(section["Password"], section["EncryptionType"], section["KeyDecrypt"]);
 
-            byte[] key = Convert.FromBase64String(base64Key);
-            byte[] iv = new byte[16]; // IV de 16 bytes (puede ser ajustado si lo defines externamente)
-
-            byte[] cipherText = Convert.FromBase64String(encrypted);
-
-            using var aes = Aes.Create();
-            aes.Key = key;
-            aes.IV = iv;
-            aes.Mode = CipherMode.CBC;
-            aes.Padding = PaddingMode.PKCS7;
-
-            using var decryptor = aes.CreateDecryptor();
-            byte[] result = decryptor.TransformFinalBlock(cipherText, 0, cipherText.Length);
-
-            return Encoding.UTF8.GetString(result);
-        }
-
-        /// <summary>
-        /// Desencripta texto codificado en Base64 estándar.
-        /// </summary>
-        public static string DecryptBase64(string encrypted)
-        {
-            byte[] buffer = Convert.FromBase64String(encrypted);
-            return Encoding.UTF8.GetString(buffer);
-        }
-
-        /// <summary>
-        /// Desencriptación modificada (implementa tu lógica heredada aquí).
-        /// </summary>
-        public static string DecryptCustom(string encrypted)
-        {
-            // Por ahora solo retorno el valor simulado. Reemplázalo con tu lógica personalizada real.
-            return $"[MODIFICADO]: {encrypted}";
-        }
-    }
+    return $"Provider={driver};Data Source={server};User ID={user};Password={password};";
 }
