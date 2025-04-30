@@ -1,41 +1,131 @@
 using System;
+using System.Data;
 using System.Data.Common;
+using System.Data.OleDb;
 using Microsoft.EntityFrameworkCore;
+using RestUtilities.Connections.Interfaces;
 
-namespace RestUtilities.Connections.Interfaces
+namespace RestUtilities.Connections.Providers.Database
 {
     /// <summary>
-    /// Contrato común para cualquier conexión gestionada por la librería.
-    /// Soporta tanto ejecución directa de comandos SQL como acceso por DbContext.
+    /// Proveedor híbrido para conexiones AS400 que soporta:
+    /// - Conexiones tradicionales usando OleDbCommand.
+    /// - Acceso moderno con EF Core (DbContext).
     /// </summary>
-    public interface IDatabaseConnection : IDisposable
+    public class AS400ConnectionProvider : IDatabaseConnection
     {
-        /// <summary>
-        /// Abre la conexión si aún no está activa.
-        /// </summary>
-        void Open();
+        private readonly string _connectionString;
+
+        // Conexión tradicional (OleDb)
+        private OleDbConnection _oleDbConnection;
+
+        // Conexión EF Core (DbContext)
+        private AS400DbContext _context;
+
+        // Opciones para crear el DbContext
+        private readonly DbContextOptions<AS400DbContext> _options;
 
         /// <summary>
-        /// Cierra la conexión y libera recursos.
+        /// Constructor que recibe y prepara la cadena de conexión.
         /// </summary>
-        void Close();
+        public AS400ConnectionProvider(string connectionString)
+        {
+            _connectionString = connectionString;
+
+            // Configura las opciones del DbContext
+            _options = new DbContextOptionsBuilder<AS400DbContext>()
+                .UseDbConnection(new OleDbConnection(_connectionString)) // Adaptación genérica
+                .Options;
+        }
 
         /// <summary>
-        /// Verifica si la conexión está activa o accesible.
+        /// Abre las conexiones necesarias (OleDb y DbContext).
         /// </summary>
-        /// <returns>True si está conectada, false si no lo está.</returns>
-        bool IsConnected();
+        public void Open()
+        {
+            // Inicializa el DbContext si no está disponible
+            if (_context == null)
+                _context = new AS400DbContext(_options);
+
+            // Inicializa la conexión OleDb si no está disponible
+            if (_oleDbConnection == null)
+                _oleDbConnection = new OleDbConnection(_connectionString);
+
+            if (_oleDbConnection.State != ConnectionState.Open)
+                _oleDbConnection.Open();
+        }
 
         /// <summary>
-        /// Retorna una instancia del DbContext si se usa Entity Framework.
+        /// Cierra y libera los recursos asociados a ambas conexiones.
         /// </summary>
-        /// <returns>Instancia de DbContext configurada.</returns>
-        DbContext GetDbContext();
+        public void Close()
+        {
+            _context?.Dispose();
+            _context = null;
+
+            if (_oleDbConnection?.State == ConnectionState.Open)
+                _oleDbConnection.Close();
+        }
 
         /// <summary>
-        /// Retorna una instancia de DbCommand para ejecutar SQL directo.
+        /// Verifica si al menos una conexión está operativa.
         /// </summary>
-        /// <returns>Comando SQL nativo de la conexión (ej. OleDbCommand).</returns>
-        DbCommand GetDbCommand();
+        public bool IsConnected()
+        {
+            try
+            {
+                return (_context?.Database?.CanConnect() ?? false)
+                    || (_oleDbConnection?.State == ConnectionState.Open);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Retorna una instancia de DbContext (opcionalmente con DbSet<> definidos por el usuario).
+        /// </summary>
+        public DbContext GetDbContext()
+        {
+            if (_context == null)
+                Open();
+
+            return _context;
+        }
+
+        /// <summary>
+        /// Retorna un comando OleDb listo para ejecutar consultas SQL tradicionales.
+        /// </summary>
+        public DbCommand GetDbCommand()
+        {
+            if (_oleDbConnection == null)
+                _oleDbConnection = new OleDbConnection(_connectionString);
+
+            if (_oleDbConnection.State != ConnectionState.Open)
+                _oleDbConnection.Open();
+
+            return _oleDbConnection.CreateCommand();
+        }
+
+        /// <summary>
+        /// Libera los recursos utilizados por las conexiones.
+        /// </summary>
+        public void Dispose()
+        {
+            Close();
+            _oleDbConnection?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// DbContext base para AS400 que puede ser extendido con DbSet<> si se desea.
+    /// </summary>
+    public class AS400DbContext : DbContext
+    {
+        public AS400DbContext(DbContextOptions<AS400DbContext> options) : base(options) { }
+
+        // Puedes registrar modelos así si los defines externamente:
+        // public DbSet<Usuario> Usuarios { get; set; }
     }
 }
