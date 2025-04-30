@@ -1,36 +1,87 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Configuration;
+using System;
+using System.Data;
+using System.Data.Common;
+using System.Data.OleDb;
 using RestUtilities.Connections.Interfaces;
-using RestUtilities.Connections.Providers.Database;
-using RestUtilities.Connections.Services;
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Cargar configuración desde Connection.json
-builder.Configuration.AddJsonFile("Connection.json", optional: false, reloadOnChange: true);
-
-// Registrar ConnectionSettings como singleton (lee ambiente, encriptación, etc.)
-builder.Services.AddSingleton<ConnectionSettings>();
-
-// Registrar la conexión principal a AS400 usando OleDbCommand
-builder.Services.AddScoped<IDatabaseConnection>(sp =>
+namespace RestUtilities.Connections.Providers.Database
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-    var settings = new ConnectionSettings(config);
+    /// <summary>
+    /// Proveedor de conexión para AS400 usando únicamente OleDbCommand.
+    /// No utiliza DbContext ni Entity Framework.
+    /// </summary>
+    public class AS400ConnectionProvider : IDatabaseConnection
+    {
+        private readonly string _connectionString;
+        private OleDbConnection _oleDbConnection;
 
-    // Obtener la cadena de conexión desencriptada desde el archivo
-    var connStr = settings.GetRawConnectionString("AS400"); // o el nombre que estés usando
+        /// <summary>
+        /// Constructor que recibe la cadena de conexión desde Connection.json.
+        /// </summary>
+        /// <param name="connectionString">Cadena de conexión ya desencriptada</param>
+        public AS400ConnectionProvider(string connectionString)
+        {
+            _connectionString = connectionString;
+        }
 
-    // Crear instancia del proveedor híbrido (soporta OleDbCommand + DbContext)
-    return new AS400ConnectionProvider(connStr);
-});
+        /// <summary>
+        /// Abre la conexión OleDb si aún no está abierta.
+        /// </summary>
+        public void Open()
+        {
+            if (_oleDbConnection == null)
+                _oleDbConnection = new OleDbConnection(_connectionString);
 
-// Otros servicios de tu API
-builder.Services.AddScoped<ILoginService, LoginService>();
+            if (_oleDbConnection.State != ConnectionState.Open)
+                _oleDbConnection.Open();
+        }
 
-builder.Services.AddControllers();
-var app = builder.Build();
+        /// <summary>
+        /// Cierra y limpia la conexión si está activa.
+        /// </summary>
+        public void Close()
+        {
+            if (_oleDbConnection?.State == ConnectionState.Open)
+                _oleDbConnection.Close();
+        }
 
-app.MapControllers();
-app.Run();
+        /// <summary>
+        /// Verifica si la conexión está actualmente abierta y operativa.
+        /// </summary>
+        public bool IsConnected()
+        {
+            return _oleDbConnection?.State == ConnectionState.Open;
+        }
+
+        /// <summary>
+        /// Retorna un OleDbCommand para ejecutar SQL directamente en AS400.
+        /// </summary>
+        public DbCommand GetDbCommand()
+        {
+            if (_oleDbConnection == null)
+                _oleDbConnection = new OleDbConnection(_connectionString);
+
+            if (_oleDbConnection.State != ConnectionState.Open)
+                _oleDbConnection.Open();
+
+            return _oleDbConnection.CreateCommand();
+        }
+
+        /// <summary>
+        /// No implementado porque no se usa EF Core.
+        /// </summary>
+        public DbContext GetDbContext()
+        {
+            throw new NotSupportedException("Este proveedor no soporta DbContext. Usa GetDbCommand().");
+        }
+
+        /// <summary>
+        /// Libera la conexión OleDb.
+        /// </summary>
+        public void Dispose()
+        {
+            Close();
+            _oleDbConnection?.Dispose();
+        }
+    }
+}
