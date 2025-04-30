@@ -1,31 +1,41 @@
 using System;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
 
-public class StringToDecimalConverter : JsonConverter<decimal>
+namespace RestUtilities.Connections.Interfaces
 {
-    public override decimal Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    /// <summary>
+    /// Contrato común para cualquier conexión gestionada por la librería.
+    /// Soporta tanto ejecución directa de comandos SQL como acceso por DbContext.
+    /// </summary>
+    public interface IDatabaseConnection : IDisposable
     {
-        // Permitir cadenas que representan números decimales
-        if (reader.TokenType == JsonTokenType.String)
-        {
-            var str = reader.GetString();
-            if (decimal.TryParse(str, out var result))
-                return result;
-            else
-                throw new JsonException($"Valor decimal inválido: {str}");
-        }
+        /// <summary>
+        /// Abre la conexión si aún no está activa.
+        /// </summary>
+        void Open();
 
-        // También permitir números directos como fallback
-        if (reader.TokenType == JsonTokenType.Number)
-            return reader.GetDecimal();
+        /// <summary>
+        /// Cierra la conexión y libera recursos.
+        /// </summary>
+        void Close();
 
-        throw new JsonException("Tipo de token no válido para decimal");
-    }
+        /// <summary>
+        /// Verifica si la conexión está activa o accesible.
+        /// </summary>
+        /// <returns>True si está conectada, false si no lo está.</returns>
+        bool IsConnected();
 
-    public override void Write(Utf8JsonWriter writer, decimal value, JsonSerializerOptions options)
-    {
-        // Siempre escribir como string en JSON
-        writer.WriteStringValue(value.ToString());
+        /// <summary>
+        /// Retorna una instancia del DbContext si se usa Entity Framework.
+        /// </summary>
+        /// <returns>Instancia de DbContext configurada.</returns>
+        DbContext GetDbContext();
+
+        /// <summary>
+        /// Retorna una instancia de DbCommand para ejecutar SQL directo.
+        /// </summary>
+        /// <returns>Comando SQL nativo de la conexión (ej. OleDbCommand).</returns>
+        DbCommand GetDbCommand();
     }
 }
