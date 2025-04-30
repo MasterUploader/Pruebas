@@ -1,75 +1,31 @@
 using System;
-using System.Data.Common;
-using Microsoft.EntityFrameworkCore;
-using RestUtilities.Connections.Interfaces;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
-namespace RestUtilities.Connections.Providers.Database
+public class StringToDecimalConverter : JsonConverter<decimal>
 {
-    /// <summary>
-    /// Adaptador para reutilizar un DbContext externo como una conexión estándar de la librería.
-    /// Este proveedor no implementa comandos tradicionales (DbCommand).
-    /// </summary>
-    /// <typeparam name="TContext">Tipo del DbContext externo (por ejemplo, As400DbContext).</typeparam>
-    public class ExternalDbContextConnectionProvider<TContext> : IDatabaseConnection
-        where TContext : DbContext
+    public override decimal Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        private readonly TContext _dbContext;
-
-        /// <summary>
-        /// Constructor que recibe el contexto externo ya configurado.
-        /// </summary>
-        public ExternalDbContextConnectionProvider(TContext dbContext)
+        // Permitir cadenas que representan números decimales
+        if (reader.TokenType == JsonTokenType.String)
         {
-            _dbContext = dbContext;
+            var str = reader.GetString();
+            if (decimal.TryParse(str, out var result))
+                return result;
+            else
+                throw new JsonException($"Valor decimal inválido: {str}");
         }
 
-        /// <summary>
-        /// No realiza acción porque el DbContext ya está inicializado externamente.
-        /// </summary>
-        public void Open() { }
+        // También permitir números directos como fallback
+        if (reader.TokenType == JsonTokenType.Number)
+            return reader.GetDecimal();
 
-        /// <summary>
-        /// Libera recursos asociados al contexto.
-        /// </summary>
-        public void Close()
-        {
-            _dbContext?.Dispose();
-        }
+        throw new JsonException("Tipo de token no válido para decimal");
+    }
 
-        /// <summary>
-        /// Verifica si el contexto puede conectarse al origen de datos.
-        /// </summary>
-        public bool IsConnected()
-        {
-            try
-            {
-                return _dbContext?.Database?.CanConnect() == true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Retorna el DbContext externo para uso con EF Core.
-        /// </summary>
-        public DbContext GetDbContext() => _dbContext;
-
-        /// <summary>
-        /// Este proveedor no soporta acceso por DbCommand.
-        /// </summary>
-        public DbCommand GetDbCommand()
-        {
-            throw new NotSupportedException("ExternalDbContextConnectionProvider no soporta comandos directos. Usa GetDbContext().");
-        }
-
-        /// <summary>
-        /// Libera el DbContext externo.
-        /// </summary>
-        public void Dispose()
-        {
-            Close();
-        }
+    public override void Write(Utf8JsonWriter writer, decimal value, JsonSerializerOptions options)
+    {
+        // Siempre escribir como string en JSON
+        writer.WriteStringValue(value.ToString());
     }
 }
