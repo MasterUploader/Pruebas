@@ -1,47 +1,37 @@
 using Microsoft.AspNetCore.Http;
-using System.Data.Common;
+using System.Data.OleDb;
 using System.Threading.Tasks;
 
 namespace SitiosIntranet.Web.Services
 {
     /// <summary>
-    /// Define las operaciones necesarias para manejar el guardado de videos en disco y AS400.
+    /// Define operaciones para manejo de videos y registro en AS400 usando OleDb.
     /// </summary>
     public interface IVideoService
     {
         /// <summary>
         /// Guarda el archivo en disco local dentro de wwwroot/videos/{agencia}/
         /// </summary>
-        /// <param name="archivo">Archivo de video cargado</param>
-        /// <param name="codcco">Código de agencia</param>
-        /// <param name="rutaServer">Ruta base del servidor</param>
-        /// <param name="nombreArchivo">Nombre del archivo final</param>
-        /// <returns>True si fue exitoso</returns>
         Task<bool> GuardarArchivoEnDisco(IFormFile archivo, string codcco, string rutaServer, string nombreArchivo);
 
         /// <summary>
-        /// Inserta los registros del video en la base de datos AS400.
+        /// Inserta el registro del video en la base de datos AS400 (una o varias agencias).
         /// </summary>
-        /// <param name="codcco">Código de agencia (0 para todas)</param>
-        /// <param name="estado">Estado A/I</param>
-        /// <param name="nombreArchivo">Nombre del archivo</param>
-        /// <param name="rutaServer">Ruta base del servidor</param>
-        /// <returns>True si el insert fue exitoso</returns>
         bool GuardarRegistroEnAs400(string codcco, string estado, string nombreArchivo, string rutaServer);
 
         /// <summary>
-        /// Obtiene el siguiente ID para CODVIDEO (MAX + 1)
+        /// Obtiene el próximo CODVIDEO desde la tabla MANTVIDEO (MAX + 1)
         /// </summary>
-        int GetUltimoId(DbConnection conn);
+        int GetUltimoId(OleDbConnection conn);
 
         /// <summary>
-        /// Obtiene la siguiente secuencia SEQ para la agencia indicada.
+        /// Obtiene la próxima secuencia SEQ para una agencia (MAX + 1)
         /// </summary>
-        int GetSecuencia(DbConnection conn, string codcco);
+        int GetSecuencia(OleDbConnection conn, string codcco);
 
         /// <summary>
-        /// Devuelve la lista de códigos de agencias activas.
+        /// Devuelve la lista de agencias activas desde RSAGE01
         /// </summary>
-        List<string> ObtenerAgencias(DbConnection conn);
+        List<string> ObtenerAgencias(OleDbConnection conn);
     }
 }
