@@ -1,87 +1,59 @@
-using System;
-using System.Data;
-using System.Data.Common;
-using System.Data.OleDb;
-using RestUtilities.Connections.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
+using SitiosIntranet.Web.Services;
 
-namespace RestUtilities.Connections.Providers.Database
+namespace SitiosIntranet.Web.Controllers
 {
-    /// <summary>
-    /// Proveedor de conexión para AS400 usando únicamente OleDbCommand.
-    /// No utiliza DbContext ni Entity Framework.
-    /// </summary>
-    public class AS400ConnectionProvider : IDatabaseConnection
+    [Authorize]
+    public class VideosController : Controller
     {
-        private readonly string _connectionString;
-        private OleDbConnection _oleDbConnection;
+        private readonly IVideoService _videoService;
 
-        /// <summary>
-        /// Constructor que recibe la cadena de conexión desde Connection.json.
-        /// </summary>
-        /// <param name="connectionString">Cadena de conexión ya desencriptada</param>
-        public AS400ConnectionProvider(string connectionString)
+        public VideosController(IVideoService videoService)
         {
-            _connectionString = connectionString;
+            _videoService = videoService;
         }
 
-        /// <summary>
-        /// Abre la conexión OleDb si aún no está abierta.
-        /// </summary>
-        public void Open()
+        // GET: Mostrar formulario para subir video
+        [HttpGet]
+        public IActionResult Agregar()
         {
-            if (_oleDbConnection == null)
-                _oleDbConnection = new OleDbConnection(_connectionString);
-
-            if (_oleDbConnection.State != ConnectionState.Open)
-                _oleDbConnection.Open();
+            return View();
         }
 
-        /// <summary>
-        /// Cierra y limpia la conexión si está activa.
-        /// </summary>
-        public void Close()
+        // POST: Recibe el video, guarda el archivo en disco y lo registra en AS400
+        [HttpPost]
+        public async Task<IActionResult> Agregar(IFormFile archivo, string codcco, string estado)
         {
-            if (_oleDbConnection?.State == ConnectionState.Open)
-                _oleDbConnection.Close();
-        }
+            if (archivo == null || archivo.Length == 0)
+            {
+                ModelState.AddModelError("archivo", "Debe seleccionar un archivo.");
+                return View();
+            }
 
-        /// <summary>
-        /// Verifica si la conexión está actualmente abierta y operativa.
-        /// </summary>
-        public bool IsConnected()
-        {
-            return _oleDbConnection?.State == ConnectionState.Open;
-        }
+            var nombreArchivo = Path.GetFileName(archivo.FileName);
+            string rutaBase = @"C:\W1\"; // Ruta base configurable si se requiere
 
-        /// <summary>
-        /// Retorna un OleDbCommand para ejecutar SQL directamente en AS400.
-        /// </summary>
-        public DbCommand GetDbCommand()
-        {
-            if (_oleDbConnection == null)
-                _oleDbConnection = new OleDbConnection(_connectionString);
+            // Guardar el archivo en disco
+            bool guardadoOk = await _videoService.GuardarArchivoEnDisco(archivo, codcco, rutaBase, nombreArchivo);
 
-            if (_oleDbConnection.State != ConnectionState.Open)
-                _oleDbConnection.Open();
+            if (!guardadoOk)
+            {
+                ModelState.AddModelError("", "No se pudo guardar el archivo.");
+                return View();
+            }
 
-            return _oleDbConnection.CreateCommand();
-        }
+            // Insertar el registro en AS400
+            bool insertadoOk = _videoService.GuardarRegistroEnAs400(codcco, estado, nombreArchivo, rutaBase);
 
-        /// <summary>
-        /// No implementado porque no se usa EF Core.
-        /// </summary>
-        public DbContext GetDbContext()
-        {
-            throw new NotSupportedException("Este proveedor no soporta DbContext. Usa GetDbCommand().");
-        }
+            if (!insertadoOk)
+            {
+                ModelState.AddModelError("", "No se pudo registrar en la base de datos.");
+                return View();
+            }
 
-        /// <summary>
-        /// Libera la conexión OleDb.
-        /// </summary>
-        public void Dispose()
-        {
-            Close();
-            _oleDbConnection?.Dispose();
+            return RedirectToAction("Index", "Home");
         }
     }
 }
