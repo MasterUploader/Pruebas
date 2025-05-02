@@ -1,59 +1,128 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
-using SitiosIntranet.Web.Services;
+using Microsoft.EntityFrameworkCore;
+using RestUtilities.Connections.Interfaces;
+using System.Data.Common;
 
-namespace SitiosIntranet.Web.Controllers
+namespace SitiosIntranet.Web.Services
 {
-    [Authorize]
-    public class VideosController : Controller
+    public class VideoService : IVideoService
     {
-        private readonly IVideoService _videoService;
+        private readonly IDatabaseConnection _as400;
+        private readonly IWebHostEnvironment _env;
 
-        public VideosController(IVideoService videoService)
+        public VideoService(IDatabaseConnection as400, IWebHostEnvironment env)
         {
-            _videoService = videoService;
+            _as400 = as400;
+            _env = env;
         }
 
-        // GET: Mostrar formulario para subir video
-        [HttpGet]
-        public IActionResult Agregar()
+        /// <summary>
+        /// Guarda el archivo en el disco local dentro de wwwroot/videos/{agencia}/
+        /// </summary>
+        public async Task<bool> GuardarArchivoEnDisco(IFormFile archivo, string codcco, string rutaServer, string nombreArchivo)
         {
-            return View();
+            try
+            {
+                string subcarpeta = codcco == "0" ? "comun" : codcco;
+                string rutaRelativa = Path.Combine("videos", subcarpeta);
+                string rutaFisica = Path.Combine(_env.WebRootPath, rutaRelativa);
+
+                Directory.CreateDirectory(rutaFisica);
+
+                string rutaCompleta = Path.Combine(rutaFisica, nombreArchivo);
+                using var stream = new FileStream(rutaCompleta, FileMode.Create);
+                await archivo.CopyToAsync(stream);
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
-        // POST: Recibe el video, guarda el archivo en disco y lo registra en AS400
-        [HttpPost]
-        public async Task<IActionResult> Agregar(IFormFile archivo, string codcco, string estado)
+        /// <summary>
+        /// Inserta el registro del video en la tabla MANTVIDEO del AS400
+        /// </summary>
+        public bool GuardarRegistroEnAs400(string codcco, string estado, string nombreArchivo, string rutaServer)
         {
-            if (archivo == null || archivo.Length == 0)
+            _as400.Open();
+            var context = _as400.GetDbContext();
+            var conn = context.Database.GetDbConnection();
+
+            try
             {
-                ModelState.AddModelError("archivo", "Debe seleccionar un archivo.");
-                return View();
+                if (conn.State != System.Data.ConnectionState.Open)
+                    conn.Open();
+
+                var agencias = codcco == "0"
+                    ? ObtenerAgencias(conn)
+                    : new List<string> { codcco };
+
+                foreach (var agencia in agencias)
+                {
+                    int codVideo = GetUltimoId(conn) + 1;
+                    int sec = GetSecuencia(conn, agencia);
+
+                    string ruta = Path.Combine(rutaServer, agencia, "Marquesin");
+
+                    string query = $@"
+                        INSERT INTO BCAH96DTA.MANTVIDEO(CODCCO, CODVIDEO, RUTA, NOMBRE, ESTADO, SEQ)
+                        VALUES('{agencia}', {codVideo}, '{ruta}', '{nombreArchivo}', '{estado}', {sec})";
+
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = query;
+                    cmd.ExecuteNonQuery();
+                }
+
+                return true;
             }
-
-            var nombreArchivo = Path.GetFileName(archivo.FileName);
-            string rutaBase = @"C:\W1\"; // Ruta base configurable si se requiere
-
-            // Guardar el archivo en disco
-            bool guardadoOk = await _videoService.GuardarArchivoEnDisco(archivo, codcco, rutaBase, nombreArchivo);
-
-            if (!guardadoOk)
+            catch
             {
-                ModelState.AddModelError("", "No se pudo guardar el archivo.");
-                return View();
+                return false;
             }
-
-            // Insertar el registro en AS400
-            bool insertadoOk = _videoService.GuardarRegistroEnAs400(codcco, estado, nombreArchivo, rutaBase);
-
-            if (!insertadoOk)
+            finally
             {
-                ModelState.AddModelError("", "No se pudo registrar en la base de datos.");
-                return View();
+                _as400.Close();
             }
+        }
 
-            return RedirectToAction("Index", "Home");
+        /// <summary>
+        /// Obtiene todas las agencias registradas en RSAGE01
+        /// </summary>
+        public List<string> ObtenerAgencias(DbConnection conn)
+        {
+            var lista = new List<string>();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT CODCCO FROM BCAH96DTA.RSAGE01";
+            using var reader = cmd.ExecuteReader();
+
+            while (reader.Read())
+                lista.Add(reader["CODCCO"].ToString());
+
+            return lista;
+        }
+
+        /// <summary>
+        /// Obtiene el siguiente valor de CODVIDEO (MAX + 1)
+        /// </summary>
+        public int GetUltimoId(DbConnection conn)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT MAX(CODVIDEO) FROM BCAH96DTA.MANTVIDEO";
+            var result = cmd.ExecuteScalar();
+            return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
+        }
+
+        /// <summary>
+        /// Obtiene el siguiente valor de SEQ para una agencia
+        /// </summary>
+        public int GetSecuencia(DbConnection conn, string codcco)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT MAX(SEQ) FROM BCAH96DTA.MANTVIDEO WHERE CODCCO = '{codcco}'";
+            var result = cmd.ExecuteScalar();
+            return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
         }
     }
 }
