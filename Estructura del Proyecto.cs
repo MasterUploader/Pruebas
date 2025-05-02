@@ -1,134 +1,56 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
 
-namespace SitiosIntranet.Web.Controllers
+/// <summary>
+/// Obtiene las agencias en formato SelectListItem para desplegar en el formulario
+/// </summary>
+public List<SelectListItem> ObtenerAgenciasSelectList()
 {
-    [Authorize]
-    public class HomeController : Controller
+    var agencias = new List<SelectListItem>();
+
+    _as400.Open();
+    using var command = _as400.GetDbCommand();
+    command.CommandText = "SELECT CODCCO, NOMAGE FROM BCAH96DTA.RSAGE01 ORDER BY NOMAGE";
+
+    if (command.Connection.State == ConnectionState.Closed)
+        command.Connection.Open();
+
+    using var reader = command.ExecuteReader();
+    while (reader.Read())
     {
-        public IActionResult MenuPrincipal()
+        agencias.Add(new SelectListItem
         {
-            // Se obtiene el tipo de usuario desde el ClaimsPrincipal o Session si prefieres
-            var tipoUsuario = HttpContext.Session.GetString("tipo_usuario");
-            ViewData["TipoUsuario"] = tipoUsuario;
-
-            return View();
-        }
+            Value = reader["CODCCO"].ToString(),
+            Text = reader["NOMAGE"].ToString()
+        });
     }
+
+    return agencias;
 }
 
 
 
-@{
-    ViewData["Title"] = "Menú Principal";
-    var tipoUsuario = ViewData["TipoUsuario"]?.ToString();
+
+[HttpGet]
+public IActionResult Agregar()
+{
+    var agencias = _videoService.ObtenerAgenciasSelectList();
+    ViewBag.Agencias = agencias;
+    return View();
 }
 
-<div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center bg-primary text-white p-3 rounded">
-        <h2 class="mb-0">Menú Principal</h2>
-        <a asp-controller="Account" asp-action="Logout" class="btn btn-light">Cerrar Sesión</a>
-    </div>
 
-    <div class="row text-center mt-4">
-        @switch (tipoUsuario)
+
+
+
+<!-- Campo: Código de Agencia -->
+<div class="mb-3">
+    <label for="codcco" class="form-label">Código de Agencia</label>
+    <select class="form-select" id="codcco" name="codcco" required>
+        <option value="">Seleccione una agencia...</option>
+        @foreach (var agencia in ViewBag.Agencias as List<SelectListItem>)
         {
-            case "1": // Super usuario
-                <partial name="_MenuIcono" model='new MenuItem("/Mensajes", "Mensajes", "boton_mensajes.png")' />
-                <partial name="_MenuIcono" model='new MenuItem("/Videos", "Videos", "boton_videos.png")' />
-                <partial name="_MenuIcono" model='new MenuItem("/Configuracion", "Configuración", "configuracion.png")' />
-                break;
-
-            case "2": // Solo videos
-                <partial name="_MenuIcono" model='new MenuItem("/Videos", "Videos", "boton_videos.png")' />
-                break;
-
-            case "3": // Solo mensajes
-                <partial name="_MenuIcono" model='new MenuItem("/Mensajes", "Mensajes", "boton_mensajes.png")' />
-                break;
+            <option value="@agencia.Value">@agencia.Text</option>
         }
-    </div>
+    </select>
+    <small class="form-text text-muted">Seleccione una o ingrese 0 si aplica a todas las agencias.</small>
 </div>
-
-
-
-@model SitiosIntranet.Web.Models.MenuItem
-
-<div class="col-md-4 mb-4">
-    <a href="@Model.Url" class="text-decoration-none">
-        <img src="~/images/@Model.Imagen" class="img-fluid" style="max-height: 100px;" />
-        <p class="mt-2 h5 text-dark">@Model.Titulo</p>
-    </a>
-</div>
-
-
-
-
-namespace SitiosIntranet.Web.Models
-{
-    public class MenuItem
-    {
-        public string Url { get; set; }
-        public string Titulo { get; set; }
-        public string Imagen { get; set; }
-
-        public MenuItem(string url, string titulo, string imagen)
-        {
-            Url = url;
-            Titulo = titulo;
-            Imagen = imagen;
-        }
-    }
-}
-
-
-
-
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-
-namespace SitiosIntranet.Web.Controllers
-{
-    [Authorize]
-    public class MensajesController : Controller
-    {
-        public IActionResult Index()
-        {
-            return View();
-        }
-    }
-}
-
-
-
-@{
-    ViewData["Title"] = "Mensajes";
-}
-
-<h2>Gestión de Mensajes</h2>
-<p>Aquí irá la funcionalidad para agregar y listar mensajes.</p>
-
-
-
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-
-namespace SitiosIntranet.Web.Controllers
-{
-    [Authorize]
-    public class ConfiguracionController : Controller
-    {
-        public IActionResult Index()
-        {
-            return View();
-        }
-    }
-}
-
-
-@{
-    ViewData["Title"] = "Configuración";
-}
-
-<h2>Configuración General</h2>
-<p>Desde aquí se podrá administrar usuarios y agencias.</p>
