@@ -1,54 +1,36 @@
 /// <summary>
-/// Guarda el registro del video en AS400 con la ruta formateada como C:\Vid{codcco}Marq
+/// Guarda el archivo de video directamente en la ruta de red especificada en ConnectionData.json.
+/// No agrega subcarpetas ni modificaciones adicionales a la ruta.
 /// </summary>
-/// <param name="codcco">Código de agencia</param>
-/// <param name="estado">Estado del video (A/I)</param>
-/// <param name="nombreArchivo">Nombre del archivo de video</param>
-/// <param name="rutaServidor">Ruta del servidor físico (no se usa en el insert, solo para guardar el archivo)</param>
-/// <returns>True si el registro se insertó correctamente, false si falló</returns>
-public bool GuardarRegistroEnAs400(string codcco, string estado, string nombreArchivo, string rutaServidor)
+/// <param name="archivo">Archivo de video subido por el usuario</param>
+/// <param name="codcco">Código de agencia (no se usa aquí, solo se conserva por contrato)</param>
+/// <param name="rutaBase">Ruta completa desde ConnectionData.json (ej: \\ServidorCompartido\Marquesin\)</param>
+/// <param name="nombreArchivo">Nombre del archivo a guardar</param>
+/// <returns>True si se guarda correctamente, False si ocurre error</returns>
+public async Task<bool> GuardarArchivoEnDisco(IFormFile archivo, string codcco, string rutaBase, string nombreArchivo)
 {
     try
     {
-        // Abrir conexión a AS400 desde la librería RestUtilities.Connections
-        _as400.Open();
+        // Asegura que la ruta base finalice con backslash por consistencia
+        if (!rutaBase.EndsWith(Path.DirectorySeparatorChar))
+            rutaBase += Path.DirectorySeparatorChar;
 
-        // Obtener comando para ejecutar SQL
-        using var command = _as400.GetDbCommand();
+        // Ruta completa del archivo, sin agregar carpetas adicionales
+        string rutaCompleta = Path.Combine(rutaBase, nombreArchivo);
 
-        if (command.Connection.State != System.Data.ConnectionState.Open)
-            command.Connection.Open();
+        // Crear el directorio si no existe (por seguridad)
+        if (!Directory.Exists(rutaBase))
+            Directory.CreateDirectory(rutaBase);
 
-        // Obtener nuevo ID para el video
-        int codVideo = GetUltimoId(command);
+        // Escribir el archivo en disco
+        using var stream = new FileStream(rutaCompleta, FileMode.Create);
+        await archivo.CopyToAsync(stream);
 
-        // Obtener secuencia correlativa
-        int sec = GetSecuencial(command, codcco);
-
-        // Construir la ruta en el formato que espera AS400: C:\Vid{codcco}Marq
-        string rutaAs400 = $"C:\\Vid{codcco}Marq";
-
-        // Construir query de inserción SQL
-        command.CommandText = $@"
-            INSERT INTO BCAH96DTA.MANTVIDEO 
-            (CODCCO, CODVIDEO, RUTA, NOMBRE, ESTADO, SEQ)
-            VALUES('{codcco}', {codVideo}, '{rutaAs400}', '{nombreArchivo}', '{estado}', {sec})
-        ";
-
-        // Ejecutar inserción
-        int result = command.ExecuteNonQuery();
-
-        return result > 0;
+        return true;
     }
     catch (Exception ex)
     {
-        // Loguear o manejar el error según tu sistema (puedes usar RestUtilities.Logging aquí si lo deseas)
-        // Por ahora, devolvemos false controladamente
+        // Aquí puedes agregar logging si es necesario
         return false;
-    }
-    finally
-    {
-        // Cerrar conexión correctamente
-        _as400.Close();
     }
 }
