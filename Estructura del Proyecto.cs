@@ -1,39 +1,27 @@
-using Microsoft.AspNetCore.Http;
-using System.Data.Common;
-using System.Threading.Tasks;
+using SitiosIntranet.Web.Models;
+using System.Collections.Generic;
 
 namespace SitiosIntranet.Web.Services
 {
     /// <summary>
-    /// Interfaz para operaciones de manejo de archivos y registros de video en AS400.
+    /// Define las operaciones de consulta para videos registrados en AS400.
     /// </summary>
-    public interface IVideoService
+    public interface IVideoQueryService
     {
         /// <summary>
-        /// Guarda el archivo físicamente en el disco local bajo wwwroot/videos/{agencia}/
+        /// Retorna la lista de todos los videos registrados.
         /// </summary>
-        Task<bool> GuardarArchivoEnDisco(IFormFile archivo, string codcco, string rutaServer, string nombreArchivo);
+        List<VideoModel> ObtenerTodos();
 
         /// <summary>
-        /// Inserta uno o varios registros en la tabla MANTVIDEO del AS400, según la agencia.
-        /// Si la agencia es 0, inserta en todas.
+        /// Obtiene un video por su código de agencia y código de video.
         /// </summary>
-        bool GuardarRegistroEnAs400(string codcco, string estado, string nombreArchivo, string rutaServer);
+        VideoModel ObtenerPorId(string codcco, int codvideo);
 
         /// <summary>
-        /// Obtiene el próximo valor para CODVIDEO (MAX + 1).
+        /// Elimina un registro de video por su código y agencia.
         /// </summary>
-        int GetUltimoId(DbCommand command);
-
-        /// <summary>
-        /// Obtiene el próximo valor de SEQ para una agencia (MAX + 1).
-        /// </summary>
-        int GetSecuencia(DbCommand command, string codcco);
-
-        /// <summary>
-        /// Devuelve la lista de agencias activas (desde RSAGE01).
-        /// </summary>
-        List<string> ObtenerAgencias(DbCommand command);
+        bool Eliminar(string codcco, int codvideo);
     }
 }
 
@@ -47,85 +35,109 @@ namespace SitiosIntranet.Web.Services
 
 
 
-using Microsoft.AspNetCore.Http;
 using RestUtilities.Connections.Interfaces;
+using SitiosIntranet.Web.Models;
+using System;
+using System.Collections.Generic;
 using System.Data.Common;
 
 namespace SitiosIntranet.Web.Services
 {
     /// <summary>
-    /// Servicio para manejo de archivos y registros en la tabla MANTVIDEO del AS400.
-    /// Toda interacción con la base de datos se hace vía DbCommand.
+    /// Implementación del servicio de consultas para videos usando DbCommand.
     /// </summary>
-    public class VideoService : IVideoService
+    public class VideoQueryService : IVideoQueryService
     {
         private readonly IDatabaseConnection _as400;
-        private readonly IWebHostEnvironment _env;
 
-        public VideoService(IDatabaseConnection as400, IWebHostEnvironment env)
+        public VideoQueryService(IDatabaseConnection as400)
         {
             _as400 = as400;
-            _env = env;
         }
 
-        /// <summary>
-        /// Guarda el archivo en disco local (en carpeta /wwwroot/videos/{agencia}/)
-        /// </summary>
-        public async Task<bool> GuardarArchivoEnDisco(IFormFile archivo, string codcco, string rutaServer, string nombreArchivo)
+        public List<VideoModel> ObtenerTodos()
         {
-            try
-            {
-                string subcarpeta = codcco == "0" ? "comun" : codcco;
-                string rutaRelativa = Path.Combine("videos", subcarpeta);
-                string rutaFisica = Path.Combine(_env.WebRootPath, rutaRelativa);
-
-                Directory.CreateDirectory(rutaFisica); // Crear si no existe
-
-                string rutaCompleta = Path.Combine(rutaFisica, nombreArchivo);
-                using var stream = new FileStream(rutaCompleta, FileMode.Create);
-                await archivo.CopyToAsync(stream);
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Inserta el registro del video en AS400.
-        /// Si codcco = 0, inserta para todas las agencias.
-        /// Usa GetDbCommand() de RestUtilities para ejecutar consultas SQL.
-        /// </summary>
-        public bool GuardarRegistroEnAs400(string codcco, string estado, string nombreArchivo, string rutaServer)
-        {
-            _as400.Open();
+            var lista = new List<VideoModel>();
 
             try
             {
+                _as400.Open();
                 using var command = _as400.GetDbCommand();
 
-                if (command.Connection.State != System.Data.ConnectionState.Open)
-                    command.Connection.Open();
+                command.CommandText = "SELECT CODCCO, CODVIDEO, RUTA, NOMBRE, ESTADO, SEQ FROM BCAH96DTA.MANTVIDEO";
 
-                var agencias = codcco == "0" ? ObtenerAgencias(command) : new List<string> { codcco };
-
-                foreach (var agencia in agencias)
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
                 {
-                    int codVideo = GetUltimoId(command); // Obtener nuevo ID
-                    int sec = GetSecuencia(command, agencia); // Obtener secuencia
+                    var video = new VideoModel
+                    {
+                        CODCCO = reader["CODCCO"].ToString(),
+                        CODVIDEO = Convert.ToInt32(reader["CODVIDEO"]),
+                        RUTA = reader["RUTA"].ToString(),
+                        NOMBRE = reader["NOMBRE"].ToString(),
+                        ESTADO = reader["ESTADO"].ToString(),
+                        SEQ = Convert.ToInt32(reader["SEQ"])
+                    };
 
-                    string ruta = Path.Combine(rutaServer, agencia, "Marquesin");
-
-                    command.CommandText = $@"
-                        INSERT INTO BCAH96DTA.MANTVIDEO(CODCCO, CODVIDEO, RUTA, NOMBRE, ESTADO, SEQ)
-                        VALUES('{agencia}', {codVideo}, '{ruta}', '{nombreArchivo}', '{estado}', {sec})";
-
-                    command.ExecuteNonQuery();
+                    lista.Add(video);
                 }
 
-                return true;
+                return lista;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        public VideoModel ObtenerPorId(string codcco, int codvideo)
+        {
+            VideoModel? video = null;
+
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    SELECT CODCCO, CODVIDEO, RUTA, NOMBRE, ESTADO, SEQ 
+                    FROM BCAH96DTA.MANTVIDEO 
+                    WHERE CODCCO = '{codcco}' AND CODVIDEO = {codvideo}";
+
+                using var reader = command.ExecuteReader();
+                if (reader.Read())
+                {
+                    video = new VideoModel
+                    {
+                        CODCCO = reader["CODCCO"].ToString(),
+                        CODVIDEO = Convert.ToInt32(reader["CODVIDEO"]),
+                        RUTA = reader["RUTA"].ToString(),
+                        NOMBRE = reader["NOMBRE"].ToString(),
+                        ESTADO = reader["ESTADO"].ToString(),
+                        SEQ = Convert.ToInt32(reader["SEQ"])
+                    };
+                }
+
+                return video!;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        public bool Eliminar(string codcco, int codvideo)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    DELETE FROM BCAH96DTA.MANTVIDEO 
+                    WHERE CODCCO = '{codcco}' AND CODVIDEO = {codvideo}";
+
+                return command.ExecuteNonQuery() > 0;
             }
             catch
             {
@@ -136,41 +148,31 @@ namespace SitiosIntranet.Web.Services
                 _as400.Close();
             }
         }
-
-        /// <summary>
-        /// Obtiene la lista de agencias activas desde RSAGE01.
-        /// </summary>
-        public List<string> ObtenerAgencias(DbCommand command)
-        {
-            var agencias = new List<string>();
-            command.CommandText = "SELECT CODCCO FROM BCAH96DTA.RSAGE01";
-
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-                agencias.Add(reader["CODCCO"].ToString());
-
-            reader.Close();
-            return agencias;
-        }
-
-        /// <summary>
-        /// Retorna el siguiente valor de CODVIDEO (MAX + 1)
-        /// </summary>
-        public int GetUltimoId(DbCommand command)
-        {
-            command.CommandText = "SELECT MAX(CODVIDEO) FROM BCAH96DTA.MANTVIDEO";
-            var result = command.ExecuteScalar();
-            return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
-        }
-
-        /// <summary>
-        /// Retorna el siguiente valor de SEQ por agencia (MAX + 1)
-        /// </summary>
-        public int GetSecuencia(DbCommand command, string codcco)
-        {
-            command.CommandText = $"SELECT MAX(SEQ) FROM BCAH96DTA.MANTVIDEO WHERE CODCCO = '{codcco}'";
-            var result = command.ExecuteScalar();
-            return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
-        }
     }
 }
+
+
+
+
+
+
+namespace SitiosIntranet.Web.Models
+{
+    /// <summary>
+    /// Representa un registro de la tabla MANTVIDEO en AS400.
+    /// </summary>
+    public class VideoModel
+    {
+        public string CODCCO { get; set; }
+        public int CODVIDEO { get; set; }
+        public string RUTA { get; set; }
+        public string NOMBRE { get; set; }
+        public string ESTADO { get; set; }
+        public int SEQ { get; set; }
+    }
+}
+
+
+
+
+builder.Services.AddScoped<IVideoQueryService, VideoQueryService>();
