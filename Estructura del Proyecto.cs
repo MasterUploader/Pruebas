@@ -1,84 +1,67 @@
-/// <summary>
-/// Inserta el registro del video en la base de datos AS400, usando la ruta personalizada si existe.
-/// </summary>
-public bool GuardarRegistroEnAs400(string codcco, string estado, string nombreArchivo, string rutaContenedorBase)
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using CAUAdministracion.Services.Videos;
+using Microsoft.AspNetCore.Http;
+using RestUtilities.Connection; // Librería personalizada de conexión
+using System.Threading.Tasks;
+using System;
+
+namespace CAUAdministracion.Controllers
 {
-    try
+    [Authorize]
+    public class VideosController : Controller
     {
-        _as400.Open();
-        using var command = _as400.GetDbCommand();
+        private readonly IVideoService _videoService;
 
-        if (command.Connection.State != ConnectionState.Open)
-            command.Connection.Open();
-
-        // Obtener la ruta personalizada desde AS400, si está disponible
-        string rutaServidor = GetRutaServer(codcco);
-
-        // Si no hay ruta personalizada, se usa la del archivo de configuración (ContenedorVideos)
-        string rutaFinal = !string.IsNullOrWhiteSpace(rutaServidor)
-            ? Path.Combine(rutaServidor, "Marquesin")
-            : Path.Combine(rutaContenedorBase, codcco, "Marquesin");
-
-        // Asegurar doble barra para compatibilidad con AS400
-        rutaFinal = rutaFinal.Replace("\\", "\\\\");
-
-        // Obtener nuevo ID para CODVIDEO
-        int codVideo = GetUltimoId(command);
-
-        // Obtener secuencia correlativa por agencia
-        int sec = GetSecuencial(command, codcco);
-
-        // Armar consulta SQL para inserción
-        string insert = $@"
-            INSERT INTO BCAH96DTA.MANTVIDEO
-            (CODCCO, CODVIDEO, RUTA, NOMBRE, ESTADO, SEQ)
-            VALUES ('{codcco}', {codVideo}, '{rutaFinal}', '{nombreArchivo}', '{estado}', {sec})";
-
-        using var cmd = new OleDbCommand(insert, (OleDbConnection)command.Connection);
-        int rowsAffected = cmd.ExecuteNonQuery();
-
-        return rowsAffected > 0;
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Error al insertar en AS400: {ex.Message}");
-        return false;
-    }
-    finally
-    {
-        _as400.Close();
-    }
-}
-
-
-
-
-
-/// <summary>
-/// Devuelve la ruta personalizada desde la tabla RSAGE01 según el código de agencia.
-/// </summary>
-private string GetRutaServer(string codcco)
-{
-    try
-    {
-        using var command = _as400.GetDbCommand();
-        command.CommandText = $"SELECT NONSER FROM BCAH96DTA.RSAGE01 WHERE CODCCO = '{codcco}'";
-
-        if (command.Connection.State == ConnectionState.Closed)
-            command.Connection.Open();
-
-        using var reader = command.ExecuteReader();
-        if (reader.Read())
+        public VideosController(IVideoService videoService)
         {
-            var ruta = reader["NONSER"]?.ToString();
-            if (!string.IsNullOrWhiteSpace(ruta))
-                return $"\\\\{ruta}\\";
+            _videoService = videoService;
+        }
+
+        /// <summary>
+        /// GET: Muestra el formulario para subir un nuevo video.
+        /// </summary>
+        [HttpGet]
+        public IActionResult Agregar()
+        {
+            return View();
+        }
+
+        /// <summary>
+        /// POST: Recibe el archivo de video, lo guarda en disco y lo registra en AS400.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> Agregar(IFormFile archivo, string codcco, string estado)
+        {
+            // Validación básica del archivo
+            if (archivo == null || archivo.Length == 0)
+            {
+                ModelState.AddModelError("archivo", "Debe seleccionar un archivo.");
+                return View();
+            }
+
+            // Obtener nombre del archivo y ruta base del archivo de configuración
+            var nombreArchivo = Path.GetFileName(archivo.FileName);
+            string rutaContenedorBase = GlobalConnection.ConnectionConfig.ContenedorVideos;
+
+            // Paso 1: Guardar archivo en disco
+            bool guardadoOk = await _videoService.GuardarArchivoEnDisco(archivo, codcco, rutaContenedorBase, nombreArchivo);
+            if (!guardadoOk)
+            {
+                ModelState.AddModelError("", "No se pudo guardar el archivo.");
+                return View();
+            }
+
+            // Paso 2: Registrar información en AS400
+            bool insertadoOk = _videoService.GuardarRegistroEnAs400(codcco, estado, nombreArchivo, rutaContenedorBase);
+            if (!insertadoOk)
+            {
+                ModelState.AddModelError("", "No se pudo registrar en la base de datos.");
+                return View();
+            }
+
+            // Redirige al menú principal después de éxito
+            return RedirectToAction("Index", "Home");
         }
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Error al obtener ruta de servidor: {ex.Message}");
-    }
-
-    return null; // Si falla, retornará null y se usará ContenedorVideos
 }
