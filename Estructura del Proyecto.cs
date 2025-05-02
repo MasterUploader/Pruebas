@@ -1,54 +1,84 @@
-public List<SelectListItem> ObtenerAgenciasSelectList()
+/// <summary>
+/// Inserta el registro del video en la base de datos AS400, usando la ruta personalizada si existe.
+/// </summary>
+public bool GuardarRegistroEnAs400(string codcco, string estado, string nombreArchivo, string rutaContenedorBase)
 {
-    var agencias = new List<SelectListItem>();
-
     try
     {
         _as400.Open();
         using var command = _as400.GetDbCommand();
-        command.CommandText = "SELECT CODCCO, NOMAGE FROM BCAH96DTA.RSAGE01 ORDER BY NOMAGE";
+
+        if (command.Connection.State != ConnectionState.Open)
+            command.Connection.Open();
+
+        // Obtener la ruta personalizada desde AS400, si está disponible
+        string rutaServidor = GetRutaServer(codcco);
+
+        // Si no hay ruta personalizada, se usa la del archivo de configuración (ContenedorVideos)
+        string rutaFinal = !string.IsNullOrWhiteSpace(rutaServidor)
+            ? Path.Combine(rutaServidor, "Marquesin")
+            : Path.Combine(rutaContenedorBase, codcco, "Marquesin");
+
+        // Asegurar doble barra para compatibilidad con AS400
+        rutaFinal = rutaFinal.Replace("\\", "\\\\");
+
+        // Obtener nuevo ID para CODVIDEO
+        int codVideo = GetUltimoId(command);
+
+        // Obtener secuencia correlativa por agencia
+        int sec = GetSecuencial(command, codcco);
+
+        // Armar consulta SQL para inserción
+        string insert = $@"
+            INSERT INTO BCAH96DTA.MANTVIDEO
+            (CODCCO, CODVIDEO, RUTA, NOMBRE, ESTADO, SEQ)
+            VALUES ('{codcco}', {codVideo}, '{rutaFinal}', '{nombreArchivo}', '{estado}', {sec})";
+
+        using var cmd = new OleDbCommand(insert, (OleDbConnection)command.Connection);
+        int rowsAffected = cmd.ExecuteNonQuery();
+
+        return rowsAffected > 0;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error al insertar en AS400: {ex.Message}");
+        return false;
+    }
+    finally
+    {
+        _as400.Close();
+    }
+}
+
+
+
+
+
+/// <summary>
+/// Devuelve la ruta personalizada desde la tabla RSAGE01 según el código de agencia.
+/// </summary>
+private string GetRutaServer(string codcco)
+{
+    try
+    {
+        using var command = _as400.GetDbCommand();
+        command.CommandText = $"SELECT NONSER FROM BCAH96DTA.RSAGE01 WHERE CODCCO = '{codcco}'";
 
         if (command.Connection.State == ConnectionState.Closed)
             command.Connection.Open();
 
         using var reader = command.ExecuteReader();
-        while (reader.Read())
+        if (reader.Read())
         {
-            agencias.Add(new SelectListItem
-            {
-                Value = reader["CODCCO"].ToString(),
-                Text = reader["NOMAGE"].ToString()
-            });
+            var ruta = reader["NONSER"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(ruta))
+                return $"\\\\{ruta}\\";
         }
     }
     catch (Exception ex)
     {
-        // Puedes loguearlo si tienes un sistema de logging, por ahora solo devolvemos una opción informativa
-        agencias.Clear();
-        agencias.Add(new SelectListItem
-        {
-            Value = "",
-            Text = "Error al obtener agencias: " + ex.Message
-        });
+        Console.WriteLine($"Error al obtener ruta de servidor: {ex.Message}");
     }
 
-    return agencias;
-}
-
-
-@if (ViewBag.Agencias is List<SelectListItem> listaAgencias)
-{
-    var esError = listaAgencias.Count == 1 && string.IsNullOrEmpty(listaAgencias[0].Value);
-
-    <select class="form-select" id="codcco" name="codcco" required>
-        @foreach (var agencia in listaAgencias)
-        {
-            <option value="@agencia.Value">@agencia.Text</option>
-        }
-    </select>
-
-    @if (esError)
-    {
-        <div class="text-danger mt-1">@listaAgencias[0].Text</div>
-    }
+    return null; // Si falla, retornará null y se usará ContenedorVideos
 }
