@@ -1,67 +1,56 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using CAUAdministracion.Services.Videos;
-using Microsoft.AspNetCore.Http;
-using RestUtilities.Connection; // Librería personalizada de conexión
-using System.Threading.Tasks;
-using System;
+using Microsoft.Extensions.Configuration;
+using RestUtilities.Connections.Services;
 
-namespace CAUAdministracion.Controllers
+namespace RestUtilities.Connections.Helpers
 {
-    [Authorize]
-    public class VideosController : Controller
+    /// <summary>
+    /// Permite acceder y modificar dinámicamente los parámetros del archivo Connection.json
+    /// desde cualquier parte de la aplicación.
+    /// </summary>
+    public static class ConnectionManagerHelper
     {
-        private readonly IVideoService _videoService;
+        /// <summary>
+        /// Asume que la configuración global fue cargada en Program.cs
+        /// y está disponible mediante esta propiedad.
+        /// </summary>
+        public static ConnectionSettings ConnectionConfig { get; set; }
 
-        public VideosController(IVideoService videoService)
+        /// <summary>
+        /// Obtiene un valor de la configuración de conexión de un servidor específico.
+        /// </summary>
+        public static string? GetValue(string connectionName, string key)
         {
-            _videoService = videoService;
+            return ConnectionConfig?
+                .CurrentEnvironment
+                .GetSection("ConnectionSettings")
+                .GetSection(connectionName)?[key];
         }
 
         /// <summary>
-        /// GET: Muestra el formulario para subir un nuevo video.
+        /// Establece (modifica en memoria) un valor de configuración para un servidor específico.
         /// </summary>
-        [HttpGet]
-        public IActionResult Agregar()
+        public static void SetValue(string connectionName, string key, string newValue)
         {
-            return View();
+            var section = ConnectionConfig?
+                .CurrentEnvironment
+                .GetSection("ConnectionSettings")
+                .GetSection(connectionName);
+
+            if (section != null)
+            {
+                section[key] = newValue;
+            }
         }
 
         /// <summary>
-        /// POST: Recibe el archivo de video, lo guarda en disco y lo registra en AS400.
+        /// Obtiene toda la sección de un servidor específico como IConfigurationSection.
         /// </summary>
-        [HttpPost]
-        public async Task<IActionResult> Agregar(IFormFile archivo, string codcco, string estado)
+        public static IConfigurationSection? GetConnectionSection(string connectionName)
         {
-            // Validación básica del archivo
-            if (archivo == null || archivo.Length == 0)
-            {
-                ModelState.AddModelError("archivo", "Debe seleccionar un archivo.");
-                return View();
-            }
-
-            // Obtener nombre del archivo y ruta base del archivo de configuración
-            var nombreArchivo = Path.GetFileName(archivo.FileName);
-            string rutaContenedorBase = GlobalConnection.ConnectionConfig.ContenedorVideos;
-
-            // Paso 1: Guardar archivo en disco
-            bool guardadoOk = await _videoService.GuardarArchivoEnDisco(archivo, codcco, rutaContenedorBase, nombreArchivo);
-            if (!guardadoOk)
-            {
-                ModelState.AddModelError("", "No se pudo guardar el archivo.");
-                return View();
-            }
-
-            // Paso 2: Registrar información en AS400
-            bool insertadoOk = _videoService.GuardarRegistroEnAs400(codcco, estado, nombreArchivo, rutaContenedorBase);
-            if (!insertadoOk)
-            {
-                ModelState.AddModelError("", "No se pudo registrar en la base de datos.");
-                return View();
-            }
-
-            // Redirige al menú principal después de éxito
-            return RedirectToAction("Index", "Home");
+            return ConnectionConfig?
+                .CurrentEnvironment
+                .GetSection("ConnectionSettings")
+                .GetSection(connectionName);
         }
     }
 }
