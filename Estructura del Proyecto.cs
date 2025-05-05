@@ -1,217 +1,79 @@
-using CAUAdministracion.Models;
-using Connections.Helpers;
-using Connections.Interfaces;
-using Microsoft.AspNetCore.Mvc.Rendering;
-using System.Data;
-using System.Data.Common;
-
-namespace CAUAdministracion.Services.Mensajes
+/// <summary>
+/// Obtiene la lista de mensajes registrados en la tabla MANTMSG desde el AS400.
+/// </summary>
+/// <returns>Una lista de objetos MensajeModel con los datos cargados desde la base de datos.</returns>
+public async Task<List<MensajeModel>> ObtenerMensajesAsync()
 {
-    /// <summary>
-    /// Servicio para la gestión de mensajes (tabla MANTMSG) en AS400.
-    /// </summary>
-    public class MensajeService : IMensajeService
+    var mensajes = new List<MensajeModel>();
+
+    try
     {
-        private readonly IDatabaseConnection _as400;
+        _as400.Open();
+        using var command = _as400.GetDbCommand();
 
-        public MensajeService(IDatabaseConnection as400)
+        // Consulta para obtener todos los mensajes registrados
+        command.CommandText = @"
+            SELECT CODCCO, CODMSG, SEQ, MENSAJE, ESTADO
+            FROM BCAH96DTA.MANTMSG
+            ORDER BY CODCCO, SEQ";
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
         {
-            _as400 = as400;
+            mensajes.Add(new MensajeModel
+            {
+                Codcco = reader["CODCCO"]?.ToString(),
+                CodMsg = Convert.ToInt32(reader["CODMSG"]),
+                Seq = Convert.ToInt32(reader["SEQ"]),
+                Mensaje = reader["MENSAJE"]?.ToString(),
+                Estado = reader["ESTADO"]?.ToString()
+            });
         }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("Error al obtener los mensajes: " + ex.Message);
+        // Puedes usar un logger aquí si ya tienes uno integrado
+    }
+    finally
+    {
+        _as400.Close();
+    }
 
-        /// <summary>
-        /// Obtiene todas las agencias que tienen marquesina activada, en formato SelectListItem.
-        /// </summary>
-        public List<SelectListItem> ObtenerAgenciasSelectList()
-        {
-            var agencias = new List<SelectListItem>();
-            try
-            {
-                _as400.Open();
-                using var command = _as400.GetDbCommand();
+    return mensajes;
+}
 
-                command.CommandText = @"
-                    SELECT CODCCO, NOMAGE 
-                    FROM BCAH96DTA.RSAGE01 
-                    WHERE MARQUESINA = 'SI' 
-                    ORDER BY NOMAGE";
 
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    agencias.Add(new SelectListItem
-                    {
-                        Value = reader["CODCCO"].ToString(),
-                        Text = reader["NOMAGE"].ToString()
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                agencias.Clear();
-                agencias.Add(new SelectListItem
-                {
-                    Value = "",
-                    Text = "Error: " + ex.Message
-                });
-            }
-            finally
-            {
-                _as400.Close();
-            }
+/// <summary>
+/// Verifica si un mensaje tiene dependencias en otra tabla antes de eliminarlo.
+/// Esto previene eliminar mensajes que aún están en uso.
+/// </summary>
+/// <param name="codcco">Código de agencia</param>
+/// <param name="codMsg">Código del mensaje</param>
+/// <returns>True si hay dependencias encontradas, False si no hay o si ocurre un error.</returns>
+public bool TieneDependencia(string codcco, int codMsg)
+{
+    try
+    {
+        _as400.Open();
+        using var command = _as400.GetDbCommand();
 
-            return agencias;
-        }
+        // Consulta a una tabla relacionada (ajústala si se conoce el nombre real)
+        command.CommandText = $@"
+            SELECT COUNT(*) 
+            FROM BCAH96DTA.OTRATABLA 
+            WHERE CODCCO = '{codcco}' 
+              AND CODMSG = {codMsg}";
 
-        /// <summary>
-        /// Lista los mensajes filtrados por código de agencia.
-        /// </summary>
-        public List<MensajeModel> ListarMensajes(string codcco)
-        {
-            var lista = new List<MensajeModel>();
-            try
-            {
-                _as400.Open();
-                using var command = _as400.GetDbCommand();
-
-                command.CommandText = $@"
-                    SELECT CODMSG, SEQ, MENSAJE, ESTADO 
-                    FROM BCAH96DTA.MANTMSG 
-                    WHERE CODCCO = '{codcco}'
-                    ORDER BY SEQ";
-
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    lista.Add(new MensajeModel
-                    {
-                        Codcco = codcco,
-                        CodMsg = Convert.ToInt32(reader["CODMSG"]),
-                        Seq = Convert.ToInt32(reader["SEQ"]),
-                        Mensaje = reader["MENSAJE"].ToString(),
-                        Estado = reader["ESTADO"].ToString()
-                    });
-                }
-            }
-            catch
-            {
-                // Error controlado, se puede loguear si se desea
-            }
-            finally
-            {
-                _as400.Close();
-            }
-
-            return lista;
-        }
-
-        /// <summary>
-        /// Elimina un mensaje de la tabla MANTMSG por su ID.
-        /// </summary>
-        public bool EliminarMensaje(int codMsg)
-        {
-            try
-            {
-                _as400.Open();
-                using var command = _as400.GetDbCommand();
-
-                command.CommandText = $@"
-                    DELETE FROM BCAH96DTA.MANTMSG 
-                    WHERE CODMSG = {codMsg}";
-
-                return command.ExecuteNonQuery() > 0;
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                _as400.Close();
-            }
-        }
-
-        /// <summary>
-        /// Actualiza un mensaje existente.
-        /// </summary>
-        public bool ActualizarMensaje(MensajeModel mensaje)
-        {
-            try
-            {
-                _as400.Open();
-                using var command = _as400.GetDbCommand();
-
-                command.CommandText = $@"
-                    UPDATE BCAH96DTA.MANTMSG
-                    SET SEQ = {mensaje.Seq}, 
-                        MENSAJE = '{mensaje.Mensaje}', 
-                        ESTADO = '{mensaje.Estado}'
-                    WHERE CODMSG = {mensaje.CodMsg} 
-                      AND CODCCO = '{mensaje.Codcco}'";
-
-                return command.ExecuteNonQuery() > 0;
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                _as400.Close();
-            }
-        }
-
-        /// <summary>
-        /// Obtiene el siguiente valor de CODMSG (MAX + 1).
-        /// </summary>
-        public int ObtenerSiguienteId()
-        {
-            try
-            {
-                _as400.Open();
-                using var command = _as400.GetDbCommand();
-
-                command.CommandText = "SELECT MAX(CODMSG) FROM BCAH96DTA.MANTMSG";
-                var result = command.ExecuteScalar();
-
-                return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
-            }
-            catch
-            {
-                return 1;
-            }
-            finally
-            {
-                _as400.Close();
-            }
-        }
-
-        /// <summary>
-        /// Inserta un nuevo mensaje en la base de datos.
-        /// </summary>
-        public bool InsertarMensaje(MensajeModel mensaje)
-        {
-            try
-            {
-                _as400.Open();
-                using var command = _as400.GetDbCommand();
-
-                int nuevoId = ObtenerSiguienteId();
-
-                command.CommandText = $@"
-                    INSERT INTO BCAH96DTA.MANTMSG (CODCCO, CODMSG, SEQ, MENSAJE, ESTADO) 
-                    VALUES ('{mensaje.Codcco}', {nuevoId}, {mensaje.Seq}, '{mensaje.Mensaje}', '{mensaje.Estado}')";
-
-                return command.ExecuteNonQuery() > 0;
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                _as400.Close();
-            }
-        }
+        var count = Convert.ToInt32(command.ExecuteScalar());
+        return count > 0;
+    }
+    catch
+    {
+        return true; // Si hay error, asumimos que sí tiene dependencia
+    }
+    finally
+    {
+        _as400.Close();
     }
 }
