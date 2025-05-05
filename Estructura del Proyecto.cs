@@ -1,63 +1,44 @@
-/// <summary>
-/// Inserta un nuevo mensaje en la tabla MANTMSG en AS400.
-/// Genera el nuevo código automáticamente (MAX + 1) y secuencia correlativa por agencia.
-/// </summary>
-/// <param name="mensaje">Modelo con los datos del mensaje a insertar</param>
-/// <returns>True si se insertó correctamente, false si hubo un error</returns>
-public bool InsertarMensaje(MensajeModel mensaje)
-{
-    try
-    {
-        _as400.Open();
-
-        if (!_as400.IsConnected())
-            return false;
-
-        using var command = _as400.GetDbCommand();
-
-        // Obtener nuevo CODMSG
-        int nuevoId = GetUltimoId(command);
-
-        // Obtener nueva secuencia por agencia
-        int nuevaSecuencia = GetSecuencia(command, mensaje.Codcco);
-
-        // Construir query SQL de inserción
-        command.CommandText = $@"
-            INSERT INTO BCAH96DTA.MANTMSG (CODMSG, CODCCO, SEQ, MENSAJE, ESTADO)
-            VALUES ({nuevoId}, '{mensaje.Codcco}', {nuevaSecuencia}, '{mensaje.Mensaje}', '{mensaje.Estado}')";
-
-        int filas = command.ExecuteNonQuery();
-        return filas > 0;
-    }
-    catch
-    {
-        // Podrías loguear aquí el error si deseas
-        return false;
-    }
-    finally
-    {
-        _as400.Close();
-    }
+@model CAUAdministracion.Models.MensajeModel
+@{
+    ViewData["Title"] = "Agregar Mensaje";
+    var agencias = ViewBag.Agencias as List<SelectListItem>;
 }
 
+<h2>Agregar Nuevo Mensaje</h2>
 
-
-/// <summary>
-/// Obtiene el próximo código de mensaje (CODMSG) a usar
-/// </summary>
-public int GetUltimoId(DbCommand command)
+@if (!string.IsNullOrEmpty(ViewBag.Mensaje))
 {
-    command.CommandText = "SELECT MAX(CODMSG) FROM BCAH96DTA.MANTMSG";
-    var result = command.ExecuteScalar();
-    return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        @ViewBag.Mensaje
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
 }
 
-/// <summary>
-/// Obtiene la próxima secuencia (SEQ) para una agencia específica
-/// </summary>
-public int GetSecuencia(DbCommand command, string codcco)
-{
-    command.CommandText = $"SELECT MAX(SEQ) FROM BCAH96DTA.MANTMSG WHERE CODCCO = '{codcco}'";
-    var result = command.ExecuteScalar();
-    return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
-}
+<form asp-action="Agregar" method="post">
+    <div class="mb-3">
+        <label for="codcco" class="form-label">Agencia</label>
+        <select id="codcco" name="Codcco" class="form-select" asp-for="Codcco" required>
+            <option value="">Seleccione una agencia</option>
+            @foreach (var agencia in agencias)
+            {
+                <option value="@agencia.Value">@agencia.Text</option>
+            }
+        </select>
+    </div>
+
+    <div class="mb-3">
+        <label for="mensaje" class="form-label">Mensaje</label>
+        <textarea class="form-control" id="mensaje" name="Mensaje" rows="4" required>@Model?.Mensaje</textarea>
+    </div>
+
+    <div class="mb-3">
+        <label for="estado" class="form-label">Estado</label>
+        <select id="estado" name="Estado" class="form-select" asp-for="Estado" required>
+            <option value="A" selected>Activo</option>
+            <option value="I">Inactivo</option>
+        </select>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a asp-controller="Messages" asp-action="Index" class="btn btn-secondary ms-2">Cancelar</a>
+</form>
