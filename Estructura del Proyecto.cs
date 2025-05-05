@@ -1,5 +1,7 @@
+@model CAUAdministracion.Models.VideoModel
 @{
     ViewData["Title"] = "Agregar Video";
+    var agencias = ViewBag.Agencias as List<SelectListItem>;
 }
 
 <h2 class="text-danger">@ViewData["Title"]</h2>
@@ -9,23 +11,18 @@
 
     <!-- Campo: Código de Agencia -->
     <div class="mb-3">
-        <label for="codcco" class="form-label">Código de Agencia</label>
-        @if (ViewBag.Agencias is List<SelectListItem> listaAgencias)
-        {
-            var esError = listaAgencias.Count == 1 && string.IsNullOrEmpty(listaAgencias[0].Value);
-
-            <select class="form-select" id="codcco" name="codcco" required>
-                @foreach (var agencia in listaAgencias)
+        <label asp-for="Codcco" class="form-label">Código de Agencia</label>
+        <select asp-for="Codcco" class="form-select" required>
+            <option value="">Seleccione una agencia</option>
+            @if (agencias != null)
+            {
+                foreach (var agencia in agencias)
                 {
                     <option value="@agencia.Value">@agencia.Text</option>
                 }
-            </select>
-
-            @if (esError)
-            {
-                <div class="text-danger mt-1">@listaAgencias[0].Text</div>
             }
-        }
+        </select>
+        <span asp-validation-for="Codcco" class="text-danger"></span>
         <small class="form-text text-muted">Seleccione una o ingrese 0 si aplica a todas las agencias.</small>
     </div>
 
@@ -48,4 +45,3 @@
     <!-- Botón Enviar -->
     <button type="submit" class="btn btn-primary">Subir Video</button>
 </form>
-
