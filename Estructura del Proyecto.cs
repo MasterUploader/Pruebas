@@ -1,111 +1,63 @@
-using CAUAdministracion.Models;
-using CAUAdministracion.Services.Mensajes;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Rendering;
-
-namespace CAUAdministracion.Controllers;
-
-[Authorize]
-public class MessagesController : Controller
+/// <summary>
+/// Inserta un nuevo mensaje en la tabla MANTMSG en AS400.
+/// Genera el nuevo código automáticamente (MAX + 1) y secuencia correlativa por agencia.
+/// </summary>
+/// <param name="mensaje">Modelo con los datos del mensaje a insertar</param>
+/// <returns>True si se insertó correctamente, false si hubo un error</returns>
+public bool InsertarMensaje(MensajeModel mensaje)
 {
-    private readonly IMensajeService _mensajeService;
-
-    public MessagesController(IMensajeService mensajeService)
+    try
     {
-        _mensajeService = mensajeService;
+        _as400.Open();
+
+        if (!_as400.IsConnected())
+            return false;
+
+        using var command = _as400.GetDbCommand();
+
+        // Obtener nuevo CODMSG
+        int nuevoId = GetUltimoId(command);
+
+        // Obtener nueva secuencia por agencia
+        int nuevaSecuencia = GetSecuencia(command, mensaje.Codcco);
+
+        // Construir query SQL de inserción
+        command.CommandText = $@"
+            INSERT INTO BCAH96DTA.MANTMSG (CODMSG, CODCCO, SEQ, MENSAJE, ESTADO)
+            VALUES ({nuevoId}, '{mensaje.Codcco}', {nuevaSecuencia}, '{mensaje.Mensaje}', '{mensaje.Estado}')";
+
+        int filas = command.ExecuteNonQuery();
+        return filas > 0;
     }
-
-    // =======================================
-    //     1. AGREGAR NUEVO MENSAJE
-    // =======================================
-
-    [HttpGet]
-    public IActionResult Agregar()
+    catch
     {
-        // Cargar la lista de agencias para el selector
-        var agencias = _mensajeService.ObtenerAgenciasSelectList();
-        ViewBag.Agencias = agencias;
-
-        return View();
+        // Podrías loguear aquí el error si deseas
+        return false;
     }
-
-    [HttpPost]
-    public IActionResult Agregar(MensajeModel model)
+    finally
     {
-        if (!ModelState.IsValid)
-        {
-            ViewBag.Agencias = _mensajeService.ObtenerAgenciasSelectList();
-            return View(model);
-        }
-
-        var insertado = _mensajeService.InsertarMensaje(model);
-
-        if (insertado)
-            return RedirectToAction("Index");
-        
-        ModelState.AddModelError("", "No se pudo insertar el mensaje.");
-        ViewBag.Agencias = _mensajeService.ObtenerAgenciasSelectList();
-        return View(model);
+        _as400.Close();
     }
+}
 
-    // =======================================
-    //     2. MANTENIMIENTO DE MENSAJES
-    // =======================================
 
-    [HttpGet]
-    public async Task<IActionResult> Index(string codcco = null)
-    {
-        // Obtener todas las agencias para el filtro
-        var agencias = _mensajeService.ObtenerAgenciasSelectList();
-        ViewBag.Agencias = agencias;
-        ViewBag.CodigoAgenciaSeleccionado = codcco;
 
-        // Obtener mensajes filtrados si hay código de agencia
-        var mensajes = await _mensajeService.ObtenerMensajesAsync();
-        if (!string.IsNullOrEmpty(codcco))
-            mensajes = mensajes.Where(m => m.Codcco == codcco).ToList();
+/// <summary>
+/// Obtiene el próximo código de mensaje (CODMSG) a usar
+/// </summary>
+public int GetUltimoId(DbCommand command)
+{
+    command.CommandText = "SELECT MAX(CODMSG) FROM BCAH96DTA.MANTMSG";
+    var result = command.ExecuteScalar();
+    return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
+}
 
-        return View(mensajes);
-    }
-
-    [HttpPost]
-    public IActionResult Actualizar(int codMsg, string codcco, string mensaje, string estado, int seq)
-    {
-        var model = new MensajeModel
-        {
-            CodMsg = codMsg,
-            Codcco = codcco,
-            Mensaje = mensaje,
-            Estado = estado,
-            Seq = seq
-        };
-
-        var actualizado = _mensajeService.ActualizarMensaje(model);
-
-        TempData["Mensaje"] = actualizado
-            ? "Mensaje actualizado correctamente."
-            : "Error al actualizar el mensaje.";
-
-        return RedirectToAction("Index", new { codcco = codcco });
-    }
-
-    [HttpPost]
-    public IActionResult Eliminar(int codMsg, string codcco)
-    {
-        // Validar si el mensaje tiene dependencias
-        if (_mensajeService.TieneDependencia(codcco, codMsg))
-        {
-            TempData["Mensaje"] = "No se puede eliminar el mensaje porque tiene dependencias.";
-            return RedirectToAction("Index", new { codcco = codcco });
-        }
-
-        var eliminado = _mensajeService.EliminarMensaje(codMsg);
-
-        TempData["Mensaje"] = eliminado
-            ? "Mensaje eliminado correctamente."
-            : "Error al eliminar el mensaje.";
-
-        return RedirectToAction("Index", new { codcco = codcco });
-    }
+/// <summary>
+/// Obtiene la próxima secuencia (SEQ) para una agencia específica
+/// </summary>
+public int GetSecuencia(DbCommand command, string codcco)
+{
+    command.CommandText = $"SELECT MAX(SEQ) FROM BCAH96DTA.MANTMSG WHERE CODCCO = '{codcco}'";
+    var result = command.ExecuteScalar();
+    return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
 }
