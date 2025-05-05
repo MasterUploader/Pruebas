@@ -1,66 +1,33 @@
-// ===========================
-        //   2. MANTENIMIENTO VIDEOS
-        // ===========================
+using Microsoft.AspNetCore.Http;
+using System.ComponentModel.DataAnnotations;
 
-        [HttpGet]
-        public IActionResult Index(string codcco)
-        {
-            if (string.IsNullOrEmpty(codcco))
-            {
-                ViewBag.Mensaje = "Debe proporcionar un código de agencia.";
-                return View(new List<VideoModel>());
-            }
+namespace CAUAdministracion.Models.Video
+{
+    /// <summary>
+    /// Modelo para cargar nuevos archivos de video.
+    /// Usado en la vista Agregar.cshtml.
+    /// </summary>
+    public class VideoUploadModel
+    {
+        /// <summary>
+        /// Archivo de video subido por el usuario.
+        /// </summary>
+        [Required(ErrorMessage = "Debe seleccionar un archivo de video.")]
+        [Display(Name = "Archivo de Video")]
+        public IFormFile Video { get; set; }
 
-            var lista = _videoService.ListarVideos(codcco);
-            return View(lista);
-        }
+        /// <summary>
+        /// Código de la agencia a la que pertenece el video.
+        /// </summary>
+        [Required(ErrorMessage = "Debe especificar el código de agencia.")]
+        [Display(Name = "Código Agencia")]
+        public string Codcco { get; set; }
 
-        [HttpPost]
-        public IActionResult Actualizar(int codVideo, string codcco, string Estado, int Seq)
-        {
-            var video = new VideoModel
-            {
-                CodVideo = codVideo,
-                Codcco = codcco,
-                Estado = Estado,
-                Seq = Seq
-            };
-
-            var actualizado = _videoService.ActualizarVideo(video);
-
-            ViewBag.Mensaje = actualizado
-                ? "Registro actualizado correctamente."
-                : "Error al actualizar el registro.";
-
-            return RedirectToAction("Index", new { codcco = codcco });
-        }
-
-        [HttpPost]
-        public IActionResult Eliminar(int codVideo, string codcco)
-        {
-            // Validar dependencias
-            if (_videoService.TieneDependencias(codcco, codVideo))
-            {
-                ViewBag.Mensaje = "No se puede eliminar el video porque tiene dependencias.";
-                return RedirectToAction("Index", new { codcco = codcco });
-            }
-
-            var lista = _videoService.ListarVideos(codcco);
-            var video = lista.FirstOrDefault(v => v.CodVideo == codVideo);
-
-            if (video == null)
-            {
-                ViewBag.Mensaje = "El video no fue encontrado.";
-                return RedirectToAction("Index", new { codcco = codcco });
-            }
-
-            var eliminadoDb = _videoService.EliminarVideo(codVideo, codcco);
-            var eliminadoArchivo = _videoService.EliminarArchivoFisico(video.RutaFisica);
-
-            ViewBag.Mensaje = eliminadoDb && eliminadoArchivo
-                ? "Video eliminado correctamente."
-                : "Error al eliminar el video.";
-
-            return RedirectToAction("Index", new { codcco = codcco });
-        }
+        /// <summary>
+        /// Estado del video (A = Activo, I = Inactivo).
+        /// </summary>
+        [Required(ErrorMessage = "Debe seleccionar un estado.")]
+        [Display(Name = "Estado")]
+        public string Estado { get; set; }
     }
+}
