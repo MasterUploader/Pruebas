@@ -1,55 +1,66 @@
-@model List<CAUAdministracion.Models.Video.VideoModel>
-@{
-    ViewBag.Title = "Mantenimiento de Videos";
-}
+// ===========================
+        //   2. MANTENIMIENTO VIDEOS
+        // ===========================
 
-<h2>Mantenimiento de Videos</h2>
-
-@if (ViewBag.Mensaje != null)
-{
-    <div class="alert alert-info">@ViewBag.Mensaje</div>
-}
-
-<form asp-action="Actualizar" method="post">
-    <table class="table table-bordered table-hover">
-        <thead class="table-dark">
-            <tr>
-                <th>Agencia</th>
-                <th>ID Video</th>
-                <th>Nombre Archivo</th>
-                <th>Secuencia</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            @for (int i = 0; i < Model.Count; i++)
+        [HttpGet]
+        public IActionResult Index(string codcco)
+        {
+            if (string.IsNullOrEmpty(codcco))
             {
-                <tr>
-                    <td>
-                        @Html.DisplayFor(m => m[i].Codcco)
-                        <input type="hidden" name="videos[@i].Codcco" value="@Model[i].Codcco" />
-                    </td>
-                    <td>
-                        @Html.DisplayFor(m => m[i].CodVideo)
-                        <input type="hidden" name="videos[@i].CodVideo" value="@Model[i].CodVideo" />
-                    </td>
-                    <td>@Model[i].Nombre</td>
-                    <td>
-                        <input type="number" name="videos[@i].Seq" value="@Model[i].Seq" class="form-control" />
-                    </td>
-                    <td>
-                        <select name="videos[@i].Estado" class="form-control">
-                            <option value="A" selected="@("A" == Model[i].Estado)">Activo</option>
-                            <option value="I" selected="@("I" == Model[i].Estado)">Inactivo</option>
-                        </select>
-                    </td>
-                    <td>
-                        <button type="submit" formaction="@Url.Action("Actualizar", new { codVideo = Model[i].CodVideo, codcco = Model[i].Codcco })" class="btn btn-primary btn-sm">Guardar</button>
-                        <button type="submit" formaction="@Url.Action("Eliminar", new { codVideo = Model[i].CodVideo, codcco = Model[i].Codcco })" class="btn btn-danger btn-sm" onclick="return confirm('¿Está seguro de eliminar este video?');">Eliminar</button>
-                    </td>
-                </tr>
+                ViewBag.Mensaje = "Debe proporcionar un código de agencia.";
+                return View(new List<VideoModel>());
             }
-        </tbody>
-    </table>
-</form>
+
+            var lista = _videoService.ListarVideos(codcco);
+            return View(lista);
+        }
+
+        [HttpPost]
+        public IActionResult Actualizar(int codVideo, string codcco, string Estado, int Seq)
+        {
+            var video = new VideoModel
+            {
+                CodVideo = codVideo,
+                Codcco = codcco,
+                Estado = Estado,
+                Seq = Seq
+            };
+
+            var actualizado = _videoService.ActualizarVideo(video);
+
+            ViewBag.Mensaje = actualizado
+                ? "Registro actualizado correctamente."
+                : "Error al actualizar el registro.";
+
+            return RedirectToAction("Index", new { codcco = codcco });
+        }
+
+        [HttpPost]
+        public IActionResult Eliminar(int codVideo, string codcco)
+        {
+            // Validar dependencias
+            if (_videoService.TieneDependencias(codcco, codVideo))
+            {
+                ViewBag.Mensaje = "No se puede eliminar el video porque tiene dependencias.";
+                return RedirectToAction("Index", new { codcco = codcco });
+            }
+
+            var lista = _videoService.ListarVideos(codcco);
+            var video = lista.FirstOrDefault(v => v.CodVideo == codVideo);
+
+            if (video == null)
+            {
+                ViewBag.Mensaje = "El video no fue encontrado.";
+                return RedirectToAction("Index", new { codcco = codcco });
+            }
+
+            var eliminadoDb = _videoService.EliminarVideo(codVideo, codcco);
+            var eliminadoArchivo = _videoService.EliminarArchivoFisico(video.RutaFisica);
+
+            ViewBag.Mensaje = eliminadoDb && eliminadoArchivo
+                ? "Video eliminado correctamente."
+                : "Error al eliminar el video.";
+
+            return RedirectToAction("Index", new { codcco = codcco });
+        }
+    }
