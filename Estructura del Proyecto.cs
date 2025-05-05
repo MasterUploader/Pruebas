@@ -1,3 +1,3 @@
-<option value="@agencia.Value" @(agencia.Value == codccoActual ? "selected" : null)>
+<option value="@agencia.Value" selected="@(agencia.Value == codccoActual)">
     @agencia.Text
 </option>
