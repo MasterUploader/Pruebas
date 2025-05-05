@@ -1,95 +1,217 @@
-using System.ComponentModel.DataAnnotations;
-
-namespace CAUAdministracion.Models
-{
-    /// <summary>
-    /// Modelo que representa un mensaje de la tabla MANTMSG del AS400.
-    /// </summary>
-    public class MensajeModel
-    {
-        /// <summary>
-        /// Código único del mensaje.
-        /// </summary>
-        public int Codigo { get; set; }
-
-        /// <summary>
-        /// Código del centro de costo (agencia).
-        /// </summary>
-        [Required(ErrorMessage = "Debe seleccionar una agencia.")]
-        public string Codcco { get; set; }
-
-        /// <summary>
-        /// Nombre de la agencia. Solo para visualización.
-        /// </summary>
-        public string NombreAgencia { get; set; }
-
-        /// <summary>
-        /// Número de secuencia para orden.
-        /// </summary>
-        [Range(1, int.MaxValue, ErrorMessage = "Secuencia debe ser mayor a 0.")]
-        public int Seq { get; set; }
-
-        /// <summary>
-        /// Contenido del mensaje.
-        /// </summary>
-        [Required(ErrorMessage = "Debe ingresar un mensaje.")]
-        public string Mensaje { get; set; }
-
-        /// <summary>
-        /// Estado del mensaje: 'A' (Activo) o 'I' (Inactivo).
-        /// </summary>
-        public string Estado { get; set; }
-
-        /// <summary>
-        /// Propiedad para mostrar el texto legible del estado (Activo/Inactivo).
-        /// </summary>
-        public string EstadoDescripcion
-        {
-            get
-            {
-                return Estado == "A" ? "Activo" : "Inactivo";
-            }
-        }
-    }
-}
-
-
-
-
-
 using CAUAdministracion.Models;
+using Connections.Helpers;
+using Connections.Interfaces;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using System.Data;
+using System.Data.Common;
 
 namespace CAUAdministracion.Services.Mensajes
 {
     /// <summary>
-    /// Interfaz que define las operaciones de mantenimiento para mensajes (MANTMSG).
+    /// Servicio para la gestión de mensajes (tabla MANTMSG) en AS400.
     /// </summary>
-    public interface IMensajeService
+    public class MensajeService : IMensajeService
     {
-        /// <summary>
-        /// Obtiene la lista de agencias habilitadas para mensajes.
-        /// </summary>
-        List<SelectListItem> ObtenerAgenciasSelectList();
+        private readonly IDatabaseConnection _as400;
+
+        public MensajeService(IDatabaseConnection as400)
+        {
+            _as400 = as400;
+        }
 
         /// <summary>
-        /// Obtiene todos los mensajes filtrados por agencia si se especifica.
+        /// Obtiene todas las agencias que tienen marquesina activada, en formato SelectListItem.
         /// </summary>
-        Task<List<MensajeModel>> ObtenerMensajesAsync(string codcco = null);
+        public List<SelectListItem> ObtenerAgenciasSelectList()
+        {
+            var agencias = new List<SelectListItem>();
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = @"
+                    SELECT CODCCO, NOMAGE 
+                    FROM BCAH96DTA.RSAGE01 
+                    WHERE MARQUESINA = 'SI' 
+                    ORDER BY NOMAGE";
+
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    agencias.Add(new SelectListItem
+                    {
+                        Value = reader["CODCCO"].ToString(),
+                        Text = reader["NOMAGE"].ToString()
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                agencias.Clear();
+                agencias.Add(new SelectListItem
+                {
+                    Value = "",
+                    Text = "Error: " + ex.Message
+                });
+            }
+            finally
+            {
+                _as400.Close();
+            }
+
+            return agencias;
+        }
 
         /// <summary>
-        /// Actualiza un mensaje existente (secuencia, contenido, estado).
+        /// Lista los mensajes filtrados por código de agencia.
         /// </summary>
-        bool ActualizarMensaje(MensajeModel mensaje);
+        public List<MensajeModel> ListarMensajes(string codcco)
+        {
+            var lista = new List<MensajeModel>();
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    SELECT CODMSG, SEQ, MENSAJE, ESTADO 
+                    FROM BCAH96DTA.MANTMSG 
+                    WHERE CODCCO = '{codcco}'
+                    ORDER BY SEQ";
+
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    lista.Add(new MensajeModel
+                    {
+                        Codcco = codcco,
+                        CodMsg = Convert.ToInt32(reader["CODMSG"]),
+                        Seq = Convert.ToInt32(reader["SEQ"]),
+                        Mensaje = reader["MENSAJE"].ToString(),
+                        Estado = reader["ESTADO"].ToString()
+                    });
+                }
+            }
+            catch
+            {
+                // Error controlado, se puede loguear si se desea
+            }
+            finally
+            {
+                _as400.Close();
+            }
+
+            return lista;
+        }
 
         /// <summary>
-        /// Elimina un mensaje por su código único.
+        /// Elimina un mensaje de la tabla MANTMSG por su ID.
         /// </summary>
-        bool EliminarMensaje(int codMsg);
+        public bool EliminarMensaje(int codMsg)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    DELETE FROM BCAH96DTA.MANTMSG 
+                    WHERE CODMSG = {codMsg}";
+
+                return command.ExecuteNonQuery() > 0;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
 
         /// <summary>
-        /// Verifica si el mensaje tiene dependencias (si aplica).
+        /// Actualiza un mensaje existente.
         /// </summary>
-        bool TieneDependencias(int codMsg);
+        public bool ActualizarMensaje(MensajeModel mensaje)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    UPDATE BCAH96DTA.MANTMSG
+                    SET SEQ = {mensaje.Seq}, 
+                        MENSAJE = '{mensaje.Mensaje}', 
+                        ESTADO = '{mensaje.Estado}'
+                    WHERE CODMSG = {mensaje.CodMsg} 
+                      AND CODCCO = '{mensaje.Codcco}'";
+
+                return command.ExecuteNonQuery() > 0;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        /// <summary>
+        /// Obtiene el siguiente valor de CODMSG (MAX + 1).
+        /// </summary>
+        public int ObtenerSiguienteId()
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = "SELECT MAX(CODMSG) FROM BCAH96DTA.MANTMSG";
+                var result = command.ExecuteScalar();
+
+                return result != DBNull.Value ? Convert.ToInt32(result) + 1 : 1;
+            }
+            catch
+            {
+                return 1;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        /// <summary>
+        /// Inserta un nuevo mensaje en la base de datos.
+        /// </summary>
+        public bool InsertarMensaje(MensajeModel mensaje)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                int nuevoId = ObtenerSiguienteId();
+
+                command.CommandText = $@"
+                    INSERT INTO BCAH96DTA.MANTMSG (CODCCO, CODMSG, SEQ, MENSAJE, ESTADO) 
+                    VALUES ('{mensaje.Codcco}', {nuevoId}, {mensaje.Seq}, '{mensaje.Mensaje}', '{mensaje.Estado}')";
+
+                return command.ExecuteNonQuery() > 0;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
     }
 }
