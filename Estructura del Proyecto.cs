@@ -1,36 +1,34 @@
-[HttpGet]
-public async Task<IActionResult> Index(string codcco)
+<tbody>
+@foreach (var item in Model)
 {
-    ViewBag.CodccoSeleccionado = codcco;
+    <tr>
+        <td>@item.Codcco</td>
+        <td>@item.CodVideo</td>
+        <td>@item.Nombre</td>
 
-    var agencias = _videoService.ObtenerAgenciasSelectList();
-    var videos = await _videoService.ObtenerListaVideosAsync();
+        <td>
+            <!-- Formulario para actualizar Estado y Seq -->
+            <form asp-action="Actualizar" method="post" class="d-flex flex-column gap-1">
+                <input type="hidden" name="codVideo" value="@item.CodVideo" />
+                <input type="hidden" name="codcco" value="@item.Codcco" />
 
-    if (!string.IsNullOrEmpty(codcco))
-        videos = videos.Where(v => v.Codcco == codcco).ToList();
+                <div class="input-group">
+                    <input type="text" name="Estado" value="@item.Estado" class="form-control form-control-sm" />
+                    <input type="number" name="Seq" value="@item.Seq" class="form-control form-control-sm" />
+                </div>
 
-    ViewBag.Agencias = agencias;
+                <button type="submit" class="btn btn-sm btn-success mt-1">Guardar</button>
+            </form>
+        </td>
 
-    return View(videos);
+        <td>
+            <!-- Formulario para eliminar -->
+            <form asp-action="Eliminar" method="post" onsubmit="return confirm('¿Estás seguro de eliminar este video?');">
+                <input type="hidden" name="codVideo" value="@item.CodVideo" />
+                <input type="hidden" name="codcco" value="@item.Codcco" />
+                <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
+            </form>
+        </td>
+    </tr>
 }
-
-
-
-<form method="get">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-4">
-            <label for="codcco" class="form-label">Seleccione Agencia:</label>
-            <select id="codcco" name="codcco" class="form-select" required>
-                <option value="">--Seleccione--</option>
-                @foreach (var agencia in ViewBag.Agencias as List<SelectListItem>)
-                {
-                    var selected = (agencia.Value == ViewBag.CodccoSeleccionado) ? "selected" : "";
-                    @:<option value="@agencia.Value" @selected>@agencia.Text</option>
-                }
-            </select>
-        </div>
-        <div class="col-auto">
-            <button type="submit" class="btn btn-primary">Filtrar</button>
-        </div>
-    </div>
-</form>
+</tbody>
