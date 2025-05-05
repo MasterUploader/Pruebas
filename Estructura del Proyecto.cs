@@ -1,17 +1,15 @@
-@using System.Security.Claims
-@{
-    ViewData["Title"] = "Inicio";
-    var tipoClaim = User.FindFirst("TipoUsuario")?.Value;
-    string tipoUsuario = tipoClaim switch
+[Authorize]
+public class VideosController : Controller
+{
+    public IActionResult Index()
     {
-        "1" => "Administrador",
-        "2" => "Agente",
-        "3" => "Supervisor",
-        _ => "usuario"
-    };
-}
+        var tipoUsuario = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Role)?.Value;
 
-<div class="text-center">
-    <h1 class="display-5">Bienvenido al Servicio de Administración de @tipoUsuario</h1>
-    <p class="lead">Desde aquí puedes acceder a los módulos disponibles según tu perfil.</p>
-</div>
+        if (tipoUsuario != "3") // solo tipo 3 tiene acceso
+        {
+            return Forbid(); // o RedirectToAction("NoAutorizado")
+        }
+
+        return View();
+    }
+}
