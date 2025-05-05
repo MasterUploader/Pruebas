@@ -1,53 +1,150 @@
-using System.ComponentModel;
-using System.ComponentModel.DataAnnotations;
-
-namespace CAUAdministracion.Models.Video
-{
-    /// <summary>
-    /// Representa un registro de video en el sistema.
-    /// Usado para listar, editar y eliminar videos desde AS400.
-    /// </summary>
-    public class VideoModel
-    {
-        /// <summary>
-        /// Código de agencia asociada al video (ej. 104)
+/// <summary>
+        /// Lista los videos activos e inactivos de una agencia desde AS400.
         /// </summary>
-        [DisplayName("Agencia")]
-        public string Codcco { get; set; }
+        public List<VideoModel> ListarVideos(string codcco)
+        {
+            var lista = new List<VideoModel>();
 
-        /// <summary>
-        /// Código único del video en AS400 (identificador primario)
-        /// </summary>
-        [DisplayName("ID Video")]
-        public int CodVideo { get; set; }
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
 
-        /// <summary>
-        /// Ruta registrada en AS400 (no se usa para guardar archivo)
-        /// </summary>
-        [DisplayName("Ruta AS400")]
-        public string Ruta { get; set; }
+                command.CommandText = $@"
+                    SELECT CODCCO, CODVIDEO, RUTA, NOMBRE, ESTADO, SEQ
+                    FROM BCAH96DTA.MANTVIDEO
+                    WHERE CODCCO = '{codcco}'
+                    ORDER BY SEQ";
 
-        /// <summary>
-        /// Nombre del archivo físico de video (ej. video.mp4)
-        /// </summary>
-        [DisplayName("Nombre Archivo")]
-        public string Nombre { get; set; }
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    lista.Add(new VideoModel
+                    {
+                        Codcco = reader["CODCCO"].ToString(),
+                        CodVideo = Convert.ToInt32(reader["CODVIDEO"]),
+                        Ruta = reader["RUTA"].ToString(),
+                        Nombre = reader["NOMBRE"].ToString(),
+                        Estado = reader["ESTADO"].ToString(),
+                        Seq = Convert.ToInt32(reader["SEQ"]),
+                        RutaFisica = Path.Combine(GlobalConnection.ConnectionConfig.ContenedorVideos, reader["NOMBRE"].ToString())
+                    });
+                }
+            }
+            catch
+            {
+                // Manejo opcional con logger
+            }
+            finally
+            {
+                _as400.Close();
+            }
 
-        /// <summary>
-        /// Estado del video (A = Activo, I = Inactivo)
-        /// </summary>
-        [DisplayName("Estado")]
-        public string Estado { get; set; }
-
-        /// <summary>
-        /// Número de secuencia dentro de la agencia
-        /// </summary>
-        [DisplayName("Secuencia")]
-        public int Seq { get; set; }
+            return lista;
+        }
 
         /// <summary>
-        /// Ruta física completa (solo para mostrar o eliminar)
+        /// Actualiza el estado y secuencia de un video.
         /// </summary>
-        public string RutaFisica { get; set; }
+        public bool ActualizarVideo(VideoModel video)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    UPDATE BCAH96DTA.MANTVIDEO
+                    SET ESTADO = '{video.Estado}',
+                        SEQ = {video.Seq}
+                    WHERE CODCCO = '{video.Codcco}'
+                      AND CODVIDEO = {video.CodVideo}";
+
+                return command.ExecuteNonQuery() > 0;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        /// <summary>
+        /// Elimina el registro del video en AS400.
+        /// </summary>
+        public bool EliminarVideo(int codVideo, string codcco)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    DELETE FROM BCAH96DTA.MANTVIDEO
+                    WHERE CODCCO = '{codcco}'
+                      AND CODVIDEO = {codVideo}";
+
+                return command.ExecuteNonQuery() > 0;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        /// <summary>
+        /// Verifica si existen dependencias del video antes de eliminarlo.
+        /// </summary>
+        public bool TieneDependencias(string codcco, int codVideo)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    SELECT COUNT(*)
+                    FROM BCAH96DTA.OTRATABLA
+                    WHERE CODCCO = '{codcco}'
+                      AND CODVIDEO = {codVideo}";
+
+                var count = Convert.ToInt32(command.ExecuteScalar());
+                return count > 0;
+            }
+            catch
+            {
+                return true; // Si hay error, asumimos que tiene dependencias para prevenir borrado
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        /// <summary>
+        /// Elimina el archivo físico del video del disco.
+        /// </summary>
+        public bool EliminarArchivoFisico(string rutaArchivo)
+        {
+            try
+            {
+                if (File.Exists(rutaArchivo))
+                {
+                    File.Delete(rutaArchivo);
+                    return true;
+                }
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
-}
