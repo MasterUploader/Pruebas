@@ -42,3 +42,14 @@ public class AgenciaModel
         set => RstBranch = value ? "SI" : "NO";
     }
 }
+
+
+<div class="form-check">
+    <input asp-for="MarqCheck" class="form-check-input" type="checkbox" />
+    <label class="form-check-label" for="MarqCheck">Aplica Marquesina</label>
+</div>
+
+<div class="form-check">
+    <input asp-for="RstCheck" class="form-check-input" type="checkbox" />
+    <label class="form-check-label" for="RstCheck">Aplica Reset Branch</label>
+</div>
