@@ -1,9 +1,14 @@
-<!-- Para Marquesina -->
-<input type="hidden" name="Marquesina" value="NO" />
-<input type="checkbox" name="Marquesina" value="SI" class="form-check-input" @(item.Marquesina == "SI" ? "checked" : "") />
+<form method="get" asp-action="Index" class="row mb-3">
+    <div class="col-md-4">
+        <label for="codcco" class="form-label">Filtrar por Agencia</label>
+        <select id="codcco" name="codcco" class="form-select" onchange="this.form.submit()">
+            <option value="" @(ViewBag.CodccoSeleccionado == null ? "selected" : "")>-- Todas las Agencias --</option>
 
-<!-- Para RstBranch -->
-<input type="hidden" name="RstBranch" value="NO" />
-<input type="checkbox" name="RstBranch" value="SI" class="form-check-input" @(item.RstBranch == "SI" ? "checked" : "") />
-
-    <option value="" selected="@(ViewBag.CodccoSeleccionado == null)">-- Todas las Agencias --</option>
+            @foreach (var agencia in (List<SelectListItem>)ViewBag.AgenciasFiltro)
+            {
+                var isSelected = ViewBag.CodccoSeleccionado?.ToString() == agencia.Value ? "selected" : "";
+                <option value="@agencia.Value" @Html.Raw(isSelected)>@agencia.Text</option>
+            }
+        </select>
+    </div>
+</form>
