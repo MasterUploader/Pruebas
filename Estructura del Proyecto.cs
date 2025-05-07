@@ -1,11 +1,15 @@
-public bool MarqCheck
-{
-    get => Marquesina == "SI";
-    set => Marquesina = value ? "SI" : "NO";
-}
+<td>
+    <select asp-for="Marquesina" class="form-select">
+        <option value="NO">NO</option>
+        <option value="SI">SI</option>
+    </select>
+</td>
+<td>
+    <select asp-for="RstBranch" class="form-select">
+        <option value="NO">NO</option>
+        <option value="SI">SI</option>
+    </select>
+</td>
 
-public bool RstCheck
-{
-    get => RstBranch == "SI";
-    set => RstBranch = value ? "SI" : "NO";
-}
+ViewBag.Model = agenciaSeleccionada;
+return View("Index", modeloPaginado);
