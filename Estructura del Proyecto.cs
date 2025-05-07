@@ -1,6 +1,9 @@
-@foreach (var agencia in (List<SelectListItem>)ViewBag.AgenciasFiltro)
-{
-    var selected = ViewBag.CodccoSeleccionado?.ToString() == agencia.Value ? "selected" : "";
+<!-- Para Marquesina -->
+<input type="hidden" name="Marquesina" value="NO" />
+<input type="checkbox" name="Marquesina" value="SI" class="form-check-input" @(item.Marquesina == "SI" ? "checked" : "") />
 
-    <option value="@agencia.Value" selected="@selected">@agencia.Text</option>
-    }
+<!-- Para RstBranch -->
+<input type="hidden" name="RstBranch" value="NO" />
+<input type="checkbox" name="RstBranch" value="SI" class="form-check-input" @(item.RstBranch == "SI" ? "checked" : "") />
+
+    <option value="" selected="@(ViewBag.CodccoSeleccionado == null)">-- Todas las Agencias --</option>
