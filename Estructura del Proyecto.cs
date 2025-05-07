@@ -1,86 +1,95 @@
-@model CAUAdministracion.Models.AgenciaModel
+@model IPagedList<CAUAdministracion.Models.AgenciaModel>
+@using PagedList.Mvc.Core
 @{
-    ViewData["Title"] = "Agregar Agencia";
+    ViewData["Title"] = "Mantenimiento de Agencias";
 }
 
 <h2 class="text-danger mb-4">@ViewData["Title"]</h2>
 
-@if (ViewBag.Mensaje != null)
+@if (TempData["Mensaje"] != null)
 {
     <div class="alert alert-info alert-dismissible fade show" role="alert">
-        @ViewBag.Mensaje
+        @TempData["Mensaje"]
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 }
 
-<form asp-action="Agregar" method="post">
-    <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+<table class="table table-bordered table-hover table-striped">
+    <thead class="table-dark text-center align-middle">
+        <tr>
+            <th>Código</th>
+            <th>Nombre</th>
+            <th>Zona</th>
+            <th>Marquesina</th>
+            <th>RST Branch</th>
+            <th>IP Server</th>
+            <th>Nom. Server</th>
+            <th>Base Datos</th>
+            <th style="width: 120px">Acciones</th>
+        </tr>
+    </thead>
+    <tbody>
+    @if (Model != null && Model.Any())
+    {
+        foreach (var item in Model)
+        {
+            <tr>
+                <td>@item.Codcco</td>
+                <td>@item.Nomage</td>
+                <td>
+                    @switch (item.Zona)
+                    {
+                        case 1: @:CENTRO SUR; break;
+                        case 2: @:NOR OCCIDENTE; break;
+                        case 3: @:NOR ORIENTE; break;
+                        default: @:DESCONOCIDA; break;
+                    }
+                </td>
+                <td>@(item.Marquesina ? "APLICA" : "NO APLICA")</td>
+                <td>@(item.Rstbranch ? "APLICA" : "NO APLICA")</td>
+                <td>@item.Ipser</td>
+                <td>@item.Nomser</td>
+                <td>@item.Nombd</td>
+                <td class="text-center">
+                    <a asp-action="Editar" asp-route-id="@item.Codcco" class="btn btn-sm btn-warning me-1">Editar</a>
+                    <form asp-action="Eliminar" asp-route-id="@item.Codcco" method="post" class="d-inline" onsubmit="return confirm('¿Está seguro de eliminar esta agencia?');">
+                        <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+        }
+    }
+    else
+    {
+        <tr>
+            <td colspan="9" class="text-center text-muted">No se encontraron agencias.</td>
+        </tr>
+    }
+    </tbody>
+</table>
 
-    <!-- Centro de Costo -->
-    <div class="mb-3">
-        <label asp-for="Codcco" class="form-label">Centro de Costo</label>
-        <input asp-for="Codcco" class="form-control" maxlength="3" required />
-        <span asp-validation-for="Codcco" class="text-danger"></span>
+<!-- Paginación -->
+@if (Model != null && Model.PageCount > 1)
+{
+    <div class="d-flex justify-content-center">
+        @Html.PagedListPager(
+            Model,
+            page => Url.Action("Index", new { page }),
+            new PagedList.Mvc.Core.Common.PagedListRenderOptions
+            {
+                UlElementClasses = new[] { "pagination", "justify-content-center" },
+                LiElementClasses = new[] { "page-item" },
+                PageClasses = new[] { "page-link" },
+                DisplayLinkToFirstPage = PagedList.Mvc.Core.Common.PagedListDisplayMode.Always,
+                DisplayLinkToLastPage = PagedList.Mvc.Core.Common.PagedListDisplayMode.Always,
+                DisplayLinkToPreviousPage = PagedList.Mvc.Core.Common.PagedListDisplayMode.Always,
+                DisplayLinkToNextPage = PagedList.Mvc.Core.Common.PagedListDisplayMode.Always,
+                MaximumPageNumbersToDisplay = 5
+            })
     </div>
-
-    <!-- Nombre de Agencia -->
-    <div class="mb-3">
-        <label asp-for="Nomage" class="form-label">Nombre de Agencia</label>
-        <input asp-for="Nomage" class="form-control" maxlength="40" required />
-        <span asp-validation-for="Nomage" class="text-danger"></span>
-    </div>
-
-    <!-- Zona -->
-    <div class="mb-3">
-        <label asp-for="Zona" class="form-label">Zona</label>
-        <select asp-for="Zona" class="form-select" required>
-            <option value="">Seleccione una zona</option>
-            <option value="1">CENTRO SUR</option>
-            <option value="2">NOR OCCIDENTE</option>
-            <option value="3">NOR ORIENTE</option>
-        </select>
-        <span asp-validation-for="Zona" class="text-danger"></span>
-    </div>
-
-    <!-- IP Servidor -->
-    <div class="mb-3">
-        <label asp-for="Ipser" class="form-label">IP del Servidor</label>
-        <input asp-for="Ipser" class="form-control" maxlength="20" />
-        <span asp-validation-for="Ipser" class="text-danger"></span>
-    </div>
-
-    <!-- Nombre del Servidor -->
-    <div class="mb-3">
-        <label asp-for="Nomser" class="form-label">Nombre del Servidor</label>
-        <input asp-for="Nomser" class="form-control" maxlength="18" />
-        <span asp-validation-for="Nomser" class="text-danger"></span>
-    </div>
-
-    <!-- Nombre de la Base de Datos -->
-    <div class="mb-3">
-        <label asp-for="Nombd" class="form-label">Nombre de Base de Datos</label>
-        <input asp-for="Nombd" class="form-control" maxlength="18" />
-        <span asp-validation-for="Nombd" class="text-danger"></span>
-    </div>
-
-    <!-- Checkboxes -->
-    <div class="mb-3 form-check form-switch">
-        <input asp-for="Marquesina" class="form-check-input" type="checkbox" value="true" />
-        <label class="form-check-label" asp-for="Marquesina">¿Aplica Marquesina?</label>
-    </div>
-
-    <div class="mb-3 form-check form-switch">
-        <input asp-for="Rstbranch" class="form-check-input" type="checkbox" value="true" />
-        <label class="form-check-label" asp-for="Rstbranch">¿Aplica Reinicio Branch?</label>
-    </div>
-
-    <!-- Botones -->
-    <div class="d-flex justify-content-start mt-4">
-        <button type="submit" class="btn btn-success me-2">Guardar</button>
-        <a asp-action="Index" class="btn btn-secondary">Cancelar</a>
-    </div>
-</form>
-
-@section Scripts {
-    <partial name="_ValidationScriptsPartial" />
 }
+
+<!-- Botón agregar -->
+<div class="mt-4">
+    <a asp-action="Agregar" class="btn btn-primary">Agregar Nueva Agencia</a>
+</div>
