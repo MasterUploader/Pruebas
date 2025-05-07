@@ -1,11 +1,13 @@
-<!-- Para Marquesina -->
 <td>
-    <input type="hidden" name="MarqCheck" value="false" />
-    <input type="checkbox" name="MarqCheck" value="true" class="form-check-input" @(item.MarqCheck ? "checked" : "") />
+    <select name="Marquesina" class="form-select form-select-sm">
+        <option value="SI" selected="@(Model.Marquesina == "SI")">SI</option>
+        <option value="NO" selected="@(Model.Marquesina == "NO")">NO</option>
+    </select>
 </td>
 
-<!-- Para RstBranch -->
 <td>
-    <input type="hidden" name="RstCheck" value="false" />
-    <input type="checkbox" name="RstCheck" value="true" class="form-check-input" @(item.RstCheck ? "checked" : "") />
+    <select name="RstBranch" class="form-select form-select-sm">
+        <option value="SI" selected="@(Model.RstBranch == "SI")">SI</option>
+        <option value="NO" selected="@(Model.RstBranch == "NO")">NO</option>
+    </select>
 </td>
