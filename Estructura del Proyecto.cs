@@ -1,11 +1,29 @@
-[HttpGet]
-[AutorizarPorTipoUsuario("1")]
-public async Task<IActionResult> Index(int? page, int? codcco, int? editId)
-{
-    var agencias = await _agenciaService.ObtenerAgenciasAsync();
+ViewBag.AgenciasFiltro = agencias
+    .Select(a => new SelectListItem
+    {
+        Value = a.Codcco.ToString(),
+        Text = $"{a.Codcco} - {a.NomAge}"
+    })
+    .OrderBy(a => a.Text)
+    .ToList();
 
-    if (codcco.HasValue && codcco.Value > 0)
-        agencias = agencias.Where(a => a.Codcco == codcco.Value).ToList();
+ViewBag.CodccoSeleccionado = null;
+
+
+
+[HttpPost]
+[AutorizarPorTipoUsuario("1")]
+public async Task<IActionResult> GuardarEdicion(AgenciaModel model)
+{
+    if (ModelState.IsValid)
+    {
+        var actualizado = _agenciaService.ActualizarAgencia(model);
+        TempData["Mensaje"] = actualizado
+            ? "Agencia actualizada correctamente."
+            : "Ocurrió un error al actualizar.";
+    }
+
+    var agencias = await _agenciaService.ObtenerAgenciasAsync();
 
     ViewBag.AgenciasFiltro = agencias
         .Select(a => new SelectListItem
@@ -16,13 +34,7 @@ public async Task<IActionResult> Index(int? page, int? codcco, int? editId)
         .OrderBy(a => a.Text)
         .ToList();
 
-    ViewBag.CodccoSeleccionado = codcco;
-    ViewBag.EditId = editId; // <<=== Este es el que activa el modo edición
+    ViewBag.CodccoSeleccionado = null;
 
-    int pageSize = 10;
-    int pageNumber = page ?? 1;
-    return View(agencias.ToPagedList(pageNumber, pageSize));
+    return View("Index", agencias.ToPagedList(1, 50));
 }
-
-
-<a asp-action="Index" asp-route-editId="@item.Codcco" class="btn btn-sm btn-warning me-1">Editar</a>
