@@ -1,55 +1,67 @@
-using System.ComponentModel.DataAnnotations;
-
-public class AgenciaModel
+// GET: Agencias/Agregar
+[HttpGet]
+public IActionResult Agregar()
 {
-    [Required(ErrorMessage = "El centro de costo es obligatorio")]
-    [Range(1, 999, ErrorMessage = "Debe ingresar un número positivo de máximo 3 dígitos")]
-    public int Codcco { get; set; }
+    return View(new AgenciaModel());
+}
 
-    [Required(ErrorMessage = "El nombre de la agencia es obligatorio")]
-    [MaxLength(40, ErrorMessage = "Máximo 40 caracteres")]
-    public string NomAge { get; set; }
+// POST: Agencias/Agregar
+[HttpPost]
+[ValidateAntiForgeryToken]
+public async Task<IActionResult> Agregar(AgenciaModel model)
+{
+    if (!ModelState.IsValid)
+        return View(model);
 
-    [Required]
-    [Range(1, 999, ErrorMessage = "Zona debe tener máximo 3 dígitos")]
-    public int Zona { get; set; }
-
-    [MaxLength(2)]
-    public string Marquesina { get; set; }  // Almacena "SI"/"NO" en lugar de bool
-
-    [MaxLength(2)]
-    public string RstBranch { get; set; }  // Almacena "SI"/"NO" en lugar de bool
-
-    [MaxLength(20)]
-    public string IpSer { get; set; }
-
-    [MaxLength(18)]
-    public string NomSer { get; set; }
-
-    [MaxLength(20)]
-    public string NomBD { get; set; }
-
-    // ✅ Propiedades auxiliares para el checkbox en Razor
-    public bool MarqCheck
+    var existe = await _agenciaService.ExisteCentroCostoAsync(model.Codcco);
+    if (existe)
     {
-        get => Marquesina == "SI";
-        set => Marquesina = value ? "SI" : "NO";
+        ModelState.AddModelError("Codcco", "Ya existe una agencia con ese centro de costo.");
+        return View(model);
     }
 
-    public bool RstCheck
+    try
     {
-        get => RstBranch == "SI";
-        set => RstBranch = value ? "SI" : "NO";
+        await _agenciaService.AgregarAgenciaAsync(model);
+        TempData["Mensaje"] = "Agencia agregada correctamente.";
+        return RedirectToAction("Index");
+    }
+    catch (Exception ex)
+    {
+        ModelState.AddModelError(string.Empty, $"Error al guardar: {ex.Message}");
+        return View(model);
     }
 }
 
 
-<div class="form-check">
-    <input asp-for="MarqCheck" class="form-check-input" type="checkbox" />
-    <label class="form-check-label" for="MarqCheck">Aplica Marquesina</label>
-</div>
+// GET: Agencias/Editar/5
+[HttpGet]
+public async Task<IActionResult> Editar(int id)
+{
+    var agencia = await _agenciaService.ObtenerPorIdAsync(id);
+    if (agencia == null)
+        return NotFound();
 
-<div class="form-check">
-    <input asp-for="RstCheck" class="form-check-input" type="checkbox" />
-    <label class="form-check-label" for="RstCheck">Aplica Reset Branch</label>
-</div>
+    return View(agencia);
+}
+
+// POST: Agencias/Editar
+[HttpPost]
+[ValidateAntiForgeryToken]
+public async Task<IActionResult> Editar(AgenciaModel model)
+{
+    if (!ModelState.IsValid)
+        return View(model);
+
+    try
+    {
+        await _agenciaService.EditarAgenciaAsync(model);
+        TempData["Mensaje"] = "Agencia actualizada correctamente.";
+        return RedirectToAction("Index");
+    }
+    catch (Exception ex)
+    {
+        ModelState.AddModelError(string.Empty, $"Error al actualizar: {ex.Message}");
+        return View(model);
+    }
+}
