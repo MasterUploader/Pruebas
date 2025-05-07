@@ -1,75 +1,108 @@
+using CAUAdministracion.Models;
+using CAUAdministracion.Services.Agencias;
+using Microsoft.AspNetCore.Mvc;
+
+namespace CAUAdministracion.Controllers;
+
 /// <summary>
-/// Obtiene la lista completa de agencias desde la tabla RSAGE01 en AS400.
+/// Controlador responsable de gestionar las agencias (agregar, listar, editar, eliminar).
 /// </summary>
-/// <returns>Una lista de objetos AgenciaModel.</returns>
-public async Task<List<AgenciaModel>> ObtenerAgenciasAsync()
+public class AgenciasController : Controller
 {
-    var agencias = new List<AgenciaModel>();
+    private readonly IAgenciaService _agenciaService;
 
-    try
+    public AgenciasController(IAgenciaService agenciaService)
     {
-        _as400.Open();
-        using var command = _as400.GetDbCommand();
+        _agenciaService = agenciaService;
+    }
 
-        command.CommandText = @"
-            SELECT CODCCO, NOMAGE, NOMBD, NOMSER, IPSER, ZONA, MARQUESINA, RSTBRANCH
-            FROM BCAH96DTA.RSAGE01
-            ORDER BY CODCCO";
+    /// <summary>
+    /// Vista principal de mantenimiento de agencias.
+    /// Lista todas las agencias existentes.
+    /// </summary>
+    public async Task<IActionResult> Index()
+    {
+        var agencias = await _agenciaService.ObtenerAgenciasAsync();
+        return View(agencias);
+    }
 
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+    /// <summary>
+    /// Vista del formulario para agregar una nueva agencia.
+    /// </summary>
+    public IActionResult Agregar()
+    {
+        return View();
+    }
+
+    /// <summary>
+    /// Procesa el formulario de nueva agencia.
+    /// Verifica si el centro de costo ya existe antes de insertar.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public IActionResult Agregar(AgenciaModel model)
+    {
+        if (!ModelState.IsValid)
         {
-            agencias.Add(new AgenciaModel
-            {
-                Codcco = reader["CODCCO"].ToString(),
-                Nombre = reader["NOMAGE"].ToString(),
-                NombreBD = reader["NOMBD"].ToString(),
-                NombreServidor = reader["NOMSER"].ToString(),
-                IpServidor = reader["IPSER"].ToString(),
-                Zona = Convert.ToInt32(reader["ZONA"]),
-                Marquesina = reader["MARQUESINA"].ToString(),
-                RstBranch = reader["RSTBRANCH"].ToString()
-            });
+            return View(model);
         }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine("Error al obtener agencias: " + ex.Message);
-    }
-    finally
-    {
-        _as400.Close();
+
+        // Validar que no exista la agencia
+        if (_agenciaService.ExisteCentroCosto(model.Codcco))
+        {
+            ModelState.AddModelError("", "Ya existe una agencia con ese centro de costo.");
+            return View(model);
+        }
+
+        // Insertar agencia
+        bool insertado = _agenciaService.InsertarAgencia(model);
+        if (insertado)
+        {
+            TempData["Mensaje"] = "Agencia agregada correctamente.";
+            return RedirectToAction("Index");
+        }
+
+        ModelState.AddModelError("", "Ocurrió un error al agregar la agencia.");
+        return View(model);
     }
 
-    return agencias;
-}
-
-/// <summary>
-/// Verifica si ya existe una agencia registrada con el centro de costo especificado.
-/// </summary>
-/// <param name="codcco">Centro de costo a verificar</param>
-/// <returns>True si existe, False si no existe o ocurre un error</returns>
-public bool ExisteCentroCosto(string codcco)
-{
-    try
+    /// <summary>
+    /// Procesa la actualización de una agencia desde vista en tabla editable.
+    /// </summary>
+    [HttpPost]
+    public IActionResult Editar(AgenciaModel model)
     {
-        _as400.Open();
-        using var command = _as400.GetDbCommand();
+        if (!ModelState.IsValid)
+        {
+            TempData["Error"] = "Datos inválidos al actualizar.";
+            return RedirectToAction("Index");
+        }
 
-        command.CommandText = $@"
-            SELECT 1 
-            FROM BCAH96DTA.RSAGE01 
-            WHERE CODCCO = '{codcco}'";
+        var actualizado = _agenciaService.ActualizarAgencia(model);
+        TempData["Mensaje"] = actualizado
+            ? "Agencia actualizada correctamente."
+            : "Ocurrió un error al actualizar la agencia.";
 
-        var result = command.ExecuteScalar();
-        return result != null;
+        return RedirectToAction("Index");
     }
-    catch
+
+    /// <summary>
+    /// Procesa la eliminación de una agencia por su código.
+    /// </summary>
+    [HttpPost]
+    public IActionResult Eliminar(string codcco)
     {
-        return false; // En caso de error asumimos que no existe
-    }
-    finally
-    {
-        _as400.Close();
+        if (string.IsNullOrEmpty(codcco))
+        {
+            TempData["Error"] = "Código de agencia no válido.";
+            return RedirectToAction("Index");
+        }
+
+        var eliminado = _agenciaService.EliminarAgencia(codcco);
+        TempData["Mensaje"] = eliminado
+            ? "Agencia eliminada correctamente."
+            : "No se pudo eliminar la agencia.";
+
+        return RedirectToAction("Index");
     }
 }
