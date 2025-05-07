@@ -1,18 +1,6 @@
-@{
-    var lista = (IPagedList<CAUAdministracion.Models.AgenciaModel>)ViewBag.Lista;
-}
-
-@if (lista != null && lista.PageCount > 1)
+@foreach (var agencia in (List<SelectListItem>)ViewBag.AgenciasFiltro)
 {
-    <div class="d-flex justify-content-center">
-        @Html.PagedListPager(
-            lista,
-            page => Url.Action("Index", new { page, codcco = ViewBag.CodccoSeleccionado }),
-            new PagedListRenderOptions
-            {
-                UlElementClasses = new[] { "pagination", "justify-content-center" },
-                LiElementClasses = new[] { "page-item" },
-                PageClasses = new[] { "page-link" }
-            })
-    </div>
-        }
+    var selected = ViewBag.CodccoSeleccionado?.ToString() == agencia.Value ? "selected" : "";
+
+    <option value="@agencia.Value" selected="@selected">@agencia.Text</option>
+    }
