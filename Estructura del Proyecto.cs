@@ -1,108 +1,86 @@
-using CAUAdministracion.Models;
-using CAUAdministracion.Services.Agencias;
-using Microsoft.AspNetCore.Mvc;
+@model CAUAdministracion.Models.AgenciaModel
+@{
+    ViewData["Title"] = "Agregar Agencia";
+}
 
-namespace CAUAdministracion.Controllers;
+<h2 class="text-danger mb-4">@ViewData["Title"]</h2>
 
-/// <summary>
-/// Controlador responsable de gestionar las agencias (agregar, listar, editar, eliminar).
-/// </summary>
-public class AgenciasController : Controller
+@if (ViewBag.Mensaje != null)
 {
-    private readonly IAgenciaService _agenciaService;
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        @ViewBag.Mensaje
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
 
-    public AgenciasController(IAgenciaService agenciaService)
-    {
-        _agenciaService = agenciaService;
-    }
+<form asp-action="Agregar" method="post">
+    <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
 
-    /// <summary>
-    /// Vista principal de mantenimiento de agencias.
-    /// Lista todas las agencias existentes.
-    /// </summary>
-    public async Task<IActionResult> Index()
-    {
-        var agencias = await _agenciaService.ObtenerAgenciasAsync();
-        return View(agencias);
-    }
+    <!-- Centro de Costo -->
+    <div class="mb-3">
+        <label asp-for="Codcco" class="form-label">Centro de Costo</label>
+        <input asp-for="Codcco" class="form-control" maxlength="3" required />
+        <span asp-validation-for="Codcco" class="text-danger"></span>
+    </div>
 
-    /// <summary>
-    /// Vista del formulario para agregar una nueva agencia.
-    /// </summary>
-    public IActionResult Agregar()
-    {
-        return View();
-    }
+    <!-- Nombre de Agencia -->
+    <div class="mb-3">
+        <label asp-for="Nomage" class="form-label">Nombre de Agencia</label>
+        <input asp-for="Nomage" class="form-control" maxlength="40" required />
+        <span asp-validation-for="Nomage" class="text-danger"></span>
+    </div>
 
-    /// <summary>
-    /// Procesa el formulario de nueva agencia.
-    /// Verifica si el centro de costo ya existe antes de insertar.
-    /// </summary>
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public IActionResult Agregar(AgenciaModel model)
-    {
-        if (!ModelState.IsValid)
-        {
-            return View(model);
-        }
+    <!-- Zona -->
+    <div class="mb-3">
+        <label asp-for="Zona" class="form-label">Zona</label>
+        <select asp-for="Zona" class="form-select" required>
+            <option value="">Seleccione una zona</option>
+            <option value="1">CENTRO SUR</option>
+            <option value="2">NOR OCCIDENTE</option>
+            <option value="3">NOR ORIENTE</option>
+        </select>
+        <span asp-validation-for="Zona" class="text-danger"></span>
+    </div>
 
-        // Validar que no exista la agencia
-        if (_agenciaService.ExisteCentroCosto(model.Codcco))
-        {
-            ModelState.AddModelError("", "Ya existe una agencia con ese centro de costo.");
-            return View(model);
-        }
+    <!-- IP Servidor -->
+    <div class="mb-3">
+        <label asp-for="Ipser" class="form-label">IP del Servidor</label>
+        <input asp-for="Ipser" class="form-control" maxlength="20" />
+        <span asp-validation-for="Ipser" class="text-danger"></span>
+    </div>
 
-        // Insertar agencia
-        bool insertado = _agenciaService.InsertarAgencia(model);
-        if (insertado)
-        {
-            TempData["Mensaje"] = "Agencia agregada correctamente.";
-            return RedirectToAction("Index");
-        }
+    <!-- Nombre del Servidor -->
+    <div class="mb-3">
+        <label asp-for="Nomser" class="form-label">Nombre del Servidor</label>
+        <input asp-for="Nomser" class="form-control" maxlength="18" />
+        <span asp-validation-for="Nomser" class="text-danger"></span>
+    </div>
 
-        ModelState.AddModelError("", "Ocurrió un error al agregar la agencia.");
-        return View(model);
-    }
+    <!-- Nombre de la Base de Datos -->
+    <div class="mb-3">
+        <label asp-for="Nombd" class="form-label">Nombre de Base de Datos</label>
+        <input asp-for="Nombd" class="form-control" maxlength="18" />
+        <span asp-validation-for="Nombd" class="text-danger"></span>
+    </div>
 
-    /// <summary>
-    /// Procesa la actualización de una agencia desde vista en tabla editable.
-    /// </summary>
-    [HttpPost]
-    public IActionResult Editar(AgenciaModel model)
-    {
-        if (!ModelState.IsValid)
-        {
-            TempData["Error"] = "Datos inválidos al actualizar.";
-            return RedirectToAction("Index");
-        }
+    <!-- Checkboxes -->
+    <div class="mb-3 form-check form-switch">
+        <input asp-for="Marquesina" class="form-check-input" type="checkbox" value="true" />
+        <label class="form-check-label" asp-for="Marquesina">¿Aplica Marquesina?</label>
+    </div>
 
-        var actualizado = _agenciaService.ActualizarAgencia(model);
-        TempData["Mensaje"] = actualizado
-            ? "Agencia actualizada correctamente."
-            : "Ocurrió un error al actualizar la agencia.";
+    <div class="mb-3 form-check form-switch">
+        <input asp-for="Rstbranch" class="form-check-input" type="checkbox" value="true" />
+        <label class="form-check-label" asp-for="Rstbranch">¿Aplica Reinicio Branch?</label>
+    </div>
 
-        return RedirectToAction("Index");
-    }
+    <!-- Botones -->
+    <div class="d-flex justify-content-start mt-4">
+        <button type="submit" class="btn btn-success me-2">Guardar</button>
+        <a asp-action="Index" class="btn btn-secondary">Cancelar</a>
+    </div>
+</form>
 
-    /// <summary>
-    /// Procesa la eliminación de una agencia por su código.
-    /// </summary>
-    [HttpPost]
-    public IActionResult Eliminar(string codcco)
-    {
-        if (string.IsNullOrEmpty(codcco))
-        {
-            TempData["Error"] = "Código de agencia no válido.";
-            return RedirectToAction("Index");
-        }
-
-        var eliminado = _agenciaService.EliminarAgencia(codcco);
-        TempData["Mensaje"] = eliminado
-            ? "Agencia eliminada correctamente."
-            : "No se pudo eliminar la agencia.";
-
-        return RedirectToAction("Index");
-    }
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
 }
