@@ -2,50 +2,43 @@ using System.ComponentModel.DataAnnotations;
 
 public class AgenciaModel
 {
-    [Required]
-    [Range(1, 999, ErrorMessage = "Centro de Costo debe ser un número positivo de hasta 3 dígitos")]
+    [Required(ErrorMessage = "El centro de costo es obligatorio")]
+    [Range(1, 999, ErrorMessage = "Debe ingresar un número positivo de máximo 3 dígitos")]
     public int Codcco { get; set; }
 
-    [Required]
-    [MaxLength(40)]
+    [Required(ErrorMessage = "El nombre de la agencia es obligatorio")]
+    [MaxLength(40, ErrorMessage = "Máximo 40 caracteres")]
     public string NomAge { get; set; }
 
     [Required]
-    [MaxLength(18)]
-    public string NomSer { get; set; }
+    [Range(1, 999, ErrorMessage = "Zona debe tener máximo 3 dígitos")]
+    public int Zona { get; set; }
 
-    [Required]
+    [MaxLength(2)]
+    public string Marquesina { get; set; }  // Almacena "SI"/"NO" en lugar de bool
+
+    [MaxLength(2)]
+    public string RstBranch { get; set; }  // Almacena "SI"/"NO" en lugar de bool
+
     [MaxLength(20)]
     public string IpSer { get; set; }
 
-    [Required]
+    [MaxLength(18)]
+    public string NomSer { get; set; }
+
     [MaxLength(20)]
     public string NomBD { get; set; }
 
-    [Required]
-    [Range(1, 999, ErrorMessage = "Zona debe ser un número positivo de hasta 3 dígitos")]
-    public int Zona { get; set; }
+    // ✅ Propiedades auxiliares para el checkbox en Razor
+    public bool MarqCheck
+    {
+        get => Marquesina == "SI";
+        set => Marquesina = value ? "SI" : "NO";
+    }
 
-    [Required]
-    [MaxLength(2)]
-    public string Marquesina { get; set; }
-
-    [Required]
-    [MaxLength(2)]
-    public string RstBranch { get; set; }
+    public bool RstCheck
+    {
+        get => RstBranch == "SI";
+        set => RstBranch = value ? "SI" : "NO";
+    }
 }
-
-
-<div class="mb-3">
-    <label asp-for="Codcco" class="form-label"></label>
-    <input asp-for="Codcco" class="form-control" maxlength="3" />
-    <span asp-validation-for="Codcco" class="text-danger"></span>
-</div>
-
-<div class="mb-3">
-    <label asp-for="NomAge" class="form-label"></label>
-    <input asp-for="NomAge" class="form-control" maxlength="40" />
-    <span asp-validation-for="NomAge" class="text-danger"></span>
-</div>
-
-<!-- Repite para NomSer, IpSer, NomBD, Zona, Marquesina, RstBranch con sus respectivos maxlength -->
