@@ -1,87 +1,205 @@
-namespace CAUAdministracion.Models;
+using CAUAdministracion.Models;
+using Connections.Interfaces;
+using System.Data.Common;
 
-/// <summary>
-/// Modelo que representa una agencia para gestión desde AS400.
-/// </summary>
-public class AgenciaModel
+namespace CAUAdministracion.Services.Agencias
 {
     /// <summary>
-    /// Código de centro de costo (identificador único).
+    /// Servicio que gestiona operaciones sobre agencias en AS400.
     /// </summary>
-    public int Codcco { get; set; }
+    public class AgenciaService : IAgenciaService
+    {
+        private readonly IDatabaseConnection _as400;
 
-    /// <summary>
-    /// Nombre de la agencia.
-    /// </summary>
-    public string Nombre { get; set; }
+        public AgenciaService(IDatabaseConnection as400)
+        {
+            _as400 = as400;
+        }
 
-    /// <summary>
-    /// Zona geográfica a la que pertenece la agencia (1: CENTRO SUR, 2: NOR OCCIDENTE, 3: NOR ORIENTE).
-    /// </summary>
-    public int Zona { get; set; }
+        /// <summary>
+        /// Lista todas las agencias registradas.
+        /// </summary>
+        public List<AgenciaModel> ObtenerAgencias()
+        {
+            var agencias = new List<AgenciaModel>();
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
 
-    /// <summary>
-    /// Indica si aplica marquesina ("SI" o "NO").
-    /// </summary>
-    public string Marquesina { get; set; }
+                command.CommandText = @"
+                    SELECT CODCCO, NOMAGE, ZONA, MARQUESINA, RSTBRANCH, NOMBD, NOMSER, IPSER
+                    FROM BCAH96DTA.RSAGE01
+                    ORDER BY CODCCO";
 
-    /// <summary>
-    /// Indica si aplica reinicio de Branch ("SI" o "NO").
-    /// </summary>
-    public string RstBranch { get; set; }
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    agencias.Add(new AgenciaModel
+                    {
+                        Codcco = Convert.ToInt32(reader["CODCCO"]),
+                        Nombre = reader["NOMAGE"]?.ToString(),
+                        Zona = Convert.ToInt32(reader["ZONA"]),
+                        Marquesina = reader["MARQUESINA"]?.ToString(),
+                        RstBranch = reader["RSTBRANCH"]?.ToString(),
+                        NombreBD = reader["NOMBD"]?.ToString(),
+                        NombreServer = reader["NOMSER"]?.ToString(),
+                        IpServer = reader["IPSER"]?.ToString()
+                    });
+                }
+            }
+            finally
+            {
+                _as400.Close();
+            }
 
-    /// <summary>
-    /// Nombre del servidor configurado para la agencia.
-    /// </summary>
-    public string NombreServidor { get; set; }
+            return agencias;
+        }
 
-    /// <summary>
-    /// Dirección IP del servidor configurado para la agencia.
-    /// </summary>
-    public string IpServidor { get; set; }
+        /// <summary>
+        /// Inserta una nueva agencia en la base de datos.
+        /// </summary>
+        public bool InsertarAgencia(AgenciaModel agencia)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
 
-    /// <summary>
-    /// Nombre de la base de datos asociada.
-    /// </summary>
-    public string NombreBaseDatos { get; set; }
+                command.CommandText = $@"
+                    INSERT INTO BCAH96DTA.RSAGE01 
+                    (CODCCO, NOMAGE, ZONA, MARQUESINA, RSTBRANCH, NOMBD, NOMSER, IPSER)
+                    VALUES 
+                    ({agencia.Codcco}, '{agencia.Nombre}', {agencia.Zona}, '{agencia.Marquesina}', 
+                     '{agencia.RstBranch}', '{agencia.NombreBD}', '{agencia.NombreServer}', '{agencia.IpServer}')";
+
+                return command.ExecuteNonQuery() > 0;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        /// <summary>
+        /// Actualiza los datos de una agencia existente.
+        /// </summary>
+        public bool ActualizarAgencia(AgenciaModel agencia)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    UPDATE BCAH96DTA.RSAGE01
+                    SET NOMAGE = '{agencia.Nombre}', ZONA = {agencia.Zona},
+                        MARQUESINA = '{agencia.Marquesina}', RSTBRANCH = '{agencia.RstBranch}',
+                        NOMBD = '{agencia.NombreBD}', NOMSER = '{agencia.NombreServer}', IPSER = '{agencia.IpServer}'
+                    WHERE CODCCO = {agencia.Codcco}";
+
+                return command.ExecuteNonQuery() > 0;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+
+        /// <summary>
+        /// Elimina una agencia de la base de datos por su código.
+        /// </summary>
+        public bool EliminarAgencia(int codcco)
+        {
+            try
+            {
+                _as400.Open();
+                using var command = _as400.GetDbCommand();
+
+                command.CommandText = $@"
+                    DELETE FROM BCAH96DTA.RSAGE01 WHERE CODCCO = {codcco}";
+
+                return command.ExecuteNonQuery() > 0;
+            }
+            finally
+            {
+                _as400.Close();
+            }
+        }
+    }
 }
-
 
 
 
 using CAUAdministracion.Models;
+using CAUAdministracion.Services.Agencias;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
-namespace CAUAdministracion.Services.Agencias;
-
-/// <summary>
-/// Contrato para el servicio de gestión de agencias.
-/// </summary>
-public interface IAgenciaService
+namespace CAUAdministracion.Controllers
 {
-    /// <summary>
-    /// Lista todas las agencias registradas.
-    /// </summary>
-    Task<List<AgenciaModel>> ObtenerAgenciasAsync();
+    [Authorize]
+    public class AgenciasController : Controller
+    {
+        private readonly IAgenciaService _agenciaService;
 
-    /// <summary>
-    /// Inserta una nueva agencia en AS400.
-    /// </summary>
-    bool InsertarAgencia(AgenciaModel agencia);
+        public AgenciasController(IAgenciaService agenciaService)
+        {
+            _agenciaService = agenciaService;
+        }
 
-    /// <summary>
-    /// Elimina una agencia según su código de centro de costo.
-    /// </summary>
-    bool EliminarAgencia(int codcco);
+        /// <summary>
+        /// Muestra la vista de mantenimiento de agencias.
+        /// </summary>
+        public IActionResult Index()
+        {
+            var agencias = _agenciaService.ObtenerAgencias();
+            return View(agencias);
+        }
 
-    /// <summary>
-    /// Actualiza los datos de una agencia existente.
-    /// </summary>
-    bool ActualizarAgencia(AgenciaModel agencia);
+        /// <summary>
+        /// Muestra la vista para agregar una nueva agencia.
+        /// </summary>
+        [HttpGet]
+        public IActionResult Agregar()
+        {
+            return View();
+        }
 
-    /// <summary>
-    /// Verifica si un código de centro de costo ya existe en la tabla.
-    /// </summary>
-    bool ExisteCentroCosto(int codcco);
+        /// <summary>
+        /// Procesa la creación de una nueva agencia.
+        /// </summary>
+        [HttpPost]
+        public IActionResult Agregar(AgenciaModel model)
+        {
+            if (!ModelState.IsValid)
+                return View(model);
+
+            bool ok = _agenciaService.InsertarAgencia(model);
+            ViewBag.Mensaje = ok ? "Agencia agregada exitosamente." : "Error al agregar agencia.";
+            return RedirectToAction("Index");
+        }
+
+        /// <summary>
+        /// Edita una agencia específica.
+        /// </summary>
+        [HttpPost]
+        public IActionResult Editar(AgenciaModel model)
+        {
+            if (!ModelState.IsValid)
+                return RedirectToAction("Index");
+
+            _agenciaService.ActualizarAgencia(model);
+            return RedirectToAction("Index");
+        }
+
+        /// <summary>
+        /// Elimina una agencia por su código.
+        /// </summary>
+        public IActionResult Eliminar(int id)
+        {
+            _agenciaService.EliminarAgencia(id);
+            return RedirectToAction("Index");
+        }
+    }
 }
-
-
