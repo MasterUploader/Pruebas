@@ -321,7 +321,7 @@
         // ===============================================================
         // ---------- Inicio ----------
         // ===============================================================
-           HeaderInputDS.HRequestId     = HRequestId;
+            HeaderInputDS.HRequestId     = HRequestId;
             HeaderInputDS.HChannel       = HChannel;
             HeaderInputDS.HSessionId     = HSessionId;
             HeaderInputDS.HClientIp      = HClientIp;
@@ -767,26 +767,7 @@
         // ===============================================================
         dcl-proc GenerarRequestJson export;
             dcl-pi *n;
-      // Declaración del puntero que usará YAJL
-
-           HRequestId char(100);
-           HChannel   char(20 );
-           HSessionId char(100);
-           HClientIp char(20);
-           HUserId   char(20);
-           HProvider char(20);
-           HOrganization char(20);
-           HTerminal char(20);
-           HTimestamp char(50);
-           ConfirmationNm char(11);
-           RegionSd  char(15);
-           BranchSd  char(15);
-           StateCd   char(3);
-           CountryCd char(3);
-           Username  char(20);
-           Terminal  char(15);
-          AgentDt   char(8);
-          AgentTm   char(6);
+            input likeDs(HeaderInputDS);      
             end-pi;
 
           dcl-s jsonPtr pointer;
@@ -1021,24 +1002,7 @@
            SetFileName();
 
           // 3. Generar JSON de request
-           GenerarRequestJson(HRequestId :
-                              HChannel   :
-                              HSessionId :
-                              HClientIp :
-                              HUserId  :
-                              HProvider :
-                              HOrganization :
-                              HTerminal :
-                              HTimestamp :
-                              ConfirmationNm :
-                              RegionSd  :
-                              BranchSd  :
-                              StateCd   :
-                              CountryCd :
-                              Username  :
-                              Terminal :
-                              AgentDt :
-                              AgentTm );
+           GenerarRequestJson(input);
 
           // 4. Enviar POST
            EnviarPost();
