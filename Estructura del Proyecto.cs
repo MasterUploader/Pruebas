@@ -3,15 +3,17 @@ public async Task<IActionResult> GuardarEdicion(AgenciaModel model)
 {
     if (!ModelState.IsValid)
     {
-        // Recargar la vista con los datos anteriores si hay error de validación
-        var lista = await _agenciaService.ObtenerAgenciasAsync();
-        var viewModel = new AgenciaIndexViewModel
+        var agencias = await _agenciaService.ObtenerAgenciasAsync();
+        var modelo = new AgenciaIndexViewModel
         {
-            Lista = lista.ToPagedList(1, 10),
+            Lista = agencias.ToPagedList(1, 10),
             AgenciaEnEdicion = model,
             CodccoSeleccionado = model.Codcco.ToString()
         };
-        return View("Index", viewModel);
+
+        ViewBag.AgenciasFiltro = await _agenciaService.ObtenerAgenciasFiltroAsync(); // << ASEGURA ESTO
+
+        return View("Index", modelo);
     }
 
     await _agenciaService.ActualizarAgenciaAsync(model);
