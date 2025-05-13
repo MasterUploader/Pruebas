@@ -1,54 +1,68 @@
-dcl-proc GetDecimalFromJson;
-  dcl-pi *n packed(15:4);
-    parentNode pointer value;
-    fieldName varchar(50) const;
-  end-pi;
+dcl-proc ProcesarRespuesta;
 
-  dcl-s result packed(15:4) inz(0);
-  dcl-s val pointer;
-  dcl-s strVal varchar(50);
+  dcl-s docNode pointer;
+  dcl-s headerNode pointer;
+  dcl-s dataNode pointer;
+  dcl-s innerDataNode pointer;
+  dcl-s requestHeader pointer;
+  dcl-s senderNode pointer;
+  dcl-s recipientNode pointer;
+  dcl-s foreignNode pointer;
+  dcl-s senderAddr pointer;
+  dcl-s recipientAddr pointer;
+  dcl-s senderIdent pointer;
+  dcl-s recipientIdent pointer;
 
-  val = yajl_object_find(parentNode: %trim(fieldName));
-  if val <> *null;
-    strVal = yajl_get_string(val);
-    if %trim(strVal) <> '';
-      result = %dec(strVal: 15: 4);
-    endif;
+  dcl-s errmsg varchar(500);
+
+  docNode = yajl_stmf_load_tree(%trim(vFullFileR): errmsg);
+
+  if errmsg <> *blanks;
+     // Manejo del error de lectura
+     HDR_MSG = 'Error al cargar JSON: ' + errmsg;
+     return;
   endif;
 
-  return result;
-end-proc;
+  //-------------------------------------------------------
+  // HEADER
+  //-------------------------------------------------------
+  headerNode = yajl_object_find(docNode: 'header');
+  if headerNode <> *null;
+     HDR_RSPID  = GetString(headerNode: 'responseId': 100);
+     HDR_TMSTMP = GetString(headerNode: 'timestamp': 50);
+     HDR_PRTIME = GetString(headerNode: 'processingtime': 20);
+     HDR_STSCD  = GetString(headerNode: 'statuscode': 10);
+     HDR_MSG    = GetString(headerNode: 'message': 500);
 
-dcl-proc GetDateFromJson;
-  dcl-pi *n date;
-    parentNode pointer value;
-    fieldName varchar(50) const;
-  end-pi;
-
-  dcl-s result date inz(*loval);
-  dcl-s val pointer;
-  dcl-s strVal char(8);
-
-  val = yajl_object_find(parentNode: %trim(fieldName));
-  if val <> *null;
-    strVal = yajl_get_string(val);
-    if %len(%trim(strVal)) = 8;
-      result = %date(%subst(strVal:1:4) + '-' +
-                     %subst(strVal:5:2) + '-' +
-                     %subst(strVal:7:2): *iso);
-    endif;
+     requestHeader = yajl_object_find(headerNode: 'requestheader');
+     if requestHeader <> *null;
+        // Puedes mapear los campos de requestHeader aquí si lo necesitas
+     endif;
   endif;
 
-  return result;
-end-proc;
+  //-------------------------------------------------------
+  // DATA
+  //-------------------------------------------------------
+  dataNode = yajl_object_find(docNode: 'data');
+  if dataNode <> *null;
+     OPCODE         = GetString(dataNode: 'opCode': 4);
+     ProcessMsg     = GetString(dataNode: 'processMsg': 70);
+     ErrorParamFullName = GetString(dataNode: 'errorParamFullName': 255);
+     TransStatusCd  = GetString(dataNode: 'transStatusCd': 3);
+     TransStatusDt  = GetString(dataNode: 'transStatusDt': 8);
+     ProcessDt      = GetString(dataNode: 'processDt': 8);
+     ProcessTm      = GetString(dataNode: 'processTm': 6);
 
-dcl-proc GetBooleanFromJson;
-  dcl-pi *n ind;
-    parentNode pointer value;
-    fieldName varchar(50) const;
-  end-pi;
+     innerDataNode = yajl_object_find(dataNode: 'data');
+     if innerDataNode <> *null;
+        ProcesarDataGeneral(innerDataNode);
+        ProcesarSender(innerDataNode);
+        ProcesarRecipient(innerDataNode);
+        ProcesarSenderIdent(innerDataNode);
+        ProcesarRecipientIdent(innerDataNode);
+     endif;
+  endif;
 
-  dcl-s val pointer;
-  val = yajl_object_find(parentNode: %trim(fieldName));
-  return (val <> *null and yajl_is_true(val));
+  yajl_tree_free(docNode);
+
 end-proc;
