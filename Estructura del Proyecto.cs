@@ -6,17 +6,14 @@ dcl-proc GetStringFromJson;
   end-pi;
 
   dcl-s result char(200);
-  dcl-s tempPtr pointer;
-  dcl-s tempStr char(500) based(tempPtr);
-  dcl-s realLength int(10);
+  dcl-s val pointer;
 
   result = *blanks;
 
-  tempPtr = yajl_object_find(parentNode: %trim(fieldName));
+  val = yajl_object_find(parentNode: %trim(fieldName));
 
-  if tempPtr <> *null;
-    realLength = %len(%str(%addr(tempStr)));
-    result = %subst(%str(%addr(tempStr)): 1: %min(realLength: maxLength));
+  if val <> *null;
+    result = yajl_get_string(val);
     if %trim(result) = '';
       result = ' ';
     endif;
@@ -24,5 +21,5 @@ dcl-proc GetStringFromJson;
     result = ' ';
   endif;
 
-  return result;
+  return %subst(result:1:maxLength);
 end-proc;
