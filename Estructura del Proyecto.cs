@@ -108,3 +108,28 @@
         }
     }
 }
+
+
+
+docNode = yajl_stmf_load_tree(%Trim($vFileSav):errMsg);
+
+               if errMsg <> '';
+
+                  $error   ='001';
+                  $mensaje   ='Error mapeo estructura json';
+
+               Else;
+
+                 //Verifica la existencia de campo
+                 node = YAJL_object_find(docNode:'error');
+                 resultP.error = YAJL_is_true(node);
+
+                 //Extrae valores de nodo
+                 node = YAJL_object_find(docNode:'error');
+                 $error = YAJL_get_string(node);
+
+                 node = YAJL_object_find(docNode:'mensaje');
+                 $mensaje = YAJL_get_string(node);
+
+              endif;
+
