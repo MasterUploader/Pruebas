@@ -1,135 +1,87 @@
-{
-    "header": {
-        "responseId": "2611ddf4-64db-4c52-ad78-36a51823d920",
-        "timestamp": "2025-05-13T03:36:42.7610835Z",
-        "processingtime": "100ms",
-        "statuscode": "1000",
-        "message": "QRYI ACCEPTED ORDER",
-        "requestheader": {
-            "h-request-id": "010604a7-30b1-496a-af69-5019820a35c3",
-            "h-channel": "Caja",
-            "h-terminal": "POSTAM",
-            "h-organization": "Davivienda",
-            "h-user-id": "PRUEBAS",
-            "h-provider": "POSTAM",
-            "h-session-id": "0c6a608d-808d-4b4b-8ed9-b1465f95b17b",
-            "h-client-ip": "localhost",
-            "h-timestamp": "20250221"
-        }
-    },
-    "data": {
-        "opCode": "1000",
-        "processMsg": "QRYI ACCEPTED ORDER",
-        "errorParamFullName": "",
-        "transStatusCd": "ONP",
-        "transStatusDt": "20250207",
-        "processDt": "20250512",
-        "processTm": "223642",
-        "data": {
-            "saleDt": "20250207",
-            "saleTm": "174941",
-            "serviceCd": "MTR",
-            "paymentTypeCd": "CSA",
-            "origCountryCd": "USA",
-            "origCurrencyCd": "USD",
-            "destCountryCd": "HND",
-            "DestCurrencyCd": "",
-            "destAmount": "7657.0200",
-            "origAmount": "300.0000",
-            "exchangeRateFx": "25.5234000000",
-            "marketRefCurrencyCd": "USD",
-            "marketRefCurrencyFx": "25.52340",
-            "marketRefCurrencyAm": "300.00",
-            "sAgentCd": "BTS",
-            "sPaymentTypeCd": "",
-            "sAccountTypeCd": "",
-            "sAccountNm": "",
-            "sBankCd": "",
-            "sBankRefNm": "",
-            "rAccountTypeCd": "",
-            "rAccountName": "",
-            "rAgentCd": "",
-            "rAgentRegionSd": "",
-            "rAgentBranchSd": "",
-            "bankRefNm": "",
-            "promotionCode": "",
-            "sender": {
-                "firstName": "JOSE",
-                "middleName": "LUIS",
-                "lastName": "DELAGARZA",
-                "motherMName": "VALDOVINOS",
-                "address": {
-                    "address": "5403 UNIVERSITY AVE",
-                    "city": "SAN DIEGO",
-                    "stateCd": "CA ",
-                    "countryCd": "USA",
-                    "zipCode": "92105",
-                    "phone": "+16192659701"
-                }
-            },
-            "recipient": {
-                "firstName": "LUZ",
-                "middleName": "AYDEE",
-                "lastName": "ALVAREZ",
-                "motherMName": "CRUZ",
-                "identif_Type_Cd": "",
-                "identif_Nm": "",
-                "foreing_Name": {
-                    "firstName": "",
-                    "middleName": "",
-                    "lastName": "",
-                    "motherMName": ""
-                },
-                "address": {
-                    "address": "DOMICILIO CONOCIDO",
-                    "city": "CIUDAD CONOCIDA",
-                    "stateCd": "ATL",
-                    "countryCd": "HND",
-                    "zipCode": "31001",
-                    "phone": "+5047414233"
-                }
-            },
-            "recipientIdentification": {
-                "typeCd": "",
-                "issuerCd": "",
-                "issuerStateCd": "",
-                "issuerCountryCd": "",
-                "identFnum": "",
-                "expirationDt": ""
-            },
-            "senderIdentification": {
-                "typeCd": "",
-                "issuerCd": "",
-                "issuerStateCd": "",
-                "issuerCountryCd": "",
-                "identFnum": "",
-                "expirationDt": ""
-            }
-        }
-    }
-}
+dcl-proc GetStringFromJsonSafe;
+  dcl-pi *n char(200);
+    parentNode pointer value;
+    fieldName varchar(100) const;
+    maxLength int(5) const;
+  end-pi;
+
+  dcl-s result char(200);
+  dcl-s tempPtr pointer;
+  dcl-s tempStr char(500) based(tempPtr);
+
+  result = *blanks;
+  tempPtr = yajl_object_find(parentNode: %trim(fieldName));
+
+  if tempPtr <> *null;
+    result = %subst(%str(%addr(tempStr)): 1: maxLength);
+    if %trim(result) = '';
+      result = ' ';
+    endif;
+  else;
+    result = ' ';
+  endif;
+
+  return result;
+end-proc;
 
 
 
-docNode = yajl_stmf_load_tree(%Trim($vFileSav):errMsg);
+dcl-proc ProcesarJsonResponse;
+  dcl-s root like(yajl_val);
+  dcl-s headerNode like(yajl_val);
+  dcl-s reqHeaderNode like(yajl_val);
+  dcl-s dataNode like(yajl_val);
+  dcl-s dataDetailNode like(yajl_val);
+  dcl-s errMsg varchar(500);
 
-               if errMsg <> '';
+  root = yajl_stmf_load_tree(%trim(vFullFileR): errMsg);
+  if errMsg <> '';
+    // manejar error
+    return;
+  endif;
 
-                  $error   ='001';
-                  $mensaje   ='Error mapeo estructura json';
+  // HEADER
+  headerNode = yajl_object_find(root: 'header');
+  if headerNode <> *null;
+    hdr_responseId = GetStringFromJsonSafe(headerNode:'responseId': 100);
+    hdr_timestamp  = GetStringFromJsonSafe(headerNode:'timestamp': 50);
+    hdr_procTime   = GetStringFromJsonSafe(headerNode:'processingtime': 20);
+    hdr_statusCode = GetStringFromJsonSafe(headerNode:'statuscode': 10);
+    hdr_message    = GetStringFromJsonSafe(headerNode:'message': 200);
 
-               Else;
+    // HEADER.REQUESTHEADER
+    reqHeaderNode = yajl_object_find(headerNode: 'requestheader');
+    if reqHeaderNode <> *null;
+      hdr_req_id   = GetStringFromJsonSafe(reqHeaderNode:'h-request-id': 100);
+      hdr_channel  = GetStringFromJsonSafe(reqHeaderNode:'h-channel': 20);
+      hdr_term     = GetStringFromJsonSafe(reqHeaderNode:'h-terminal': 20);
+      hdr_org      = GetStringFromJsonSafe(reqHeaderNode:'h-organization': 50);
+      hdr_user     = GetStringFromJsonSafe(reqHeaderNode:'h-user-id': 20);
+      hdr_prov     = GetStringFromJsonSafe(reqHeaderNode:'h-provider': 20);
+      hdr_sess     = GetStringFromJsonSafe(reqHeaderNode:'h-session-id': 100);
+      hdr_ip       = GetStringFromJsonSafe(reqHeaderNode:'h-client-ip': 50);
+      hdr_time     = GetStringFromJsonSafe(reqHeaderNode:'h-timestamp': 20);
+    endif;
+  endif;
 
-                 //Verifica la existencia de campo
-                 node = YAJL_object_find(docNode:'error');
-                 resultP.error = YAJL_is_true(node);
+  // DATA
+  dataNode = yajl_object_find(root: 'data');
+  if dataNode <> *null;
+    data_opcode  = GetStringFromJsonSafe(dataNode:'opCode': 10);
+    data_msg     = GetStringFromJsonSafe(dataNode:'processMsg': 200);
+    data_cd      = GetStringFromJsonSafe(dataNode:'transStatusCd': 10);
+    data_dt      = GetStringFromJsonSafe(dataNode:'transStatusDt': 10);
+    data_procDt  = GetStringFromJsonSafe(dataNode:'processDt': 10);
+    data_procTm  = GetStringFromJsonSafe(dataNode:'processTm': 10);
 
-                 //Extrae valores de nodo
-                 node = YAJL_object_find(docNode:'error');
-                 $error = YAJL_get_string(node);
+    // DATA.DATA (anidado)
+    dataDetailNode = yajl_object_find(dataNode: 'data');
+    if dataDetailNode <> *null;
+      data_saleDt = GetStringFromJsonSafe(dataDetailNode:'saleDt': 10);
+      data_origAmt = GetStringFromJsonSafe(dataDetailNode:'origAmount': 20);
+      // ... y así sucesivamente
+    endif;
+  endif;
 
-                 node = YAJL_object_find(docNode:'mensaje');
-                 $mensaje = YAJL_get_string(node);
-
-              endif;
-
+  yajl_tree_free(root);
+end-proc;
