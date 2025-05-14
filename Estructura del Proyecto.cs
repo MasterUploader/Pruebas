@@ -1,4 +1,4 @@
-dcl-pr http_debug extproc('http_debug');
-  debugOn ind value;
-  fileName pointer value options(*string);
+dcl-pr MIACLLE extpgm('MIACLLE');
+  entrada1 char(10);
+  entrada2 char(20);
 end-pr;
