@@ -1,99 +1,93 @@
-{
-    "header": {
-        "responseId": "272be604-5bc6-41f6-818c-6f9cf1fabac2",
-        "timestamp": "2025-05-14T16:29:07.1885577Z",
-        "processingtime": "100ms",
-        "statuscode": "1100",
-        "message": "PAYI ACCEPTED ORDER",
-        "requestheader": {
-            "h-request-id": "7e7b6a36-e872-48a6-a1d5-329fdd24439e",
-            "h-channel": "Caja",
-            "h-terminal": "POSTAM",
-            "h-organization": "Davivienda",
-            "h-user-id": "PRUEBAS",
-            "h-provider": "POSTAM",
-            "h-session-id": "19cd5bf3-46db-48d8-a32e-14b134a5c3ed",
-            "h-client-ip": "localhost",
-            "h-timestamp": "20250221"
-        }
-    },
-    "data": {
-        "OpCode": "1100",
-        "ProcessMsg": "PAYI ACCEPTED ORDER",
-        "ErrorParamFullName": "",
-        "TransStatusCd": "",
-        "TransStatusDt": "",
-        "ProcessDt": "20250514",
-        "ProcessTm": "112906",
-        "Data": {
-            "SaleDt": "20250207",
-            "SaleTm": "174941",
-            "ServiceCd": "MTR",
-            "PaymentTypeCd": "CSA",
-            "OrigCountryCd": "USA",
-            "OrigCurrencyCd": "USD",
-            "DestCountryCd": "HND",
-            "DestCurrencyCd": "HNL",
-            "DestAmount": "7657.0200",
-            "OrigAmount": "300.0000",
-            "ExchangeRateFx": "25.5234000000",
-            "MarketRefCurrencyCd": "USD",
-            "MarketRefCurrencyFx": "25.52340",
-            "MarketRefCurrencyAm": "300.00",
-            "S_Agent_Cd": "BTS",
-            "S_Agent_Country_Cd": "USA",
-            "S_Agent_State_Cd": "TX ",
-            "S_Payment_Type_Cd": "",
-            "S_Account_Type_Cd": "",
-            "S_Account_Nm": "",
-            "S_Bank_Cd": "",
-            "S_Bank_Ref_Nm": "",
-            "RAgentCd": "",
-            "RAgentRegionSd": "CSU",
-            "RAgentBranchSd": "101",
-            "Bank_Ref_Nm": "GUBSPWQ9AV4XJ8GGPJX7",
-            "Sender": {
-                "firstName": "JOSE",
-                "middleName": "LUIS",
-                "lastName": "DELAGARZA",
-                "motherMName": "VALDOVINOS",
-                "address": {
-                    "address": "5403 UNIVERSITY AVE",
-                    "city": "SAN DIEGO",
-                    "stateCd": "CA ",
-                    "countryCd": "USA",
-                    "zipCode": "92105",
-                    "phone": "+16192659701"
-                }
-            },
-            "Recipient": {
-                "FirstName": "LUZ",
-                "MiddleName": "AYDEE",
-                "LastName": "ALVAREZ",
-                "MotherMName": "CRUZ",
-                "Foreing_Name": {
-                    "firstName": "",
-                    "middleName": "",
-                    "lastName": "",
-                    "motherMName": ""
-                },
-                "Address": {
-                    "address": "DOMICILIO CONOCIDO",
-                    "city": "CIUDAD CONOCIDA",
-                    "stateCd": "ATL",
-                    "countryCd": "HND",
-                    "zipCode": "31001",
-                    "phone": "+5047414233"
-                }
-            },
-            "SenderIdentification": {
-                "typeCd": "",
-                "issuerCd": "",
-                "issuerStateCd": "",
-                "issuerCountryCd": "",
-                "identFnum": "",
-                "expirationDt": ""
-            }
-        }
-    }
-}
+        // ========================================================
+        // Procedimiento Enviar Posteo al API
+        // ========================================================
+        dcl-proc EnviarPost;
+          dcl-s fd int(10);
+          dcl-s filePath pointer;
+          dcl-s bytesRead int(10);
+          dcl-s headers varchar(200);
+          dcl-s responseLen int(10);
+
+          // ----------------------------------------
+          // Realiza el POST, guarda en archivo IFS
+          // ----------------------------------------
+          //callp http_debug(*on: vFullFileH); //Guarda archivo log
+          callp http_debug(*on); //No guarda archivo log
+
+          callp HTTP_setCCSIDs(1208: 0);
+
+          rc = HTTP_POST(%Trim(pUrlPost)
+                     : %addr(jsonBuffer )
+                     : jsonLen
+                     : %Trim(vFullFileR)
+                     : 60
+                     : HTTP_USERAGENT
+                     : 'application/json');
+
+          // Validaciones del resultado        
+
+          if rc < 0;
+              // Error grave de conexión
+              response = '{ "error": "Fallo de conexión o red." }';
+              ErrorGenerico(rc:
+                              response);
+          elseif rc > 0;
+              // Error HTTP
+              response = '{ "error": "Error HTTP. Código RC=' + 
+              %char(rc) + '" }';
+              ErrorGenerico(rc:
+                              response);
+          elseif %trim(response) = *blanks;
+              // Respuesta vacía
+              response = '{ "error": "Respuesta vacía de la API. RC=0" }';
+              ErrorGenerico(rc:
+                              response);
+          elseif %scan('error': %xlate('":,{}[]' : '        ' :
+                  %trim(response))) > 0;
+              // Contenido contiene palabra error
+              response = '{ "warning": "La API respondió con posible error" }';
+              ErrorGenerico(rc:
+                              response);
+          endif;
+
+        end-proc;
+
+
+dcl-proc ErrorGenerico export;
+            dcl-pi ErrorGenerico;
+               error int(10);
+               mensaje char(100);
+            end-pi;
+            
+          dcl-s jsonGen int(10);            
+          dcl-s errMsg varchar(500);
+
+           jsonGen = yajl_genOpen(*OFF);
+
+          // Comenzar el objeto JSON principal
+          callp yajl_beginObj();
+          callp yajl_beginObj();
+
+          // --- HEADER ---
+          callp yajl_addChar('header');
+          callp yajl_beginObj();
+          callp yajl_addChar('statuscode': %char(error));
+          callp yajl_addChar('message': %trim(mensaje));
+          callp yajl_endObj();
+          // --- HEADER ---
+
+          callp yajl_endObj();
+          callp yajl_endObj();
+          // --- Comenzar el objeto JSON principal ---//
+
+          // Obtener el buffer JSON generado
+            yajl_saveBuf(vFullFileR: errMsg);
+
+          //  if errMsg <> '';
+          // // handle error
+          // endif;
+
+          // Cerrar el generador de JSON
+          callp yajl_genClose();         
+          
+        end-proc;
