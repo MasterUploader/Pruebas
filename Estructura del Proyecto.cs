@@ -1,33 +1,63 @@
-dcl-proc ErrorGenerico export;
-  dcl-pi ErrorGenerico;
-    error int(10);
-    mensaje char(100);
-  end-pi;
+public static class CertificateLoader
+{
+    public static X509Certificate2 GetCertificateByThumbprint(string thumbprint)
+    {
+        using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadOnly);
 
-  dcl-s jsonGen int(10);
-  dcl-s jsonStr varchar(32700);
-  dcl-s jsonLen int(10);
-  dcl-s fd int(10);
-  dcl-s errMsg varchar(500);
+        var cert = store.Certificates
+            .Find(X509FindType.FindByThumbprint, thumbprint, validOnly: false)
+            .OfType<X509Certificate2>()
+            .FirstOrDefault();
 
-  // 1. Generar JSON de error con YAJL
-  jsonGen = yajl_genOpen(*OFF);
+        if (cert == null || !cert.HasPrivateKey)
+            throw new Exception("Certificado no encontrado o sin clave privada.");
 
-  callp yajl_beginObj();
-    callp yajl_addChar('header');
-    callp yajl_beginObj();
-      callp yajl_addChar('statuscode': %char(error));
-      callp yajl_addChar('message': %trim(mensaje));
-    callp yajl_endObj();
-  callp yajl_endObj();
+        return cert;
+    }
+}
 
-  callp yajl_copyBuf(0: %addr(jsonStr): %size(jsonStr): jsonLen);
-  callp yajl_genClose();
 
-  // 2. Sobrescribir el archivo de respuesta
-  fd = open(%addr(vFullFileR): O_WRONLY + O_TRUNC + O_CREAT: 0666);
-  if fd > 0;
-    callp write(fd: %addr(jsonStr): jsonLen);
-    callp close(fd);
-  endif;
-end-proc;
+
+
+public class JwtGenerator
+{
+    private readonly X509Certificate2 _certificate;
+
+    public JwtGenerator(X509Certificate2 certificate)
+    {
+        _certificate = certificate ?? throw new ArgumentNullException(nameof(certificate));
+    }
+
+    public string GenerateToken(string issuer, string audience, TimeSpan expiresIn)
+    {
+        var securityKey = new X509SecurityKey(_certificate);
+
+        var signingCredentials = new SigningCredentials(
+            securityKey,
+            SecurityAlgorithms.RsaSha256 // Puede ser RsaSha384 o RsaSha512 según el certificado
+        );
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, "usuario@ejemplo.com"),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim("rol", "Administrador")
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: issuer,
+            audience: audience,
+            claims: claims,
+            notBefore: DateTime.UtcNow,
+            expires: DateTime.UtcNow.Add(expiresIn),
+            signingCredentials: signingCredentials
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+}
+
+
+dotnet add package System.IdentityModel.Tokens.Jwt
+dotnet add package Microsoft.IdentityModel.Tokens
