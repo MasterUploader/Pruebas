@@ -1,51 +1,36 @@
 /// <summary>
-/// Agrega la información del entorno al log, capturando detalles del sistema, petición actual y distribución.
+/// Formatea la información de una solicitud HTTP realizada mediante HttpClient,
+/// incluyendo método, URL, cabeceras, cuerpo de la solicitud, código de respuesta, respuesta y duración.
 /// </summary>
-public void AddEnvironmentLog()
+public static string FormatHttpClientLog(
+    string method,
+    string url,
+    IDictionary<string, string> headers,
+    string? requestBody,
+    HttpStatusCode statusCode,
+    string? responseBody,
+    long durationMs)
 {
-    try
+    var sb = new StringBuilder();
+
+    sb.AppendLine("[HttpClient Request]");
+    sb.AppendLine($"  Método         : {method}");
+    sb.AppendLine($"  URL            : {url}");
+    sb.AppendLine($"  Headers        :");
+
+    foreach (var header in headers)
     {
-        var context = _httpContextAccessor.HttpContext;
-        var hostEnvironment = context?.RequestServices.GetService<IHostEnvironment>();
-
-        // 1. Intentar obtener de un header HTTP
-        var distributionFromHeader = context?.Request.Headers["Distribucion"].FirstOrDefault();
-
-        // 2. Intentar obtener de los claims del usuario (si existe autenticación JWT)
-        var distributionFromClaim = context?.User?.Claims?
-            .FirstOrDefault(c => c.Type == "distribution")?.Value;
-
-        // 3. Intentar extraer del subdominio (ejemplo: cliente1.api.com)
-        var host = context?.Request.Host.Host;
-        var distributionFromSubdomain = !string.IsNullOrWhiteSpace(host) && host.Contains(".")
-            ? host.Split('.')[0]
-            : null;
-
-        // 4. Seleccionar la primera fuente válida o asignar "N/A"
-        var distribution = distributionFromHeader
-                           ?? distributionFromClaim
-                           ?? distributionFromSubdomain
-                           ?? "N/A";
-
-        // Llamar al formateador
-        string formatted = LogFormatter.FormatEnvironmentInfoStart(
-            application: hostEnvironment?.ApplicationName ?? "Desconocido",
-            env: hostEnvironment?.EnvironmentName ?? "Desconocido",
-            contentRoot: hostEnvironment?.ContentRootPath ?? "Desconocido",
-            executionId: context?.TraceIdentifier ?? "Desconocido",
-            clientIp: context?.Connection.RemoteIpAddress?.ToString() ?? "Desconocido",
-            userAgent: context?.Request.Headers["User-Agent"].ToString() ?? "Desconocido",
-            machineName: Environment.MachineName,
-            os: Environment.OSVersion.ToString(),
-            host: context?.Request.Host.ToString() ?? "Desconocido",
-            distribution: distribution
-        );
-
-        // Guardar en archivo
-        LogHelper.WriteLogToFile(_logDirectory, GetCurrentLogFile(), formatted);
+        sb.AppendLine($"    - {header.Key}: {header.Value}");
     }
-    catch (Exception ex)
-    {
-        LogInternalError(ex);
-    }
+
+    sb.AppendLine($"  Cuerpo Enviado : {(string.IsNullOrWhiteSpace(requestBody) ? "[vacío]" : requestBody)}");
+
+    sb.AppendLine();
+    sb.AppendLine("[HttpClient Response]");
+    sb.AppendLine($"  Código Estado  : {(int)statusCode} {statusCode}");
+    sb.AppendLine($"  Cuerpo Recibido: {(string.IsNullOrWhiteSpace(responseBody) ? "[vacío]" : responseBody)}");
+    sb.AppendLine($"  Duración       : {durationMs} ms");
+    sb.AppendLine(new string('-', 80));
+
+    return sb.ToString();
 }
