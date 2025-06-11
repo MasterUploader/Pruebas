@@ -1,52 +1,55 @@
 /// <summary>
-/// Captura la información del entorno del servidor y del cliente, incluyendo detalles extendidos del HttpContext.
+/// Formatea la información del entorno, incluyendo datos adicionales si están disponibles.
 /// </summary>
-private async Task<string> CaptureEnvironmentInfoAsync(HttpContext context)
+/// <param name="application">Nombre de la aplicación.</param>
+/// <param name="env">Nombre del entorno (Development, Production, etc.).</param>
+/// <param name="contentRoot">Ruta raíz del contenido.</param>
+/// <param name="executionId">Identificador único de la ejecución.</param>
+/// <param name="clientIp">Dirección IP del cliente.</param>
+/// <param name="userAgent">Agente de usuario del cliente.</param>
+/// <param name="machineName">Nombre de la máquina donde corre la aplicación.</param>
+/// <param name="os">Sistema operativo del servidor.</param>
+/// <param name="host">Host del request recibido.</param>
+/// <param name="distribution">Distribución personalizada u origen (opcional).</param>
+/// <param name="extras">Diccionario con información adicional opcional.</param>
+/// <returns>Texto formateado con la información del entorno.</returns>
+public static string FormatEnvironmentInfoStart(
+    string application,
+    string env,
+    string contentRoot,
+    string executionId,
+    string clientIp,
+    string userAgent,
+    string machineName,
+    string os,
+    string host,
+    string distribution,
+    Dictionary<string, string>? extras = null)
 {
-    var request = context.Request;
-    var connection = context.Connection;
-    var hostEnvironment = context.RequestServices.GetService<IHostEnvironment>();
+    var sb = new StringBuilder();
 
-    // Preparar información extendida
-    string application = hostEnvironment?.ApplicationName ?? "Desconocido";
-    string env = hostEnvironment?.EnvironmentName ?? "Desconocido";
-    string contentRoot = hostEnvironment?.ContentRootPath ?? "Desconocido";
-    string executionId = context.TraceIdentifier ?? "Desconocido";
-    string clientIp = connection?.RemoteIpAddress?.ToString() ?? "Desconocido";
-    string userAgent = request.Headers["User-Agent"].ToString() ?? "Desconocido";
-    string machineName = Environment.MachineName;
-    string os = Environment.OSVersion.ToString();
-    string host = request.Host.ToString() ?? "Desconocido";
+    sb.AppendLine("[Inicio de Log]");
+    sb.AppendLine($"  Timestamp.............: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
+    sb.AppendLine($"  Aplicación............: {application}");
+    sb.AppendLine($"  Entorno...............: {env}");
+    sb.AppendLine($"  Content Root..........: {contentRoot}");
+    sb.AppendLine($"  Execution ID..........: {executionId}");
+    sb.AppendLine($"  IP Cliente............: {clientIp}");
+    sb.AppendLine($"  User Agent............: {userAgent}");
+    sb.AppendLine($"  Host..................: {host}");
+    sb.AppendLine($"  Máquina...............: {machineName}");
+    sb.AppendLine($"  Sistema Operativo.....: {os}");
+    sb.AppendLine($"  Distribución..........: {distribution}");
 
-    // Información adicional del contexto
-    var extras = new Dictionary<string, string>
+    if (extras is not null && extras.Any())
     {
-        { "Scheme", request.Scheme },
-        { "Protocol", request.Protocol },
-        { "Method", request.Method },
-        { "Path", request.Path },
-        { "Query", request.QueryString.ToString() },
-        { "ContentType", request.ContentType ?? "N/A" },
-        { "ContentLength", request.ContentLength?.ToString() ?? "N/A" },
-        { "ClientPort", connection?.RemotePort.ToString() ?? "Desconocido" },
-        { "LocalIp", connection?.LocalIpAddress?.ToString() ?? "Desconocido" },
-        { "LocalPort", connection?.LocalPort.ToString() ?? "Desconocido" },
-        { "ConnectionId", connection?.Id ?? "Desconocido" },
-        { "Referer", request.Headers["Referer"].ToString() ?? "N/A" }
-    };
+        sb.AppendLine("  -- Extras del HttpContext --");
+        foreach (var kvp in extras)
+        {
+            sb.AppendLine($"    {kvp.Key,-20}: {kvp.Value}");
+        }
+    }
 
-    // Usar el formateador existente
-    return LogFormatter.FormatEnvironmentInfoStart(
-        application: application,
-        env: env,
-        contentRoot: contentRoot,
-        executionId: executionId,
-        clientIp: clientIp,
-        userAgent: userAgent,
-        machineName: machineName,
-        os: os,
-        host: host,
-        distribution: "N/A",
-        extras: extras // Se requiere que FormatEnvironmentInfoStart lo soporte
-    );
+    sb.AppendLine(new string('-', 70));
+    return sb.ToString();
 }
