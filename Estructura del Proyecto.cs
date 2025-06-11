@@ -1,33 +1,46 @@
-public static string PrettyPrintXml(string xml)
+protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
 {
+    var stopwatch = Stopwatch.StartNew();
+    var context = _httpContextAccessor.HttpContext;
+    string traceId = context?.TraceIdentifier ?? Guid.NewGuid().ToString();
+
     try
     {
-        var doc = new System.Xml.XmlDocument();
-        doc.LoadXml(xml);
+        HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
+        stopwatch.Stop();
 
-        var stringBuilder = new StringBuilder();
-        var settings = new XmlWriterSettings
-        {
-            Indent = true,
-            IndentChars = "  ",
-            NewLineChars = "\n",
-            NewLineHandling = NewLineHandling.Replace
-        };
+        string responseBody = response.Content != null
+            ? await response.Content.ReadAsStringAsync()
+            : "Sin contenido";
 
-        using (var writer = XmlWriter.Create(stringBuilder, settings))
-        {
-            doc.Save(writer);
-        }
+        // 🔹 Formato del log: incluye cuerpo de respuesta bien formateado
+        string formatted = LogFormatter.FormatHttpClientRequestWithResponse(
+            traceId: traceId,
+            method: request.Method.Method,
+            url: request.RequestUri?.ToString() ?? "URI no definida",
+            statusCode: ((int)response.StatusCode).ToString(),
+            elapsedMs: stopwatch.ElapsedMilliseconds,
+            headers: request.Headers.ToString(),
+            requestBody: request.Content != null ? await request.Content.ReadAsStringAsync() : null,
+            responseBody: FormatXmlPretty(responseBody)
+        );
 
-        return stringBuilder.ToString();
+        AppendHttpClientLogToContext(context, formatted);
+
+        return response;
     }
-    catch
+    catch (Exception ex)
     {
-        // Si el XML es inválido o viene mal, lo devolvemos como está
-        return xml;
+        stopwatch.Stop();
+
+        string errorLog = LogFormatter.FormatHttpClientError(
+            traceId: traceId,
+            method: request.Method.Method,
+            url: request.RequestUri?.ToString() ?? "URI no definida",
+            exception: ex
+        );
+
+        AppendHttpClientLogToContext(context, errorLog);
+        throw;
     }
 }
-
-
-string responseBody = await response.Content.ReadAsStringAsync();
-responseBody = LogFormatter.PrettyPrintXml(responseBody);
