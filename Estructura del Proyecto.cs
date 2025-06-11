@@ -1,48 +1,33 @@
-public static string FormatHttpClientRequest(
-    string traceId,
-    string method,
-    string url,
-    string statusCode,
-    long elapsedMs,
-    string headers,
-    string? body,
-    string? responseBody // <-- nuevo
-)
+public static string PrettyPrintXml(string xml)
 {
-    var builder = new StringBuilder();
-    builder.AppendLine("============= INICIO HTTP CLIENT =============");
-    builder.AppendLine($"TraceId       : {traceId}");
-    builder.AppendLine($"Método        : {method}");
-    builder.AppendLine($"URL           : {url}");
-    builder.AppendLine($"Código Status : {statusCode}");
-    builder.AppendLine($"Duración (ms) : {elapsedMs}");
-    builder.AppendLine($"Encabezados   :\n{headers}");
-
-    if (!string.IsNullOrWhiteSpace(body))
+    try
     {
-        builder.AppendLine("Cuerpo:");
-        builder.AppendLine(body);
-    }
+        var doc = new System.Xml.XmlDocument();
+        doc.LoadXml(xml);
 
-    if (!string.IsNullOrWhiteSpace(responseBody))
+        var stringBuilder = new StringBuilder();
+        var settings = new XmlWriterSettings
+        {
+            Indent = true,
+            IndentChars = "  ",
+            NewLineChars = "\n",
+            NewLineHandling = NewLineHandling.Replace
+        };
+
+        using (var writer = XmlWriter.Create(stringBuilder, settings))
+        {
+            doc.Save(writer);
+        }
+
+        return stringBuilder.ToString();
+    }
+    catch
     {
-        builder.AppendLine("Respuesta:");
-        builder.AppendLine(responseBody);
+        // Si el XML es inválido o viene mal, lo devolvemos como está
+        return xml;
     }
-
-    builder.AppendLine("============= FIN HTTP CLIENT =============");
-    return builder.ToString();
 }
 
-string responseBody = await response.Content.ReadAsStringAsync();
 
-string formatted = LogFormatter.FormatHttpClientRequest(
-    traceId: traceId,
-    method: request.Method.Method,
-    url: request.RequestUri?.ToString() ?? "Uri no definida",
-    statusCode: ((int)response.StatusCode).ToString(),
-    elapsedMs: stopwatch.ElapsedMilliseconds,
-    headers: request.Headers.ToString(),
-    body: request.Content != null ? await request.Content.ReadAsStringAsync() : null,
-    responseBody: responseBody // <-- nuevo
-);
+string responseBody = await response.Content.ReadAsStringAsync();
+responseBody = LogFormatter.PrettyPrintXml(responseBody);
