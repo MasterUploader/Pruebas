@@ -1,31 +1,35 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-
-namespace Logging.Helpers
+public static class JsonHelper
 {
-    public static class JsonHelper
+    // Opciones individuales reutilizables
+    public static JsonNamingPolicy CamelCase => JsonNamingPolicy.CamelCase;
+    public static JsonNamingPolicy PascalCase => null; // null = no aplicar naming policy
+    public static JsonIgnoreCondition IgnoreNull => JsonIgnoreCondition.WhenWritingNull;
+    public static JsonIgnoreCondition IncludeAll => JsonIgnoreCondition.Never;
+    public static JsonNumberHandling AllowNumbersAsString => JsonNumberHandling.AllowReadingFromString;
+
+    // Métodos generadores de opciones completas
+    public static JsonSerializerOptions CreateOptions(
+        bool indented = true,
+        JsonNamingPolicy? namingPolicy = null,
+        JsonIgnoreCondition ignoreCondition = JsonIgnoreCondition.Never,
+        JsonNumberHandling? numberHandling = null)
     {
-        public static readonly JsonSerializerOptions PrettyPrint = new JsonSerializerOptions
+        return new JsonSerializerOptions
         {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            NumberHandling = JsonNumberHandling.AllowReadingFromString
-        };
-
-        public static readonly JsonSerializerOptions Compact = new JsonSerializerOptions
-        {
-            WriteIndented = false,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            NumberHandling = JsonNumberHandling.AllowReadingFromString
-        };
-
-        public static readonly JsonSerializerOptions PreserveCase = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = null, // Conserva PascalCase
-            WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.Never
+            WriteIndented = indented,
+            PropertyNamingPolicy = namingPolicy,
+            DefaultIgnoreCondition = ignoreCondition,
+            NumberHandling = numberHandling ?? JsonNumberHandling.Strict
         };
     }
+
+    // Ejemplos predefinidos reutilizables
+    public static JsonSerializerOptions PrettyPrintCamelCase =>
+        CreateOptions(indented: true, namingPolicy: CamelCase, ignoreCondition: IgnoreNull);
+
+    public static JsonSerializerOptions PrettyPrintPascalCase =>
+        CreateOptions(indented: true, namingPolicy: PascalCase, ignoreCondition: IgnoreNull);
+
+    public static JsonSerializerOptions CompactCamelCase =>
+        CreateOptions(indented: false, namingPolicy: CamelCase, ignoreCondition: IgnoreNull);
 }
