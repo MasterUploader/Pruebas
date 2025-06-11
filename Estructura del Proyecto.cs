@@ -1,94 +1,56 @@
-using System;
-using System.Diagnostics;
-using System.Net.Http;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
-using Logging.Helpers;
-using Logging.Formatters;
-
-namespace Logging.Handlers
+/// <summary>
+/// Formatea la información de una solicitud HTTP externa realizada mediante HttpClient.
+/// </summary>
+public static string FormatHttpClientRequest(
+    string traceId,
+    string method,
+    string url,
+    string statusCode,
+    long elapsedMs,
+    string headers,
+    string? body)
 {
-    /// <summary>
-    /// Handler personalizado para interceptar y registrar llamadas HTTP salientes realizadas mediante HttpClient.
-    /// Este log se integrará automáticamente con el archivo de log del Middleware.
-    /// </summary>
-    public class HttpClientLoggingHandler : DelegatingHandler
+    var builder = new StringBuilder();
+
+    builder.AppendLine();
+    builder.AppendLine("========== INICIO HTTP CLIENT ==========");
+    builder.AppendLine($"TraceId       : {traceId}");
+    builder.AppendLine($"Método        : {method}");
+    builder.AppendLine($"URL           : {url}");
+    builder.AppendLine($"Código Status : {statusCode}");
+    builder.AppendLine($"Duración (ms) : {elapsedMs}");
+    builder.AppendLine("Encabezados   :");
+    builder.AppendLine(headers.Trim());
+
+    if (!string.IsNullOrWhiteSpace(body))
     {
-        private readonly IHttpContextAccessor _httpContextAccessor;
-
-        public HttpClientLoggingHandler(IHttpContextAccessor httpContextAccessor)
-        {
-            _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
-        }
-
-        /// <summary>
-        /// Intercepta la solicitud y la respuesta del HttpClient, y guarda su información en HttpContext.Items.
-        /// </summary>
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var stopwatch = Stopwatch.StartNew();
-            var context = _httpContextAccessor.HttpContext;
-
-            // Prevenir ejecución fuera de un contexto HTTP válido (por ejemplo en tareas en background)
-            if (context == null)
-                return await base.SendAsync(request, cancellationToken);
-
-            string traceId = context.TraceIdentifier ?? Guid.NewGuid().ToString();
-
-            try
-            {
-                // Realizar la solicitud
-                HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
-                stopwatch.Stop();
-
-                // Formatear el log
-                string formatted = LogFormatter.FormatHttpClientRequest(
-                    traceId: traceId,
-                    method: request.Method.Method,
-                    url: request.RequestUri.ToString(),
-                    statusCode: ((int)response.StatusCode).ToString(),
-                    elapsedMs: stopwatch.ElapsedMilliseconds,
-                    headers: request.Headers.ToString(),
-                    body: request.Content != null ? await request.Content.ReadAsStringAsync() : null
-                );
-
-                // Guardar en el contexto para que lo consuma el LoggingMiddleware
-                AppendHttpClientLogToContext(context, formatted);
-
-                return response;
-            }
-            catch (Exception ex)
-            {
-                stopwatch.Stop();
-
-                // En caso de excepción, guardar log de error
-                string errorLog = LogFormatter.FormatHttpClientError(
-                    traceId: traceId,
-                    method: request.Method.Method,
-                    url: request.RequestUri.ToString(),
-                    exception: ex
-                );
-
-                AppendHttpClientLogToContext(context, errorLog);
-
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Agrega el log de HttpClient a la lista en HttpContext.Items, para que luego sea procesado por el Middleware.
-        /// </summary>
-        private void AppendHttpClientLogToContext(HttpContext context, string logEntry)
-        {
-            const string key = "HttpClientLogs";
-
-            if (!context.Items.ContainsKey(key))
-                context.Items[key] = new StringBuilder();
-
-            if (context.Items[key] is StringBuilder sb)
-                sb.AppendLine(logEntry);
-        }
+        builder.AppendLine("Cuerpo:");
+        builder.AppendLine(body.Trim());
     }
+
+    builder.AppendLine("=========== FIN HTTP CLIENT ============");
+    return builder.ToString();
+}
+
+/// <summary>
+/// Formatea la información de error ocurrida durante una solicitud con HttpClient.
+/// </summary>
+public static string FormatHttpClientError(
+    string traceId,
+    string method,
+    string url,
+    Exception exception)
+{
+    var builder = new StringBuilder();
+
+    builder.AppendLine();
+    builder.AppendLine("======= ERROR HTTP CLIENT =======");
+    builder.AppendLine($"TraceId     : {traceId}");
+    builder.AppendLine($"Método      : {method}");
+    builder.AppendLine($"URL         : {url}");
+    builder.AppendLine($"Excepción   : {exception.Message}");
+    builder.AppendLine($"StackTrace  : {exception.StackTrace}");
+    builder.AppendLine("=================================");
+
+    return builder.ToString();
 }
