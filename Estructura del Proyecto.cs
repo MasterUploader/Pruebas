@@ -1,28 +1,31 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Logging.Helpers
 {
-    /// <summary>
-    /// Configuraciones comunes de serialización JSON reutilizables.
-    /// </summary>
-    public static class JsonOptions
+    public static class JsonHelper
     {
-        /// <summary>
-        /// Opciones para serializar JSON con indentación (pretty print).
-        /// </summary>
         public static readonly JsonSerializerOptions PrettyPrint = new JsonSerializerOptions
         {
-            WriteIndented = true
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            NumberHandling = JsonNumberHandling.AllowReadingFromString
         };
 
-        /// <summary>
-        /// Opciones compactas (sin espacios ni saltos de línea).
-        /// </summary>
         public static readonly JsonSerializerOptions Compact = new JsonSerializerOptions
         {
-            WriteIndented = false
+            WriteIndented = false,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            NumberHandling = JsonNumberHandling.AllowReadingFromString
         };
 
-        // Puedes agregar otras configuraciones reutilizables aquí si lo deseas
+        public static readonly JsonSerializerOptions PreserveCase = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = null, // Conserva PascalCase
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.Never
+        };
     }
 }
