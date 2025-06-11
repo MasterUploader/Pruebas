@@ -1,46 +1,57 @@
-protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+/// <summary>
+/// Devuelve el cuerpo formateado automáticamente como JSON o XML si es posible.
+/// </summary>
+/// <param name="body">El contenido de la respuesta.</param>
+/// <param name="contentType">El tipo de contenido (Content-Type).</param>
+public static string PrettyPrintAuto(string? body, string? contentType)
 {
-    var stopwatch = Stopwatch.StartNew();
-    var context = _httpContextAccessor.HttpContext;
-    string traceId = context?.TraceIdentifier ?? Guid.NewGuid().ToString();
+    if (string.IsNullOrWhiteSpace(body))
+        return "[Sin contenido]";
+
+    contentType = contentType?.ToLowerInvariant();
 
     try
     {
-        HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
-        stopwatch.Stop();
+        if (contentType != null && contentType.Contains("json"))
+            return PrettyPrintJson(body);
 
-        string responseBody = response.Content != null
-            ? await response.Content.ReadAsStringAsync()
-            : "Sin contenido";
+        if (contentType != null && (contentType.Contains("xml") || contentType.Contains("text/xml")))
+            return PrettyPrintXml(body);
 
-        // 🔹 Formato del log: incluye cuerpo de respuesta bien formateado
-        string formatted = LogFormatter.FormatHttpClientRequestWithResponse(
-            traceId: traceId,
-            method: request.Method.Method,
-            url: request.RequestUri?.ToString() ?? "URI no definida",
-            statusCode: ((int)response.StatusCode).ToString(),
-            elapsedMs: stopwatch.ElapsedMilliseconds,
-            headers: request.Headers.ToString(),
-            requestBody: request.Content != null ? await request.Content.ReadAsStringAsync() : null,
-            responseBody: FormatXmlPretty(responseBody)
-        );
-
-        AppendHttpClientLogToContext(context, formatted);
-
-        return response;
+        return body;
     }
-    catch (Exception ex)
+    catch
     {
-        stopwatch.Stop();
+        return body; // Si el formateo falla, devolver el cuerpo original
+    }
+}
 
-        string errorLog = LogFormatter.FormatHttpClientError(
-            traceId: traceId,
-            method: request.Method.Method,
-            url: request.RequestUri?.ToString() ?? "URI no definida",
-            exception: ex
-        );
+responseBody: LogHelper.PrettyPrintAuto(responseBody, response.Content?.Headers?.ContentType?.MediaType)
 
-        AppendHttpClientLogToContext(context, errorLog);
-        throw;
+
+    /// <summary>
+/// Da formato legible a un string JSON.
+/// Si no es un JSON válido, devuelve el texto original.
+/// </summary>
+/// <param name="json">Contenido en formato JSON.</param>
+/// <returns>JSON formateado con sangrías o el texto original si falla el parseo.</returns>
+public static string PrettyPrintJson(string json)
+{
+    if (string.IsNullOrWhiteSpace(json))
+        return "[Sin contenido JSON]";
+
+    try
+    {
+        using var jdoc = JsonDocument.Parse(json);
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true
+        };
+
+        return JsonSerializer.Serialize(jdoc.RootElement, options);
+    }
+    catch
+    {
+        return json; // Si no es JSON válido, devolverlo sin cambios
     }
 }
