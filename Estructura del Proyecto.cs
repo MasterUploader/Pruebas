@@ -1,99 +1,144 @@
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+using System.Reflection;
 
 namespace RestUtilities.Common.Helpers;
 
 /// <summary>
-/// Clase utilitaria para medir tiempos de ejecución mediante Stopwatch de forma simplificada.
+/// Métodos auxiliares para trabajar con enumeraciones.
 /// </summary>
-public sealed class StopwatchHelper : IDisposable
+public static class EnumHelper
 {
-    private readonly Stopwatch _stopwatch;
-    private readonly Action<string>? _onDisposeMessage;
-    private readonly string? _label;
+    /// <summary>
+    /// Obtiene todos los valores definidos en una enumeración.
+    /// </summary>
+    public static IEnumerable<TEnum> GetValues<TEnum>() where TEnum : Enum
+        => Enum.GetValues(typeof(TEnum)).Cast<TEnum>();
 
     /// <summary>
-    /// Crea una nueva instancia y empieza la medición automáticamente.
+    /// Verifica si un valor (entero o cadena) está definido en la enumeración.
     /// </summary>
-    private StopwatchHelper(string? label = null, Action<string>? onDisposeMessage = null)
+    public static bool IsDefined<TEnum>(object value) where TEnum : Enum
+        => Enum.IsDefined(typeof(TEnum), value);
+
+    /// <summary>
+    /// Convierte una cadena al valor del enum (lanzando excepción si falla).
+    /// </summary>
+    public static TEnum Parse<TEnum>(string value) where TEnum : struct, Enum
+        => Enum.Parse<TEnum>(value, ignoreCase: true);
+
+    /// <summary>
+    /// Intenta convertir una cadena al valor del enum, devolviendo false si no se puede.
+    /// </summary>
+    public static bool TryParse<TEnum>(string? value, out TEnum result) where TEnum : struct, Enum
+        => Enum.TryParse(value, ignoreCase: true, out result);
+
+    /// <summary>
+    /// Obtiene la descripción asociada a un valor de enumeración.
+    /// </summary>
+    public static string GetDescription(Enum value)
     {
-        _label = label;
-        _onDisposeMessage = onDisposeMessage;
-        _stopwatch = Stopwatch.StartNew();
+        var field = value.GetType().GetField(value.ToString());
+        if (field == null) return value.ToString();
+
+        var display = field.GetCustomAttribute<DisplayAttribute>();
+        if (!string.IsNullOrWhiteSpace(display?.Name))
+            return display.Name!;
+
+        var description = field.GetCustomAttribute<DescriptionAttribute>();
+        if (!string.IsNullOrWhiteSpace(description?.Description))
+            return description.Description!;
+
+        return value.ToString();
     }
 
     /// <summary>
-    /// Inicia un nuevo cronómetro.
+    /// Devuelve un diccionario con los valores del enum como int y sus descripciones.
     /// </summary>
-    public static StopwatchHelper StartNew(string? label = null, Action<string>? onDisposeMessage = null)
-        => new(label, onDisposeMessage);
+    public static Dictionary<int, string> GetValueDescriptionMap<TEnum>() where TEnum : Enum
+        => GetValues<TEnum>().ToDictionary(
+            e => Convert.ToInt32(e),
+            e => GetDescription(e)
+        );
 
     /// <summary>
-    /// Devuelve el tiempo transcurrido como TimeSpan.
+    /// Devuelve un diccionario con los nombres del enum como string y sus descripciones.
     /// </summary>
-    public TimeSpan Elapsed => _stopwatch.Elapsed;
+    public static Dictionary<string, string> GetNameDescriptionMap<TEnum>() where TEnum : Enum
+        => GetValues<TEnum>().ToDictionary(
+            e => e.ToString(),
+            e => GetDescription(e)
+        );
 
     /// <summary>
-    /// Devuelve el tiempo transcurrido en milisegundos.
+    /// Obtiene el atributo Display completo si está presente en el valor del enum.
     /// </summary>
-    public long ElapsedMilliseconds => _stopwatch.ElapsedMilliseconds;
-
-    /// <summary>
-    /// Devuelve el tiempo transcurrido en segundos como número decimal.
-    /// </summary>
-    public double ElapsedSeconds => _stopwatch.Elapsed.TotalSeconds;
-
-    /// <summary>
-    /// Reinicia el cronómetro.
-    /// </summary>
-    public void Restart() => _stopwatch.Restart();
-
-    /// <summary>
-    /// Detiene el cronómetro.
-    /// </summary>
-    public void Stop() => _stopwatch.Stop();
-
-    /// <summary>
-    /// Devuelve una representación legible del tiempo transcurrido, por ejemplo: "1.234 segundos".
-    /// </summary>
-    public string ToReadable()
-        => $"{Elapsed.TotalSeconds:F3} segundos";
-
-    /// <summary>
-    /// Devuelve una cadena formateada con una etiqueta personalizada.
-    /// </summary>
-    public string ToLogFormat()
-        => string.IsNullOrWhiteSpace(_label)
-            ? $"Duración: {ToReadable()}"
-            : $"{_label} tomó {ToReadable()}";
-
-    /// <summary>
-    /// Detiene el cronómetro y devuelve el tiempo legible.
-    /// </summary>
-    public string StopAndGetReadable()
+    public static DisplayAttribute? GetDisplayAttribute(Enum value)
     {
-        Stop();
-        return ToReadable();
+        var field = value.GetType().GetField(value.ToString());
+        return field?.GetCustomAttribute<DisplayAttribute>();
     }
 
     /// <summary>
-    /// Detiene el cronómetro y devuelve la cadena de log con formato.
+    /// Obtiene el atributo Description si está presente en el valor del enum.
     /// </summary>
-    public string StopAndGetLog()
+    public static DescriptionAttribute? GetDescriptionAttribute(Enum value)
     {
-        Stop();
-        return ToLogFormat();
+        var field = value.GetType().GetField(value.ToString());
+        return field?.GetCustomAttribute<DescriptionAttribute>();
     }
 
     /// <summary>
-    /// Detiene y ejecuta la acción con el mensaje de log si se proporcionó.
+    /// Devuelve una lista de objetos { Value, Label } útil para listas desplegables.
     /// </summary>
-    public void Dispose()
+    public static List<EnumItem> ToList<TEnum>() where TEnum : Enum
+        => GetValues<TEnum>()
+            .Select(e => new EnumItem
+            {
+                Value = Convert.ToInt32(e),
+                Label = GetDescription(e)
+            })
+            .ToList();
+
+    /// <summary>
+    /// Devuelve una lista de descripciones separadas de un enum con flags.
+    /// </summary>
+    public static List<string> GetFlagsDescriptions(Enum value)
     {
-        Stop();
-        if (_onDisposeMessage != null)
-        {
-            _onDisposeMessage(ToLogFormat());
-        }
+        return Enum.GetValues(value.GetType())
+            .Cast<Enum>()
+            .Where(flag => value.HasFlag(flag) && Convert.ToInt32(flag) != 0)
+            .Select(GetDescription)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Devuelve una lista de valores numéricos individuales para un enum con flags.
+    /// </summary>
+    public static List<int> GetFlagsValues(Enum value)
+    {
+        return Enum.GetValues(value.GetType())
+            .Cast<Enum>()
+            .Where(flag => value.HasFlag(flag) && Convert.ToInt32(flag) != 0)
+            .Select(flag => Convert.ToInt32(flag))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Devuelve si un enum tiene definido el atributo [Flags].
+    /// </summary>
+    public static bool IsFlagsEnum<TEnum>() where TEnum : Enum
+        => typeof(TEnum).GetCustomAttribute<FlagsAttribute>() != null;
+
+    /// <summary>
+    /// Modelo auxiliar para representar elementos visuales.
+    /// </summary>
+    public class EnumItem
+    {
+        public int Value { get; set; }
+        public string Label { get; set; } = string.Empty;
     }
 }
