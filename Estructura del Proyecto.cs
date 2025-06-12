@@ -1,76 +1,99 @@
 using System;
-using System.Globalization;
+using System.Diagnostics;
 
 namespace RestUtilities.Common.Helpers;
 
 /// <summary>
-/// Métodos auxiliares para trabajar con TimeSpan (duraciones de tiempo).
+/// Clase utilitaria para medir tiempos de ejecución mediante Stopwatch de forma simplificada.
 /// </summary>
-public static class TimeSpanHelper
+public sealed class StopwatchHelper : IDisposable
 {
+    private readonly Stopwatch _stopwatch;
+    private readonly Action<string>? _onDisposeMessage;
+    private readonly string? _label;
+
     /// <summary>
-    /// Convierte un TimeSpan a un formato legible, por ejemplo: "1 hora, 2 minutos, 3 segundos".
+    /// Crea una nueva instancia y empieza la medición automáticamente.
     /// </summary>
-    public static string ToReadableString(TimeSpan span)
+    private StopwatchHelper(string? label = null, Action<string>? onDisposeMessage = null)
     {
-        if (span == TimeSpan.Zero)
-            return "0 segundos";
-
-        var parts = new List<string>();
-        if (span.Days > 0) parts.Add($"{span.Days} día{(span.Days > 1 ? "s" : "")}");
-        if (span.Hours > 0) parts.Add($"{span.Hours} hora{(span.Hours > 1 ? "s" : "")}");
-        if (span.Minutes > 0) parts.Add($"{span.Minutes} minuto{(span.Minutes > 1 ? "s" : "")}");
-        if (span.Seconds > 0) parts.Add($"{span.Seconds} segundo{(span.Seconds > 1 ? "s" : "")}");
-        if (span.Milliseconds > 0) parts.Add($"{span.Milliseconds} ms");
-
-        return string.Join(", ", parts);
+        _label = label;
+        _onDisposeMessage = onDisposeMessage;
+        _stopwatch = Stopwatch.StartNew();
     }
 
     /// <summary>
-    /// Devuelve el TimeSpan resultante entre dos fechas.
+    /// Inicia un nuevo cronómetro.
     /// </summary>
-    public static TimeSpan GetDuration(DateTime start, DateTime end)
-        => end - start;
+    public static StopwatchHelper StartNew(string? label = null, Action<string>? onDisposeMessage = null)
+        => new(label, onDisposeMessage);
 
     /// <summary>
-    /// Convierte segundos a TimeSpan.
+    /// Devuelve el tiempo transcurrido como TimeSpan.
     /// </summary>
-    public static TimeSpan FromSeconds(double seconds)
-        => TimeSpan.FromSeconds(seconds);
+    public TimeSpan Elapsed => _stopwatch.Elapsed;
 
     /// <summary>
-    /// Convierte minutos a TimeSpan.
+    /// Devuelve el tiempo transcurrido en milisegundos.
     /// </summary>
-    public static TimeSpan FromMinutes(double minutes)
-        => TimeSpan.FromMinutes(minutes);
+    public long ElapsedMilliseconds => _stopwatch.ElapsedMilliseconds;
 
     /// <summary>
-    /// Devuelve la cantidad total de milisegundos de un TimeSpan.
+    /// Devuelve el tiempo transcurrido en segundos como número decimal.
     /// </summary>
-    public static double ToTotalMilliseconds(TimeSpan span)
-        => span.TotalMilliseconds;
+    public double ElapsedSeconds => _stopwatch.Elapsed.TotalSeconds;
 
     /// <summary>
-    /// Devuelve la cantidad total de segundos de un TimeSpan.
+    /// Reinicia el cronómetro.
     /// </summary>
-    public static double ToTotalSeconds(TimeSpan span)
-        => span.TotalSeconds;
+    public void Restart() => _stopwatch.Restart();
 
     /// <summary>
-    /// Indica si un TimeSpan es mayor que otro.
+    /// Detiene el cronómetro.
     /// </summary>
-    public static bool IsGreaterThan(TimeSpan a, TimeSpan b)
-        => a > b;
+    public void Stop() => _stopwatch.Stop();
 
     /// <summary>
-    /// Indica si un TimeSpan está dentro de un rango específico.
+    /// Devuelve una representación legible del tiempo transcurrido, por ejemplo: "1.234 segundos".
     /// </summary>
-    public static bool IsBetween(TimeSpan value, TimeSpan min, TimeSpan max)
-        => value >= min && value <= max;
+    public string ToReadable()
+        => $"{Elapsed.TotalSeconds:F3} segundos";
 
     /// <summary>
-    /// Devuelve una cadena con formato corto: "hh:mm:ss.fff"
+    /// Devuelve una cadena formateada con una etiqueta personalizada.
     /// </summary>
-    public static string ToShortFormat(TimeSpan span)
-        => span.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture);
+    public string ToLogFormat()
+        => string.IsNullOrWhiteSpace(_label)
+            ? $"Duración: {ToReadable()}"
+            : $"{_label} tomó {ToReadable()}";
+
+    /// <summary>
+    /// Detiene el cronómetro y devuelve el tiempo legible.
+    /// </summary>
+    public string StopAndGetReadable()
+    {
+        Stop();
+        return ToReadable();
+    }
+
+    /// <summary>
+    /// Detiene el cronómetro y devuelve la cadena de log con formato.
+    /// </summary>
+    public string StopAndGetLog()
+    {
+        Stop();
+        return ToLogFormat();
+    }
+
+    /// <summary>
+    /// Detiene y ejecuta la acción con el mensaje de log si se proporcionó.
+    /// </summary>
+    public void Dispose()
+    {
+        Stop();
+        if (_onDisposeMessage != null)
+        {
+            _onDisposeMessage(ToLogFormat());
+        }
+    }
 }
