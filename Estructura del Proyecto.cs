@@ -4,94 +4,73 @@ using System.Globalization;
 namespace RestUtilities.Common.Helpers;
 
 /// <summary>
-/// Helper para operaciones comunes con fechas y horas.
-/// Permite conversión, formateo y validación de DateTime y DateTimeOffset.
+/// Métodos auxiliares para trabajar con TimeSpan (duraciones de tiempo).
 /// </summary>
-public static class DateTimeHelper
+public static class TimeSpanHelper
 {
     /// <summary>
-    /// Devuelve la fecha y hora actual en UTC.
+    /// Convierte un TimeSpan a un formato legible, por ejemplo: "1 hora, 2 minutos, 3 segundos".
     /// </summary>
-    public static DateTime UtcNow => DateTime.UtcNow;
-
-    /// <summary>
-    /// Devuelve la fecha y hora actual en la zona horaria local.
-    /// </summary>
-    public static DateTime Now => DateTime.Now;
-
-    /// <summary>
-    /// Convierte una fecha UTC a la hora local del sistema.
-    /// </summary>
-    public static DateTime ToLocalTime(DateTime utcDateTime)
+    public static string ToReadableString(TimeSpan span)
     {
-        return utcDateTime.ToLocalTime();
+        if (span == TimeSpan.Zero)
+            return "0 segundos";
+
+        var parts = new List<string>();
+        if (span.Days > 0) parts.Add($"{span.Days} día{(span.Days > 1 ? "s" : "")}");
+        if (span.Hours > 0) parts.Add($"{span.Hours} hora{(span.Hours > 1 ? "s" : "")}");
+        if (span.Minutes > 0) parts.Add($"{span.Minutes} minuto{(span.Minutes > 1 ? "s" : "")}");
+        if (span.Seconds > 0) parts.Add($"{span.Seconds} segundo{(span.Seconds > 1 ? "s" : "")}");
+        if (span.Milliseconds > 0) parts.Add($"{span.Milliseconds} ms");
+
+        return string.Join(", ", parts);
     }
 
     /// <summary>
-    /// Convierte una fecha local a UTC.
+    /// Devuelve el TimeSpan resultante entre dos fechas.
     /// </summary>
-    public static DateTime ToUtc(DateTime localDateTime)
-    {
-        return localDateTime.ToUniversalTime();
-    }
+    public static TimeSpan GetDuration(DateTime start, DateTime end)
+        => end - start;
 
     /// <summary>
-    /// Intenta convertir un string a DateTime. Devuelve null si falla.
+    /// Convierte segundos a TimeSpan.
     /// </summary>
-    public static DateTime? TryParse(string? input, string? format = null, CultureInfo? culture = null)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-            return null;
-
-        culture ??= CultureInfo.InvariantCulture;
-
-        if (format == null)
-        {
-            return DateTime.TryParse(input, culture, DateTimeStyles.None, out var result) ? result : null;
-        }
-        else
-        {
-            return DateTime.TryParseExact(input, format, culture, DateTimeStyles.None, out var result) ? result : null;
-        }
-    }
+    public static TimeSpan FromSeconds(double seconds)
+        => TimeSpan.FromSeconds(seconds);
 
     /// <summary>
-    /// Formatea un DateTime a una cadena con formato ISO 8601 (UTC).
+    /// Convierte minutos a TimeSpan.
     /// </summary>
-    public static string ToIsoUtc(DateTime dateTime)
-    {
-        return dateTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
-    }
+    public static TimeSpan FromMinutes(double minutes)
+        => TimeSpan.FromMinutes(minutes);
 
     /// <summary>
-    /// Formatea un DateTime con un formato personalizado.
+    /// Devuelve la cantidad total de milisegundos de un TimeSpan.
     /// </summary>
-    public static string Format(DateTime dateTime, string format, CultureInfo? culture = null)
-    {
-        return dateTime.ToString(format, culture ?? CultureInfo.InvariantCulture);
-    }
+    public static double ToTotalMilliseconds(TimeSpan span)
+        => span.TotalMilliseconds;
 
     /// <summary>
-    /// Convierte un timestamp UNIX (segundos desde 1970) a DateTime (UTC).
+    /// Devuelve la cantidad total de segundos de un TimeSpan.
     /// </summary>
-    public static DateTime FromUnixTimestamp(long timestamp)
-    {
-        return DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime;
-    }
+    public static double ToTotalSeconds(TimeSpan span)
+        => span.TotalSeconds;
 
     /// <summary>
-    /// Convierte un DateTime (UTC o local) a timestamp UNIX (segundos desde 1970).
+    /// Indica si un TimeSpan es mayor que otro.
     /// </summary>
-    public static long ToUnixTimestamp(DateTime dateTime)
-    {
-        return new DateTimeOffset(dateTime.ToUniversalTime()).ToUnixTimeSeconds();
-    }
+    public static bool IsGreaterThan(TimeSpan a, TimeSpan b)
+        => a > b;
 
     /// <summary>
-    /// Devuelve true si el string es una fecha válida en el formato especificado.
+    /// Indica si un TimeSpan está dentro de un rango específico.
     /// </summary>
-    public static bool IsValidDate(string input, string? format = null, CultureInfo? culture = null)
-    {
-        return TryParse(input, format, culture).HasValue;
-    }
+    public static bool IsBetween(TimeSpan value, TimeSpan min, TimeSpan max)
+        => value >= min && value <= max;
+
+    /// <summary>
+    /// Devuelve una cadena con formato corto: "hh:mm:ss.fff"
+    /// </summary>
+    public static string ToShortFormat(TimeSpan span)
+        => span.ToString(@"hh\:mm\:ss\.fff", CultureInfo.InvariantCulture);
 }
