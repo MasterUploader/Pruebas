@@ -1,20 +1,14 @@
-RestUtilities.Common/
-│
-├── RestUtilities.Common.csproj
-├── Helpers/
-│   ├── JsonHelper.cs
-│   ├── XmlHelper.cs
-│   ├── DateTimeHelper.cs
-│   ├── StringHelper.cs
-│   ├── EnumHelper.cs
-│   ├── ValidationHelper.cs
-│   ├── HttpHelper.cs
-│   ├── EnvironmentHelper.cs
-│   ├── RetryHelper.cs
-│   ├── RegexPatterns.cs
-│
-├── Constants/
-│   ├── CommonConstants.cs
-│
-└── Models/
-    ├── ApiResponse.cs
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="System.Text.Json" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
