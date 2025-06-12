@@ -1,77 +1,97 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using System;
+using System.Globalization;
 
 namespace RestUtilities.Common.Helpers;
 
 /// <summary>
-/// Helper estático para serialización, deserialización y formateo de JSON.
-/// Permite configuraciones reutilizables como pretty print, camelCase, y opciones personalizadas.
+/// Helper para operaciones comunes con fechas y horas.
+/// Permite conversión, formateo y validación de DateTime y DateTimeOffset.
 /// </summary>
-public static class JsonHelper
+public static class DateTimeHelper
 {
     /// <summary>
-    /// Serializa un objeto a una cadena JSON.
+    /// Devuelve la fecha y hora actual en UTC.
     /// </summary>
-    /// <param name="obj">Objeto a serializar.</param>
-    /// <param name="prettyPrint">Indica si debe aplicarse formato indentado (pretty print).</param>
-    /// <param name="useCamelCase">Indica si se debe usar camelCase en los nombres de propiedad.</param>
-    /// <param name="ignoreNull">Indica si se deben ignorar propiedades nulas.</param>
-    public static string ToJson(
-        object obj,
-        bool prettyPrint = false,
-        bool useCamelCase = true,
-        bool ignoreNull = true)
+    public static DateTime UtcNow => DateTime.UtcNow;
+
+    /// <summary>
+    /// Devuelve la fecha y hora actual en la zona horaria local.
+    /// </summary>
+    public static DateTime Now => DateTime.Now;
+
+    /// <summary>
+    /// Convierte una fecha UTC a la hora local del sistema.
+    /// </summary>
+    public static DateTime ToLocalTime(DateTime utcDateTime)
     {
-        var options = new JsonSerializerOptions
+        return utcDateTime.ToLocalTime();
+    }
+
+    /// <summary>
+    /// Convierte una fecha local a UTC.
+    /// </summary>
+    public static DateTime ToUtc(DateTime localDateTime)
+    {
+        return localDateTime.ToUniversalTime();
+    }
+
+    /// <summary>
+    /// Intenta convertir un string a DateTime. Devuelve null si falla.
+    /// </summary>
+    public static DateTime? TryParse(string? input, string? format = null, CultureInfo? culture = null)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return null;
+
+        culture ??= CultureInfo.InvariantCulture;
+
+        if (format == null)
         {
-            WriteIndented = prettyPrint,
-            PropertyNamingPolicy = useCamelCase ? JsonNamingPolicy.CamelCase : null,
-            DefaultIgnoreCondition = ignoreNull ? JsonIgnoreCondition.WhenWritingNull : JsonIgnoreCondition.Never
-        };
-
-        return JsonSerializer.Serialize(obj, options);
-    }
-
-    /// <summary>
-    /// Deserializa una cadena JSON a un objeto del tipo especificado.
-    /// </summary>
-    /// <typeparam name="T">Tipo destino.</typeparam>
-    /// <param name="json">Cadena JSON.</param>
-    /// <param name="useCamelCase">Indica si se espera camelCase en el JSON.</param>
-    public static T? FromJson<T>(string json, bool useCamelCase = true)
-    {
-        var options = new JsonSerializerOptions
+            return DateTime.TryParse(input, culture, DateTimeStyles.None, out var result) ? result : null;
+        }
+        else
         {
-            PropertyNamingPolicy = useCamelCase ? JsonNamingPolicy.CamelCase : null
-        };
-
-        return JsonSerializer.Deserialize<T>(json, options);
+            return DateTime.TryParseExact(input, format, culture, DateTimeStyles.None, out var result) ? result : null;
+        }
     }
 
     /// <summary>
-    /// Pretty print para una cadena JSON, con opciones personalizadas.
+    /// Formatea un DateTime a una cadena con formato ISO 8601 (UTC).
     /// </summary>
-    /// <param name="json">Cadena JSON de entrada.</param>
-    /// <param name="options">Opciones personalizadas para la salida.</param>
-    public static string PrettyPrint(string json, JsonSerializerOptions? options = null)
+    public static string ToIsoUtc(DateTime dateTime)
     {
-        using var doc = JsonDocument.Parse(json);
-        return JsonSerializer.Serialize(doc.RootElement, options ?? new JsonSerializerOptions { WriteIndented = true });
+        return dateTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
     }
 
     /// <summary>
-    /// Serializa un objeto con opciones personalizadas.
+    /// Formatea un DateTime con un formato personalizado.
     /// </summary>
-    public static string Serialize(object obj, JsonSerializerOptions? options = null)
+    public static string Format(DateTime dateTime, string format, CultureInfo? culture = null)
     {
-        return JsonSerializer.Serialize(obj, options ?? new JsonSerializerOptions());
+        return dateTime.ToString(format, culture ?? CultureInfo.InvariantCulture);
     }
 
     /// <summary>
-    /// Deserializa una cadena JSON con opciones personalizadas.
+    /// Convierte un timestamp UNIX (segundos desde 1970) a DateTime (UTC).
     /// </summary>
-    public static T? Deserialize<T>(string json, JsonSerializerOptions? options = null)
+    public static DateTime FromUnixTimestamp(long timestamp)
     {
-        return JsonSerializer.Deserialize<T>(json, options ?? new JsonSerializerOptions());
+        return DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime;
+    }
+
+    /// <summary>
+    /// Convierte un DateTime (UTC o local) a timestamp UNIX (segundos desde 1970).
+    /// </summary>
+    public static long ToUnixTimestamp(DateTime dateTime)
+    {
+        return new DateTimeOffset(dateTime.ToUniversalTime()).ToUnixTimeSeconds();
+    }
+
+    /// <summary>
+    /// Devuelve true si el string es una fecha válida en el formato especificado.
+    /// </summary>
+    public static bool IsValidDate(string input, string? format = null, CultureInfo? culture = null)
+    {
+        return TryParse(input, format, culture).HasValue;
     }
 }
