@@ -1,17 +1,21 @@
 using System;
+using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
 using System.IO;
 using System.Security.Cryptography;
-using System.IdentityModel.Tokens.Jwt;
 using Microsoft.IdentityModel.Tokens;
 
 public class JwtValidator
 {
-    public static void DecodificarYValidarToken(string token, string publicKeyPath)
+    public static JwtValidationResult ValidarTokenRS256(string token, string publicKeyPath)
     {
+        var result = new JwtValidationResult();
+
         if (!File.Exists(publicKeyPath))
         {
-            Console.WriteLine("❌ Archivo de clave pública no encontrado.");
-            return;
+            result.Success = false;
+            result.ErrorMessage = "Archivo de clave pública no encontrado.";
+            return result;
         }
 
         string publicKeyPem = File.ReadAllText(publicKeyPath);
@@ -21,45 +25,75 @@ public class JwtValidator
         {
             rsa.ImportFromPem(publicKeyPem.ToCharArray());
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            Console.WriteLine($"❌ Error al cargar la clave: {e.Message}");
-            return;
+            result.Success = false;
+            result.ErrorMessage = $"Error al cargar la clave pública: {ex.Message}";
+            return result;
         }
 
-        var rsaKey = new RsaSecurityKey(rsa);
         var handler = new JwtSecurityTokenHandler();
-
         var parameters = new TokenValidationParameters
         {
             ValidateIssuer = false,
             ValidateAudience = false,
-            ValidateLifetime = false, // Ignora expiración si solo quieres validar firma
+            ValidateLifetime = false, // para validación de firma solamente
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = rsaKey
+            IssuerSigningKey = new RsaSecurityKey(rsa)
         };
 
         try
         {
             var principal = handler.ValidateToken(token, parameters, out SecurityToken validatedToken);
-            var jwtToken = (JwtSecurityToken)validatedToken;
 
-            Console.WriteLine("✅ Firma válida.");
-            Console.WriteLine("\n🔎 HEADER:");
-            foreach (var h in jwtToken.Header)
-                Console.WriteLine($"  {h.Key}: {h.Value}");
+            var jwtToken = validatedToken as JwtSecurityToken;
+            if (jwtToken == null || jwtToken.Header.Alg != SecurityAlgorithms.RsaSha256)
+            {
+                result.Success = false;
+                result.ErrorMessage = "El token no es RS256.";
+                return result;
+            }
 
-            Console.WriteLine("\n📦 PAYLOAD:");
-            foreach (var c in jwtToken.Claims)
-                Console.WriteLine($"  {c.Type}: {c.Value}");
+            result.Success = true;
+            result.Header = new Dictionary<string, object>(jwtToken.Header);
+            result.Claims = new Dictionary<string, string>();
+            foreach (var claim in jwtToken.Claims)
+            {
+                result.Claims[claim.Type] = claim.Value;
+            }
+
+            return result;
         }
         catch (SecurityTokenInvalidSignatureException)
         {
-            Console.WriteLine("❌ Firma inválida. La clave pública no corresponde.");
+            result.Success = false;
+            result.ErrorMessage = "Firma inválida: la clave pública no corresponde al token.";
+            return result;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"⚠️ Error: {ex.Message}");
+            result.Success = false;
+            result.ErrorMessage = $"Error al validar el token: {ex.Message}";
+            return result;
         }
     }
+}
+
+
+string token = "tu.jwt.aqui";
+string keyPath = "./keys/jwtRSA256.pem.pub";
+
+var resultado = JwtValidator.ValidarTokenRS256(token, keyPath);
+
+if (resultado.Success)
+{
+    Console.WriteLine("✅ Firma válida. Claims:");
+    foreach (var kv in resultado.Claims)
+    {
+        Console.WriteLine($"  {kv.Key}: {kv.Value}");
+    }
+}
+else
+{
+    Console.WriteLine($"❌ Error: {resultado.ErrorMessage}");
 }
