@@ -1,116 +1,105 @@
-using Connections.Managers;
-using Logging.Abstractions;
-using System.Data;
-using System.Data.Common;
-using System.Data.OleDb;
+<Project Sdk="Microsoft.NET.Sdk">
 
-namespace Connections.Providers.Database;
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<!-- Metadatos para NuGet -->
+		<PackageId>RestUtilities.Connections</PackageId>
+		<Version>1.0.1</Version>
+		<Authors>Brayan René Banegas Mejía</Authors>
+		<Description>Biblioteca para gestionar conexiones a bases de datos, servicios externos y mensajería en .NET 8.</Description>
+		<PackageTags>Conexiones;As400;SQL</PackageTags>
+		<!-- Generar el paquete NuGet automáticamente al compilar -->
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+		<PlatformTarget>x64</PlatformTarget>
+		<IncludeBuildOutput>true</IncludeBuildOutput>
+		<Platforms>x64</Platforms>
+		<RemoveUnnecessaryImports>true</RemoveUnnecessaryImports>
+	</PropertyGroup>
 
-/// <summary>
-/// Proveedor de conexión para AS400 usando únicamente OleDbCommand.
-/// No utiliza DbContext ni Entity Framework.
-/// </summary>
-public class As400ConnectionProvider : LoggingDatabaseConnection
-{
-    private readonly OleDbConnection _oleDbConnection;
+  <ItemGroup>
+    <PackageReference Include="FluentFTP" Version="52.1.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.6" />
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.8.0" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.41" />
+    <PackageReference Include="System.Data.OleDb" Version="8.0.1" />
+  </ItemGroup>
 
-    /// <summary>
-    /// Inicializa una nueva instancia de <see cref="As400ConnectionProvider"/>.
-    /// </summary>
-    /// <param name="connectionString">Cadena de conexión a AS400.</param>
-    /// <param name="loggingService">Servicio de logging para registrar consultas.</param>
-    public As400ConnectionProvider(string connectionString, ILoggingService loggingService)
-        : base(new OleDbConnection(connectionString), loggingService)
-    {
-        _oleDbConnection = new OleDbConnection(connectionString);
-    }
-
-    /// <summary>
-    /// Abre la conexión OleDb si aún no está abierta.
-    /// </summary>
-    public new void Open()
-    {
-        if (_oleDbConnection.State != ConnectionState.Open)
-            _oleDbConnection.Open();
-    }
-
-    /// <summary>
-    /// Cierra y limpia la conexión si está activa.
-    /// </summary>
-    public new void Close()
-    {
-        if (_oleDbConnection.State == ConnectionState.Open)
-            _oleDbConnection.Close();
-    }
-
-    /// <summary>
-    /// Verifica si la conexión está actualmente abierta y operativa.
-    /// </summary>
-    /// <returns>True si la conexión está abierta, false en caso contrario.</returns>
-    public new bool IsConnected()
-    {
-        return _oleDbConnection.State == ConnectionState.Open;
-    }
-
-    /// <summary>
-    /// Retorna un comando OleDb envuelto en logging para ejecutar SQL directamente.
-    /// </summary>
-    /// <returns>Instancia de <see cref="DbCommand"/> con soporte de logging.</returns>
-    public  DbCommand GetDbCommand()
-    {
-        Open();
-        return _oleDbConnection.CreateCommand();
-    }
-
-    /// <summary>
-    /// Libera la conexión OleDb.
-    /// </summary>
-    public new void Dispose()
-    {
-        base.Dispose();
-        _oleDbConnection.Dispose();
-    }
-}
+	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
 
 
+	<ItemGroup>
+		<!-- Helpers-->
+		<Compile Include="Helpers\ConnectionManagerHelper.cs" />
+		<Compile Include="Helpers\EncryptionHelper.cs" />
+		
+		
+		<!-- Interfaces -->
+		<Compile Include="Interfaces\IExternalServiceConnection.cs" />
+		<Compile Include="Interfaces\IConnectionManager.cs" />
+		<Compile Include="Interfaces\IWebSocketConnection.cs" />
+		<Compile Include="Interfaces\IGrpcConnection.cs" />
+		<Compile Include="Interfaces\IFtpConnection.cs" />
+		<Compile Include="Interfaces\IServiceConnectionFactory.cs" />
+		<Compile Include="Interfaces\IMessageQueueConnection.cs" />
+		<Compile Include="Interfaces\ISoapServiceConnection.cs" />
+		<Compile Include="Managers\LoggingDatabaseConnection.cs" />
+
+		<!-- Providers/Database -->
+		<Compile Include="Providers\Database\AS400ConnectionProvider.cs" />
+		<Compile Include="Providers\Database\ExternalDbContextConnectionProvider.cs" />
+		<Compile Include="Providers\Database\MSSQLConnectionProvider.cs" />
+		<Compile Include="Providers\Database\OracleConnectionProvider.cs" />
+		<Compile Include="Providers\Database\MySQLConnectionProvider.cs" />
+		<Compile Include="Providers\Database\PostgreSQLConnectionProvider.cs" />
+		<Compile Include="Providers\Database\MongoDBConnectionProvider.cs" />
+		<Compile Include="Providers\Database\RedisConnectionProvider.cs" />
+		<Compile Include="Providers\Database\DatabaseConnectionFactory.cs" />
+
+		<!-- Providers/Services -->
+		<Compile Include="Providers\Services\RestServiceClient.cs" />
+		<Compile Include="Providers\Services\SoapServiceClient.cs" />
+		<Compile Include="Providers\Services\WebSocketConnectionProvider.cs" />
+		<Compile Include="Providers\Services\GrpcConnectionProvider.cs" />
+		<Compile Include="Providers\Services\RabbitMQConnectionProvider.cs" />
+		<Compile Include="Providers\Services\FtpConnectionProvider.cs" />
+		<Compile Include="Providers\Services\ServiceConnectionFactory.cs" />
+		
+		<!--Logging-->
+
+		<!-- MAnagers -->
+		<Compile Include="Managers\ConnectionManager.cs" />
+		<Compile Include="Managers\DatabaseManager.cs" />
+		<Compile Include="Managers\ServiceManager.cs" />
+		<Compile Include="Managers\WebSocketManager.cs" />
+		<Compile Include="Managers\GrpcManager.cs" />
+
+		<!-- Models -->
+		<Compile Include="Models\ConnectionInfo.cs" />
+		<Compile Include="Models\DatabaseSettings.cs" />
+		<Compile Include="Models\ServiceSettings.cs" />
+		<Compile Include="Models\WebSocketSettings.cs" />
+		<Compile Include="Models\GrpcSettings.cs" />
+		<Compile Include="Models\RedisSettings.cs" />
+
+		<!-- Services -->
+		<Compile Include="Services\ConnectionSettings.cs" />
+
+	</ItemGroup>
 
 
+	<ItemGroup>
+	  <ProjectReference Include="..\Connections.Abstractions\Connections.Abstractions.csproj" />
+	  <ProjectReference Include="..\Logging\Logging.csproj" />
+	</ItemGroup>
 
-using Connections.Interfaces;
 
-namespace Connections.Providers.Database;
-
-/// <summary>
-/// Fábrica para la creación de conexiones a bases de datos según el tipo configurado.
-/// </summary>
-public class DatabaseConnectionFactory
-{
-    private readonly Dictionary<string, Func<string, IDatabaseConnection>> _providers;
-
-    public DatabaseConnectionFactory()
-    {
-        _providers = new Dictionary<string, Func<string, IDatabaseConnection>>
-        {
-            { "AS400", connectionString => new AS400ConnectionProvider(connectionString) }
-            //{ "MSSQL", connectionString => new MSSQLConnectionProvider(connectionString) },
-            //{ "Oracle", connectionString => new OracleConnectionProvider(connectionString) }
-            // Se pueden agregar más motores de BD aquí
-        };
-    }
-
-    /// <summary>
-    /// Crea una conexión a la base de datos según el tipo configurado.
-    /// </summary>
-    /// <param name="dbType">Tipo de base de datos (ejemplo: "MSSQL", "AS400").</param>
-    /// <param name="connectionString">Cadena de conexión.</param>
-    /// <returns>Instancia de `IDatabaseConnection`.</returns>
-    public IDatabaseConnection CreateConnection(string dbType, string connectionString)
-    {
-        if (_providers.TryGetValue(dbType, out var provider))
-        {
-            return provider(connectionString);
-        }
-
-        throw new ArgumentException($"No se encontró un proveedor para el tipo de base de datos: {dbType}");
-    }
-}
+</Project>
