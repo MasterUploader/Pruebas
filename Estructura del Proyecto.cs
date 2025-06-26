@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using System;
 using System.Data.Common;
 using Connections.Interfaces;
 using Logging.Commands;
@@ -8,7 +9,7 @@ namespace Logging.Decorators
 {
     /// <summary>
     /// Decorador que intercepta las llamadas a la conexión de base de datos para registrar automáticamente los comandos ejecutados.
-    /// Compatible con todas las conexiones que implementen <see cref="IDatabaseConnection"/>.
+    /// Este decorador permite agregar funcionalidades de logging sin modificar la implementación original de la conexión.
     /// </summary>
     public class LoggingDatabaseConnectionDecorator : IDatabaseConnection
     {
@@ -17,12 +18,12 @@ namespace Logging.Decorators
         private readonly QueryExecutionLogger _queryLogger;
 
         /// <summary>
-        /// Inicializa una nueva instancia de la clase <see cref="LoggingDatabaseConnectionDecorator"/>.
+        /// Inicializa una nueva instancia del decorador de conexión.
         /// </summary>
-        /// <param name="innerConnection">Conexión original que se desea decorar.</param>
-        /// <param name="httpContextAccessor">Contexto HTTP para capturar información del request actual.</param>
-        /// <param name="queryLogger">Servicio de logging especializado para registrar las consultas.</param>
-        /// <exception cref="ArgumentNullException">Si alguno de los parámetros es nulo.</exception>
+        /// <param name="innerConnection">Conexión original que se desea envolver con funcionalidades de logging.</param>
+        /// <param name="httpContextAccessor">Contexto HTTP para obtener información adicional del request.</param>
+        /// <param name="queryLogger">Servicio responsable de registrar las operaciones ejecutadas.</param>
+        /// <exception cref="ArgumentNullException">Se lanza si alguno de los parámetros es nulo.</exception>
         public LoggingDatabaseConnectionDecorator(
             IDatabaseConnection innerConnection,
             IHttpContextAccessor httpContextAccessor,
@@ -34,7 +35,7 @@ namespace Logging.Decorators
         }
 
         /// <summary>
-        /// Abre la conexión de base de datos subyacente.
+        /// Abre la conexión original subyacente.
         /// </summary>
         public void Open()
         {
@@ -42,7 +43,7 @@ namespace Logging.Decorators
         }
 
         /// <summary>
-        /// Cierra la conexión de base de datos subyacente.
+        /// Cierra la conexión original subyacente.
         /// </summary>
         public void Close()
         {
@@ -50,22 +51,31 @@ namespace Logging.Decorators
         }
 
         /// <summary>
-        /// Indica si la conexión se encuentra actualmente abierta y operativa.
+        /// Verifica si la conexión original está activa.
         /// </summary>
-        /// <returns>True si está conectada, false si está cerrada o inactiva.</returns>
+        /// <returns>True si la conexión está abierta; de lo contrario, False.</returns>
         public bool IsConnected()
         {
             return _innerConnection.IsConnected();
         }
 
         /// <summary>
-        /// Obtiene un <see cref="DbCommand"/> decorado que incluye funcionalidad de logging automático.
+        /// Obtiene un comando de base de datos con capacidades de logging.
         /// </summary>
-        /// <returns>Una instancia de <see cref="DbCommand"/> envuelta en <see cref="LoggingDbCommand"/>.</returns>
-        public DbCommand GetDbCommand()
+        /// <param name="context">Contexto HTTP actual para capturar información adicional como headers o traceId.</param>
+        /// <returns>Comando de base de datos envuelto con lógica de registro.</returns>
+        public DbCommand GetDbCommand(HttpContext context)
         {
-            var originalCommand = _innerConnection.GetDbCommand();
-            return new LoggingDbCommand(originalCommand, _httpContextAccessor.HttpContext!, _queryLogger);
+            var originalCommand = _innerConnection.GetDbCommand(context);
+            return new LoggingDbCommand(originalCommand, context, _queryLogger);
+        }
+
+        /// <summary>
+        /// Libera los recursos utilizados por la conexión original.
+        /// </summary>
+        public void Dispose()
+        {
+            _innerConnection.Dispose();
         }
     }
 }
