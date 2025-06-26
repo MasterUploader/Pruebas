@@ -1,225 +1,98 @@
-using System.Data;
-using System.Data.Common;
-using Microsoft.AspNetCore.Http;
-using RestUtilities.Logging.Services;
-using RestUtilities.Logging.Utils;
+using System.Diagnostics;
 
-namespace RestUtilities.Connections.Logging;
+namespace Common.Helpers;
 
 /// <summary>
-/// Clase que actúa como decorador de <see cref="DbCommand"/> para registrar automáticamente la ejecución
-/// de comandos SQL, incluyendo errores, duración, parámetros y metadatos del contexto HTTP si está disponible.
+/// Clase utilitaria para medir tiempos de ejecución mediante Stopwatch de forma simplificada.
 /// </summary>
-public class LoggingDbCommand : DbCommand
+public sealed class StopwatchHelper : IDisposable
 {
-    private readonly DbCommand _innerCommand;
-    private readonly HttpContext? _context;
-    private readonly ILoggingService _loggingService;
+    private readonly Stopwatch _stopwatch;
+    private readonly Action<string>? _onDisposeMessage;
+    private readonly string? _label;
 
     /// <summary>
-    /// Inicializa una nueva instancia del <see cref="LoggingDbCommand"/>.
+    /// Crea una nueva instancia y empieza la medición automáticamente.
     /// </summary>
-    /// <param name="innerCommand">El comando original a ejecutar.</param>
-    /// <param name="context">El contexto HTTP actual (opcional).</param>
-    /// <param name="loggingService">Servicio de logging inyectado para registrar los logs.</param>
-    public LoggingDbCommand(DbCommand innerCommand, HttpContext? context, ILoggingService loggingService)
+    private StopwatchHelper(string? label = null, Action<string>? onDisposeMessage = null)
     {
-        _innerCommand = innerCommand ?? throw new ArgumentNullException(nameof(innerCommand));
-        _context = context;
-        _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
-    }
-
-    public override string CommandText
-    {
-        get => _innerCommand.CommandText;
-        set => _innerCommand.CommandText = value;
-    }
-
-    public override int CommandTimeout
-    {
-        get => _innerCommand.CommandTimeout;
-        set => _innerCommand.CommandTimeout = value;
-    }
-
-    public override CommandType CommandType
-    {
-        get => _innerCommand.CommandType;
-        set => _innerCommand.CommandType = value;
-    }
-
-    public override bool DesignTimeVisible
-    {
-        get => _innerCommand.DesignTimeVisible;
-        set => _innerCommand.DesignTimeVisible = value;
-    }
-
-    public override UpdateRowSource UpdatedRowSource
-    {
-        get => _innerCommand.UpdatedRowSource;
-        set => _innerCommand.UpdatedRowSource = value;
-    }
-
-    protected override DbConnection DbConnection
-    {
-        get => _innerCommand.Connection!;
-        set => _innerCommand.Connection = value;
-    }
-
-    protected override DbTransaction? DbTransaction
-    {
-        get => _innerCommand.Transaction;
-        set => _innerCommand.Transaction = value;
-    }
-
-    protected override DbParameterCollection DbParameterCollection => _innerCommand.Parameters;
-
-    public override void Cancel() => _innerCommand.Cancel();
-
-    public override void Prepare() => _innerCommand.Prepare();
-
-    protected override DbParameter CreateDbParameter() => _innerCommand.CreateParameter();
-
-    /// <summary>
-    /// Ejecuta un lector de datos y registra el log de la ejecución.
-    /// </summary>
-    protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
-    {
-        var stopwatch = StopwatchHelper.Start();
-        try
-        {
-            var result = _innerCommand.ExecuteReader(behavior);
-            stopwatch.Stop();
-
-            var log = LogFormatter.FormatDatabaseSuccess(_innerCommand, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, log);
-            return result;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            var errorLog = LogFormatter.FormatDatabaseError(_innerCommand, ex, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, errorLog);
-            throw;
-        }
+        _label = label;
+        _onDisposeMessage = onDisposeMessage;
+        _stopwatch = Stopwatch.StartNew();
     }
 
     /// <summary>
-    /// Ejecuta un comando no query y registra el log de la ejecución.
+    /// Inicia un nuevo cronómetro.
     /// </summary>
-    public override int ExecuteNonQuery()
-    {
-        var stopwatch = StopwatchHelper.Start();
-        try
-        {
-            var result = _innerCommand.ExecuteNonQuery();
-            stopwatch.Stop();
+    public static StopwatchHelper StartNew(string? label = null, Action<string>? onDisposeMessage = null)
+        => new(label, onDisposeMessage);
 
-            var log = LogFormatter.FormatDatabaseSuccess(_innerCommand, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, log);
-            return result;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            var errorLog = LogFormatter.FormatDatabaseError(_innerCommand, ex, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, errorLog);
-            throw;
-        }
+    /// <summary>
+    /// Devuelve el tiempo transcurrido como TimeSpan.
+    /// </summary>
+    public TimeSpan Elapsed => _stopwatch.Elapsed;
+
+    /// <summary>
+    /// Devuelve el tiempo transcurrido en milisegundos.
+    /// </summary>
+    public long ElapsedMilliseconds => _stopwatch.ElapsedMilliseconds;
+
+    /// <summary>
+    /// Devuelve el tiempo transcurrido en segundos como número decimal.
+    /// </summary>
+    public double ElapsedSeconds => _stopwatch.Elapsed.TotalSeconds;
+
+    /// <summary>
+    /// Reinicia el cronómetro.
+    /// </summary>
+    public void Restart() => _stopwatch.Restart();
+
+    /// <summary>
+    /// Detiene el cronómetro.
+    /// </summary>
+    public void Stop() => _stopwatch.Stop();
+
+    /// <summary>
+    /// Devuelve una representación legible del tiempo transcurrido, por ejemplo: "1.234 segundos".
+    /// </summary>
+    public string ToReadable()
+        => $"{Elapsed.TotalSeconds:F3} segundos";
+
+    /// <summary>
+    /// Devuelve una cadena formateada con una etiqueta personalizada.
+    /// </summary>
+    public string ToLogFormat()
+        => string.IsNullOrWhiteSpace(_label)
+            ? $"Duración: {ToReadable()}"
+            : $"{_label} tomó {ToReadable()}";
+
+    /// <summary>
+    /// Detiene el cronómetro y devuelve el tiempo legible.
+    /// </summary>
+    public string StopAndGetReadable()
+    {
+        Stop();
+        return ToReadable();
     }
 
     /// <summary>
-    /// Ejecuta el comando y retorna la primera columna de la primera fila del resultado.
+    /// Detiene el cronómetro y devuelve la cadena de log con formato.
     /// </summary>
-    public override object ExecuteScalar()
+    public string StopAndGetLog()
     {
-        var stopwatch = StopwatchHelper.Start();
-        try
-        {
-            var result = _innerCommand.ExecuteScalar();
-            stopwatch.Stop();
-
-            var log = LogFormatter.FormatDatabaseSuccess(_innerCommand, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, log);
-            return result!;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            var errorLog = LogFormatter.FormatDatabaseError(_innerCommand, ex, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, errorLog);
-            throw;
-        }
+        Stop();
+        return ToLogFormat();
     }
 
     /// <summary>
-    /// Ejecuta de forma asincrónica un comando no query.
+    /// Detiene y ejecuta la acción con el mensaje de log si se proporcionó.
     /// </summary>
-    public override async Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+    public void Dispose()
     {
-        var stopwatch = StopwatchHelper.Start();
-        try
+        Stop();
+        if (_onDisposeMessage != null)
         {
-            var result = await _innerCommand.ExecuteNonQueryAsync(cancellationToken);
-            stopwatch.Stop();
-
-            var log = LogFormatter.FormatDatabaseSuccess(_innerCommand, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, log);
-            return result;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            var errorLog = LogFormatter.FormatDatabaseError(_innerCommand, ex, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, errorLog);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Ejecuta de forma asincrónica el comando y retorna el primer valor.
-    /// </summary>
-    public override async Task<object> ExecuteScalarAsync(CancellationToken cancellationToken)
-    {
-        var stopwatch = StopwatchHelper.Start();
-        try
-        {
-            var result = await _innerCommand.ExecuteScalarAsync(cancellationToken);
-            stopwatch.Stop();
-
-            var log = LogFormatter.FormatDatabaseSuccess(_innerCommand, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, log);
-            return result!;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            var errorLog = LogFormatter.FormatDatabaseError(_innerCommand, ex, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, errorLog);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Ejecuta de forma asincrónica un lector de datos.
-    /// </summary>
-    protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
-    {
-        var stopwatch = StopwatchHelper.Start();
-        try
-        {
-            var result = await _innerCommand.ExecuteReaderAsync(behavior, cancellationToken);
-            stopwatch.Stop();
-
-            var log = LogFormatter.FormatDatabaseSuccess(_innerCommand, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, log);
-            return result;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            var errorLog = LogFormatter.FormatDatabaseError(_innerCommand, ex, stopwatch.ElapsedMilliseconds);
-            _loggingService.WriteLog(_context, errorLog);
-            throw;
+            _onDisposeMessage(ToLogFormat());
         }
     }
 }
