@@ -1,77 +1,116 @@
-using Connections.Interfaces;
-using Connections.Logging;
-using Logging.Helpers;
-using Microsoft.AspNetCore.Http;
+using Connections.Managers;
+using Logging.Abstractions;
+using System.Data;
 using System.Data.Common;
+using System.Data.OleDb;
 
-namespace Logging.Decorators;
+namespace Connections.Providers.Database;
 
 /// <summary>
-/// Decorador que intercepta las llamadas a la conexión de base de datos para registrar automáticamente los comandos ejecutados.
-/// Este decorador permite agregar funcionalidades de logging sin modificar la implementación original de la conexión.
+/// Proveedor de conexión para AS400 usando únicamente OleDbCommand.
+/// No utiliza DbContext ni Entity Framework.
 /// </summary>
-public class LoggingDatabaseConnectionDecorator : IDatabaseConnection
+public class As400ConnectionProvider : LoggingDatabaseConnection
 {
-    private readonly IDatabaseConnection _innerConnection;
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly QueryExecutionLogger _queryLogger;
+    private readonly OleDbConnection _oleDbConnection;
 
     /// <summary>
-    /// Inicializa una nueva instancia del decorador de conexión.
+    /// Inicializa una nueva instancia de <see cref="As400ConnectionProvider"/>.
     /// </summary>
-    /// <param name="innerConnection">Conexión original que se desea envolver con funcionalidades de logging.</param>
-    /// <param name="httpContextAccessor">Contexto HTTP para obtener información adicional del request.</param>
-    /// <param name="queryLogger">Servicio responsable de registrar las operaciones ejecutadas.</param>
-    /// <exception cref="ArgumentNullException">Se lanza si alguno de los parámetros es nulo.</exception>
-    public LoggingDatabaseConnectionDecorator(
-        IDatabaseConnection innerConnection,
-        IHttpContextAccessor httpContextAccessor,
-        QueryExecutionLogger queryLogger)
+    /// <param name="connectionString">Cadena de conexión a AS400.</param>
+    /// <param name="loggingService">Servicio de logging para registrar consultas.</param>
+    public As400ConnectionProvider(string connectionString, ILoggingService loggingService)
+        : base(new OleDbConnection(connectionString), loggingService)
     {
-        _innerConnection = innerConnection ?? throw new ArgumentNullException(nameof(innerConnection));
-        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
-        _queryLogger = queryLogger ?? throw new ArgumentNullException(nameof(queryLogger));
+        _oleDbConnection = new OleDbConnection(connectionString);
     }
 
     /// <summary>
-    /// Abre la conexión original subyacente.
+    /// Abre la conexión OleDb si aún no está abierta.
     /// </summary>
-    public void Open()
+    public new void Open()
     {
-        _innerConnection.Open();
+        if (_oleDbConnection.State != ConnectionState.Open)
+            _oleDbConnection.Open();
     }
 
     /// <summary>
-    /// Cierra la conexión original subyacente.
+    /// Cierra y limpia la conexión si está activa.
     /// </summary>
-    public void Close()
+    public new void Close()
     {
-        _innerConnection.Close();
+        if (_oleDbConnection.State == ConnectionState.Open)
+            _oleDbConnection.Close();
     }
 
     /// <summary>
-    /// Verifica si la conexión original está activa.
+    /// Verifica si la conexión está actualmente abierta y operativa.
     /// </summary>
-    /// <returns>True si la conexión está abierta; de lo contrario, False.</returns>
-    /// 
-    public bool IsConnected => _innerConnection.IsConnected();
-
-    /// <summary>
-    /// Obtiene un comando de base de datos con capacidades de logging.
-    /// </summary>
-    /// <param name="context">Contexto HTTP actual para capturar información adicional como headers o traceId.</param>
-    /// <returns>Comando de base de datos envuelto con lógica de registro.</returns>
-    public DbCommand GetDbCommand(HttpContext context)
+    /// <returns>True si la conexión está abierta, false en caso contrario.</returns>
+    public new bool IsConnected()
     {
-        var originalCommand = _innerConnection.GetDbCommand(context);
-        return new LoggingDbCommand(originalCommand, context, _queryLogger);
+        return _oleDbConnection.State == ConnectionState.Open;
     }
 
     /// <summary>
-    /// Libera los recursos utilizados por la conexión original.
+    /// Retorna un comando OleDb envuelto en logging para ejecutar SQL directamente.
     /// </summary>
-    public void Dispose()
+    /// <returns>Instancia de <see cref="DbCommand"/> con soporte de logging.</returns>
+    public  DbCommand GetDbCommand()
     {
-        _innerConnection.Dispose();
+        Open();
+        return _oleDbConnection.CreateCommand();
+    }
+
+    /// <summary>
+    /// Libera la conexión OleDb.
+    /// </summary>
+    public new void Dispose()
+    {
+        base.Dispose();
+        _oleDbConnection.Dispose();
+    }
+}
+
+
+
+
+
+using Connections.Interfaces;
+
+namespace Connections.Providers.Database;
+
+/// <summary>
+/// Fábrica para la creación de conexiones a bases de datos según el tipo configurado.
+/// </summary>
+public class DatabaseConnectionFactory
+{
+    private readonly Dictionary<string, Func<string, IDatabaseConnection>> _providers;
+
+    public DatabaseConnectionFactory()
+    {
+        _providers = new Dictionary<string, Func<string, IDatabaseConnection>>
+        {
+            { "AS400", connectionString => new AS400ConnectionProvider(connectionString) }
+            //{ "MSSQL", connectionString => new MSSQLConnectionProvider(connectionString) },
+            //{ "Oracle", connectionString => new OracleConnectionProvider(connectionString) }
+            // Se pueden agregar más motores de BD aquí
+        };
+    }
+
+    /// <summary>
+    /// Crea una conexión a la base de datos según el tipo configurado.
+    /// </summary>
+    /// <param name="dbType">Tipo de base de datos (ejemplo: "MSSQL", "AS400").</param>
+    /// <param name="connectionString">Cadena de conexión.</param>
+    /// <returns>Instancia de `IDatabaseConnection`.</returns>
+    public IDatabaseConnection CreateConnection(string dbType, string connectionString)
+    {
+        if (_providers.TryGetValue(dbType, out var provider))
+        {
+            return provider(connectionString);
+        }
+
+        throw new ArgumentException($"No se encontró un proveedor para el tipo de base de datos: {dbType}");
     }
 }
