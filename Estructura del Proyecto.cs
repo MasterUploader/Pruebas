@@ -1,105 +1,22 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-	<PropertyGroup>
-		<TargetFramework>net8.0</TargetFramework>
-		<!-- Metadatos para NuGet -->
-		<PackageId>RestUtilities.Connections</PackageId>
-		<Version>1.0.1</Version>
-		<Authors>Brayan René Banegas Mejía</Authors>
-		<Description>Biblioteca para gestionar conexiones a bases de datos, servicios externos y mensajería en .NET 8.</Description>
-		<PackageTags>Conexiones;As400;SQL</PackageTags>
-		<!-- Generar el paquete NuGet automáticamente al compilar -->
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
-		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-		<PlatformTarget>x64</PlatformTarget>
-		<IncludeBuildOutput>true</IncludeBuildOutput>
-		<Platforms>x64</Platforms>
-		<RemoveUnnecessaryImports>true</RemoveUnnecessaryImports>
-	</PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="FluentFTP" Version="52.1.0" />
-    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.6" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.6" />
-    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.8.0" />
-    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
-    <PackageReference Include="StackExchange.Redis" Version="2.8.41" />
-    <PackageReference Include="System.Data.OleDb" Version="8.0.1" />
-  </ItemGroup>
-
-	<ItemGroup>
-		<FrameworkReference Include="Microsoft.AspNetCore.App" />
-	</ItemGroup>
-
-
-	<ItemGroup>
-		<!-- Helpers-->
-		<Compile Include="Helpers\ConnectionManagerHelper.cs" />
-		<Compile Include="Helpers\EncryptionHelper.cs" />
-		
-		
-		<!-- Interfaces -->
-		<Compile Include="Interfaces\IExternalServiceConnection.cs" />
-		<Compile Include="Interfaces\IConnectionManager.cs" />
-		<Compile Include="Interfaces\IWebSocketConnection.cs" />
-		<Compile Include="Interfaces\IGrpcConnection.cs" />
-		<Compile Include="Interfaces\IFtpConnection.cs" />
-		<Compile Include="Interfaces\IServiceConnectionFactory.cs" />
-		<Compile Include="Interfaces\IMessageQueueConnection.cs" />
-		<Compile Include="Interfaces\ISoapServiceConnection.cs" />
-		<Compile Include="Managers\LoggingDatabaseConnection.cs" />
-
-		<!-- Providers/Database -->
-		<Compile Include="Providers\Database\AS400ConnectionProvider.cs" />
-		<Compile Include="Providers\Database\ExternalDbContextConnectionProvider.cs" />
-		<Compile Include="Providers\Database\MSSQLConnectionProvider.cs" />
-		<Compile Include="Providers\Database\OracleConnectionProvider.cs" />
-		<Compile Include="Providers\Database\MySQLConnectionProvider.cs" />
-		<Compile Include="Providers\Database\PostgreSQLConnectionProvider.cs" />
-		<Compile Include="Providers\Database\MongoDBConnectionProvider.cs" />
-		<Compile Include="Providers\Database\RedisConnectionProvider.cs" />
-		<Compile Include="Providers\Database\DatabaseConnectionFactory.cs" />
-
-		<!-- Providers/Services -->
-		<Compile Include="Providers\Services\RestServiceClient.cs" />
-		<Compile Include="Providers\Services\SoapServiceClient.cs" />
-		<Compile Include="Providers\Services\WebSocketConnectionProvider.cs" />
-		<Compile Include="Providers\Services\GrpcConnectionProvider.cs" />
-		<Compile Include="Providers\Services\RabbitMQConnectionProvider.cs" />
-		<Compile Include="Providers\Services\FtpConnectionProvider.cs" />
-		<Compile Include="Providers\Services\ServiceConnectionFactory.cs" />
-		
-		<!--Logging-->
-
-		<!-- MAnagers -->
-		<Compile Include="Managers\ConnectionManager.cs" />
-		<Compile Include="Managers\DatabaseManager.cs" />
-		<Compile Include="Managers\ServiceManager.cs" />
-		<Compile Include="Managers\WebSocketManager.cs" />
-		<Compile Include="Managers\GrpcManager.cs" />
-
-		<!-- Models -->
-		<Compile Include="Models\ConnectionInfo.cs" />
-		<Compile Include="Models\DatabaseSettings.cs" />
-		<Compile Include="Models\ServiceSettings.cs" />
-		<Compile Include="Models\WebSocketSettings.cs" />
-		<Compile Include="Models\GrpcSettings.cs" />
-		<Compile Include="Models\RedisSettings.cs" />
-
-		<!-- Services -->
-		<Compile Include="Services\ConnectionSettings.cs" />
-
-	</ItemGroup>
-
-
-	<ItemGroup>
-	  <ProjectReference Include="..\Connections.Abstractions\Connections.Abstractions.csproj" />
-	  <ProjectReference Include="..\Logging\Logging.csproj" />
-	</ItemGroup>
-
-
-</Project>
+Rebuild started at 2:14 PM...
+1>------ Skipped Rebuild All: Project: Connections.Abstractions ------
+1> 
+Restored C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Connections.Abstractions\Connections.Abstractions.csproj (in 3 ms).
+Restored C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Common\Common.csproj (in 149 ms).
+Restored C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Logging\Logging.csproj (in 169 ms).
+2>------ Rebuild All started: Project: Common, Configuration: Release Any CPU ------
+Restored C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Connections\Connections.csproj (in 240 ms).
+2>Common -> C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Common\bin\Release\net8.0\Common.dll
+3>------ Rebuild All started: Project: Logging, Configuration: Release x64 ------
+3>C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Logging\Helpers\LoggingDbCommand.cs(37,9,37,12): warning CS8765: Nullability of type of parameter 'value' doesn't match overridden member (possibly because of nullability attributes).
+3>C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Logging\Helpers\LoggingDbCommand.cs(61,9,61,12): warning CS8765: Nullability of type of parameter 'value' doesn't match overridden member (possibly because of nullability attributes).
+3>C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Logging\Helpers\JsonHelper.cs(13,50,13,54): warning CS8603: Possible null reference return.
+3>C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Logging\Filters\LogMethodExecutionAttribute.cs(37,29,37,50): warning CS8602: Dereference of a possibly null reference.
+3>Logging -> C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Logging\bin\x64\Release\net8.0\Logging.dll
+3>The package RestUtilities.Logging.1.0.0 is missing a readme. Go to https://aka.ms/nuget/authoring-best-practices/readme to learn why package readmes are important.
+3>Successfully created package 'C:\Git\Librerias Davivienda\DaviviendaRESTUtilities\RestUtilities\Logging\bin\x64\Release\RestUtilities.Logging.1.0.0.nupkg'.
+3>Done building project "Logging.csproj".
+4>------ Skipped Rebuild All: Project: Connections ------
+4> 
+========== Rebuild All: 2 succeeded, 0 failed, 2 skipped ==========
+========== Rebuild completed at 2:14 PM and took 04.507 seconds ==========
