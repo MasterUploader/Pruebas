@@ -1,34 +1,39 @@
 using Microsoft.AspNetCore.Http;
 using System.Data.Common;
+using RestUtilities.Logging.Helpers;
+using RestUtilities.Logging.Formatters;
 
-namespace RestUtilities.Logging;
-
-/// <summary>
-/// Contrato para la escritura estructurada de logs.
-/// Soporta logs para controladores, excepciones, peticiones externas, y ahora también comandos de bases de datos.
-/// </summary>
-public interface ILoggingService
+public partial class LoggingService : ILoggingService
 {
-    // Métodos existentes...
-    void WriteLog(HttpContext? context, string message);
-    void AddExceptionLog(Exception ex);
+    // ✅ Método para registrar comandos SQL exitosos
+    public void LogDatabaseSuccess(DbCommand command, long elapsedMs, HttpContext? context = null, string? customMessage = null)
+    {
+        // Formatear log con todos los detalles del comando y duración
+        var message = LogFormatter.FormatDatabaseSuccess(
+            command: command,
+            elapsedMs: elapsedMs,
+            context: context,
+            customMessage: customMessage
+        );
 
-    // 📌 NUEVOS MÉTODOS PARA LOG DE BASES DE DATOS
+        // Guardar en el archivo general de logs (sin crear uno independiente)
+        WriteLog(context, message);
+    }
 
-    /// <summary>
-    /// Registra un log de éxito para un comando SQL ejecutado correctamente.
-    /// </summary>
-    /// <param name="command">El comando ejecutado (SELECT, INSERT, etc.).</param>
-    /// <param name="elapsedMs">El tiempo de ejecución en milisegundos.</param>
-    /// <param name="context">Contexto HTTP actual para extraer TraceId, usuario, etc. (opcional).</param>
-    /// <param name="customMessage">Mensaje adicional personalizado (opcional).</param>
-    void LogDatabaseSuccess(DbCommand command, long elapsedMs, HttpContext? context = null, string? customMessage = null);
+    // ✅ Método para registrar comandos SQL fallidos
+    public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null)
+    {
+        // Formatear log del error con información detallada
+        var message = LogFormatter.FormatDatabaseError(
+            command: command,
+            exception: ex,
+            context: context
+        );
 
-    /// <summary>
-    /// Registra un log de error para un comando SQL que lanzó una excepción.
-    /// </summary>
-    /// <param name="command">El comando ejecutado que causó el error.</param>
-    /// <param name="ex">La excepción lanzada.</param>
-    /// <param name="context">Contexto HTTP actual para extraer información adicional (opcional).</param>
-    void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null);
+        // Guardar el error en el mismo archivo de log principal
+        WriteLog(context, message);
+
+        // Registrar excepción para visibilidad en SingleLog (si se desea mantener consistencia con errores críticos)
+        AddExceptionLog(ex);
+    }
 }
