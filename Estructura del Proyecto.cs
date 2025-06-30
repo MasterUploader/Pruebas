@@ -1,30 +1,53 @@
-string sqlQuery = "INSERT INTO BCAH96DTA.UTH01CCC (CCC00GUID, CCC01CORR, CCC02FECH, CCC03HORA, CCC04CAJE, CCC05BANC, CCC06SUCU, CCC07TERM, CCC08LIMI, CCC09NTOK, CCC10STAT, CCC11MESS, CCC12DTID, CCC12DTNA, CCC13DTPO, CCC13TIST, CCC14MDTI, CCC15MDHM, CCC16MDNT, CCC17COVA, CCC18CONA, CCC19ERRO, CCC20MENS) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+string sqlQuery = @"
+INSERT INTO BCAH96DTA.UTH01CCC (
+    CCC00GUID, CCC01CORR, CCC02FECH, CCC03HORA, CCC04CAJE, CCC05BANC, CCC06SUCU, CCC07TERM, CCC08LIMI, CCC09NTOK, 
+    CCC10STAT, CCC11MESS, CCC12DTID, CCC12DTNA, CCC13DTPO, CCC13TIST, CCC14MDTI, CCC15MDHM, CCC16MDNT, CCC17COVA, 
+    CCC18CONA, CCC19ERRO, CCC20MENS
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    
 using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
 command.CommandText = sqlQuery;
+command.CommandType = CommandType.Text;
 
-command.CommandType = System.Data.CommandType.Text;
-command.Parameters.Add("CCC00GUID", OleDbType.Char).Value = getCompaniesDto.CamposObligatoriosModel.Guid;
-command.Parameters.Add("CCC01CORR", OleDbType.Char).Value = correlativo.ToString();
-command.Parameters.Add("CCC02FECH", OleDbType.Char).Value = getCompaniesDto.CamposObligatoriosModel.Fecha;
-command.Parameters.Add("CCC03HORA", OleDbType.Char).Value = getCompaniesDto.CamposObligatoriosModel.Hora;
-command.Parameters.Add("CCC04CAJE", OleDbType.Char).Value = getCompaniesDto.CamposObligatoriosModel.Cajero;
-command.Parameters.Add("CCC05BANC", OleDbType.Char).Value = getCompaniesDto.CamposObligatoriosModel.Banco;
-command.Parameters.Add("CCC06SUCU", OleDbType.Char).Value = getCompaniesDto.CamposObligatoriosModel.Sucursal;
-command.Parameters.Add("CCC07TERM", OleDbType.Char).Value = getCompaniesDto.CamposObligatoriosModel.Terminal;
-command.Parameters.Add("CCC08LIMI", OleDbType.Char).Value = getCompaniesDto.Limit;
-command.Parameters.Add("CCC09NTOK", OleDbType.Char).Value = getCompaniesDto.NextToken;
-command.Parameters.Add("CCC10STAT", OleDbType.Char).Value = list2.Status;
-command.Parameters.Add("CCC11MESS", OleDbType.Char).Value = list2.Message;
-command.Parameters.Add("CCC12DTID", OleDbType.Char).Value = list3.Id;
-command.Parameters.Add("CCC12DTNA", OleDbType.Char).Value = list3.Name;
-command.Parameters.Add("CCC13DTPO", OleDbType.Char).Value = (list3.PayableOptions == null) ? "Nulo" : string.Join(",", list3.PayableOptions);
-command.Parameters.Add("CCC13TIST", OleDbType.Char).Value = list2.Timestamp.ToString();
-command.Parameters.Add("CCC14MDTI", OleDbType.Char).Value = list2.Metadata.Items;
-command.Parameters.Add("CCC15MDHM", OleDbType.Char).Value = ((list2.Metadata.HasMore.ToString() == null) ? "NO" : list2.Metadata.HasMore.ToString());
-command.Parameters.Add("CCC16MDNT", OleDbType.Char).Value = ((list2.Metadata.NextToken == null) ? "" : list2.Metadata.NextToken);
-command.Parameters.Add("CCC17COVA", OleDbType.Char).Value = ((list2.Code.Value.ToString() == null) ? "124" : list2.Code.Value.ToString());
-command.Parameters.Add("CCC18CONA", OleDbType.Char).Value = ((list2.Code.Name == null) ? "" : list2.Code.Name);
-command.Parameters.Add("CCC19ERRO", OleDbType.Char).Value = getCompaniesResponseDto.Error;
-command.Parameters.Add("CCC20MENS", OleDbType.Char).Value = ((getCompaniesResponseDto.Mensaje == null) ? "Proceso ejecutado Satisfactoriamente" : getCompaniesResponseDto.Mensaje);
+AddOleDbParameter(command, "CCC00GUID", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Guid);
+AddOleDbParameter(command, "CCC01CORR", OleDbType.Char, correlativo.ToString());
+AddOleDbParameter(command, "CCC02FECH", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Fecha);
+AddOleDbParameter(command, "CCC03HORA", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Hora);
+AddOleDbParameter(command, "CCC04CAJE", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Cajero);
+AddOleDbParameter(command, "CCC05BANC", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Banco);
+AddOleDbParameter(command, "CCC06SUCU", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Sucursal);
+AddOleDbParameter(command, "CCC07TERM", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Terminal);
+AddOleDbParameter(command, "CCC08LIMI", OleDbType.Char, getCompaniesDto.Limit);
+AddOleDbParameter(command, "CCC09NTOK", OleDbType.Char, getCompaniesDto.NextToken);
+AddOleDbParameter(command, "CCC10STAT", OleDbType.Char, list2.Status);
+AddOleDbParameter(command, "CCC11MESS", OleDbType.Char, list2.Message);
+AddOleDbParameter(command, "CCC12DTID", OleDbType.Char, list3.Id);
+AddOleDbParameter(command, "CCC12DTNA", OleDbType.Char, list3.Name);
+AddOleDbParameter(command, "CCC13DTPO", OleDbType.Char, list3.PayableOptions == null ? "Nulo" : string.Join(",", list3.PayableOptions));
+AddOleDbParameter(command, "CCC13TIST", OleDbType.Char, list2.Timestamp.ToString());
+AddOleDbParameter(command, "CCC14MDTI", OleDbType.Char, list2.Metadata.Items);
+AddOleDbParameter(command, "CCC15MDHM", OleDbType.Char, list2.Metadata.HasMore?.ToString() ?? "NO");
+AddOleDbParameter(command, "CCC16MDNT", OleDbType.Char, list2.Metadata.NextToken ?? "");
+AddOleDbParameter(command, "CCC17COVA", OleDbType.Char, list2.Code.Value?.ToString() ?? "124");
+AddOleDbParameter(command, "CCC18CONA", OleDbType.Char, list2.Code.Name ?? "");
+AddOleDbParameter(command, "CCC19ERRO", OleDbType.Char, getCompaniesResponseDto.Error);
+AddOleDbParameter(command, "CCC20MENS", OleDbType.Char, getCompaniesResponseDto.Mensaje ?? "Proceso ejecutado Satisfactoriamente");
 
 command.ExecuteNonQuery();
+
+/// <summary>
+/// Agrega un parámetro a un DbCommand, compatible con OleDbCommand y decoradores como LoggingDatabaseCommand.
+/// </summary>
+/// <param name="cmd">Comando al cual se agregará el parámetro.</param>
+/// <param name="name">Nombre del parámetro.</param>
+/// <param name="type">Tipo OleDb del parámetro.</param>
+/// <param name="value">Valor del parámetro.</param>
+private void AddOleDbParameter(DbCommand cmd, string name, OleDbType type, object? value)
+{
+    var param = cmd.CreateParameter();
+    param.ParameterName = name;
+    if (param is OleDbParameter oleParam)
+        oleParam.OleDbType = type;
+    param.Value = value ?? DBNull.Value;
+    cmd.Parameters.Add(param);
+}
