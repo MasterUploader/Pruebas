@@ -58,3 +58,59 @@ public static void SafeWriteCsv(string directory, string logFilePath, string con
         // Silenciar errores de escritura en CSV para evitar interrupciones
     }
 }
+
+
+
+public void AddSingleLog(string message)
+{
+    try
+    {
+        string formatted = LogFormatter.FormatSingleLog(message).Indent(LogScope.CurrentLevel);
+        LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
+    }
+    catch (Exception ex)
+    {
+        LogInternalError(ex);
+    }
+}
+
+public void AddObjLog(string objectName, object logObject)
+{
+    try
+    {
+        string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
+        LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
+    }
+    catch (Exception ex)
+    {
+        LogInternalError(ex);
+    }
+}
+
+public void AddObjLog(object logObject)
+{
+    try
+    {
+        string objectName = logObject?.GetType()?.Name ?? "ObjetoDesconocido";
+        object safeObject = logObject ?? new { };
+        string formatted = LogFormatter.FormatObjectLog(objectName, safeObject).Indent(LogScope.CurrentLevel);
+        LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
+    }
+    catch (Exception ex)
+    {
+        LogInternalError(ex);
+    }
+}
+
+public void AddExceptionLog(Exception ex)
+{
+    try
+    {
+        string formatted = LogFormatter.FormatExceptionDetails(ex.ToString()).Indent(LogScope.CurrentLevel);
+        LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
+    }
+    catch (Exception e)
+    {
+        LogInternalError(e);
+    }
+}
