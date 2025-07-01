@@ -1,195 +1,183 @@
-using Common.Helpers;
+using Connections.Helpers;
+using Connections.Interfaces;
+using Connections.Providers.Database;
+using Connections.Services;
 using Logging.Abstractions;
-using Microsoft.AspNetCore.Http;
-using System.Data;
-using System.Data.Common;
+using Logging.Decorators;
+using Logging.Filters;
+using Logging.Middleware;
+using Logging.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.OpenApi.Models;
+using MS_BAN_38_UTH_RECAUDACION_PAGOS.Repository;
+using MS_BAN_38_UTH_RECAUDACION_PAGOS.Repository.IRepository.Autenticacion;
+using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.IServiceReference;
+using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Companies.Companies_Services;
+using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Payments.Payments_Services;
+using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Receivables.Receivables_Services;
+using MS_BAN_38_UTH_RECAUDACION_PAGOS.Utils;
+using RestUtilities.Logging.Handlers;
+using System.Reflection;
 
-namespace Connections.Logging;
+var builder = WebApplication.CreateBuilder(args);
 
-/// <summary>
-/// Comando decorador que intercepta y registra automáticamente las operaciones SQL ejecutadas.
-/// Compatible con múltiples proveedores y diseñado para ser reutilizable con la librería Connections.
-/// </summary>
-public class LoggingDbCommand : DbCommand
+/*Conexiones */
+// Cargar configuración desde Connection.json por ambiente (DEV, UAT, PROD)
+builder.Configuration.AddJsonFile("ConnectionData.json", optional: false, reloadOnChange: true);
+
+var connectionSettings = new ConnectionSettings(builder.Configuration);
+ConnectionManagerHelper.ConnectionConfig = connectionSettings;
+
+// Registrar ConnectionSettings para leer configuración dinámica
+builder.Services.AddSingleton<ConnectionSettings>();
+
+// Registrar IHttpContextAccessor para acceso al contexto en servicios
+builder.Services.AddHttpContextAccessor();
+
+// Registrar servicio de Logging
+builder.Services.AddScoped<ILoggingService, LoggingService>();
+
+// Registrar la conexión principal a AS400 usando OleDbCommand
+// Registrar servicio de conexión con soporte de logging para AS400
+builder.Services.AddScoped<IDatabaseConnection>(sp =>
 {
-    private readonly DbCommand _innerCommand;
-    private readonly HttpContext? _context;
-    private readonly ILoggingService _loggingService;
+    // Obtener configuración general
+    var config = sp.GetRequiredService<IConfiguration>();
+    var settings = new ConnectionSettings(config); // Tu clase para acceder a settings
 
-    /// <summary>
-    /// Inicializa una nueva instancia de <see cref="LoggingDbCommand"/>.
-    /// </summary>
-    /// <param name="innerCommand">Instancia original de DbCommand que se desea envolver.</param>
-    /// <param name="context">Contexto actual HTTP, si está disponible (puede ser null en procesos internos).</param>
-    /// <param name="loggingService">Servicio de logging donde se registrará la ejecución del comando.</param>
-    public LoggingDbCommand(DbCommand innerCommand, HttpContext? context, ILoggingService loggingService)
+    // Obtener cadena de conexión desencriptada para AS400
+    var connStr = settings.GetAS400ConnectionString("AS400");
+
+    // Instanciar proveedor interno
+    var innerProvider = new As400ConnectionProvider(
+        connStr,
+        sp.GetRequiredService<ILoggingService>()); // Constructor de AS400ConnectionProvider
+
+    // Retornar decorador con logging
+    return new LoggingDatabaseConnectionDecorator(
+        innerProvider,
+        sp.GetRequiredService<IHttpContextAccessor>(),
+        sp.GetRequiredService<ILoggingService>());        
+});
+/*Conexiones*/
+
+
+
+// Registra IHttpContextAccessor para acceder al HttpContext en el servicio de logging.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<LoggingActionFilter>();
+
+// Registra el servicio de logging. La implementación utilizará la configuración inyectada (IOptions<LoggingOptions>)
+// y la información del entorno (IHostEnvironment).
+builder.Services.AddSingleton<ILoggingService, LoggingService>();
+
+// Configura LoggingOptions a partir de la sección "LoggingOptions" en el appsettings.json.
+builder.Services.Configure<Logging.Configuration.LoggingOptions>(builder.Configuration.GetSection("LoggingOptions"));
+
+//Login para HTTPClientHandler
+builder.Services.AddTransient<HttpClientLoggingHandler>();
+
+//Configuramos para que capture logs de salida del HTTP
+builder.Services.AddHttpClient("GINIH").AddHttpMessageHandler<HttpClientLoggingHandler>();
+
+
+/*Configuración de la conexión*/
+builder.Configuration
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddJsonFile("ConnectionData.json", optional: false, reloadOnChange: true);
+
+var configuration = builder.Configuration;
+
+//Leer Ambiente
+var enviroment = configuration["ApiSettings:Enviroment"] ?? "DEV";
+//Leer node correspondiente desde ConnectionData.json
+var connectionSection = configuration.GetSection(enviroment);
+var connectionConfig = connectionSection.Get<ConnectionConfig>();
+
+//Asignación de conexión Global
+GlobalConnection.Current = connectionConfig!;
+
+/*Configuración de la conexión*/
+
+// Add services to the container.
+builder.Services.AddHttpClient<ILoginRepository, LoginRepository>();
+builder.Services.AddHttpClient<ICompaniesServices, CompaniesServices>();
+builder.Services.AddHttpClient<IPaymentsServices, PaymentsServices>();
+builder.Services.AddHttpClient<IReceivablesServices, ReceivablesServices>();
+
+builder.Services.AddScoped<ILoginRepository, LoginRepository>();
+builder.Services.AddScoped<ICompaniesServices, CompaniesServices>();
+builder.Services.AddScoped<IPaymentsServices, PaymentsServices>();
+builder.Services.AddScoped<IReceivablesServices, ReceivablesServices>();
+
+
+// Add services to the container.
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<LoggingActionFilter>();   
+
+});
+
+//builder.Services.AddControllers().AddNewtonsoftJson(options =>
+//{
+//    options.SerializerSettings.ContractResolver = new Newtonsoft.Json.Serialization.DefaultContractResolver();
+//});
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
     {
-        _innerCommand = innerCommand ?? throw new ArgumentNullException(nameof(innerCommand));
-        _context = context;
-        _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
-    }
-
-    #region Propiedades sobrescritas
-
-    public override string CommandText
-    {
-        get => _innerCommand.CommandText;
-        set => _innerCommand.CommandText = value;
-    }
-
-    public override int CommandTimeout
-    {
-        get => _innerCommand.CommandTimeout;
-        set => _innerCommand.CommandTimeout = value;
-    }
-
-    public override CommandType CommandType
-    {
-        get => _innerCommand.CommandType;
-        set => _innerCommand.CommandType = value;
-    }
-
-    public override bool DesignTimeVisible
-    {
-        get => _innerCommand.DesignTimeVisible;
-        set => _innerCommand.DesignTimeVisible = value;
-    }
-
-    protected override DbConnection DbConnection
-    {
-        get => _innerCommand.Connection!;
-        set => _innerCommand.Connection = value;
-    }
-
-    protected override DbTransaction? DbTransaction
-    {
-        get => _innerCommand.Transaction;
-        set => _innerCommand.Transaction = value;
-    }
-
-    protected override DbParameterCollection DbParameterCollection => _innerCommand.Parameters;
-
-    public override UpdateRowSource UpdatedRowSource
-    {
-        get => _innerCommand.UpdatedRowSource;
-        set => _innerCommand.UpdatedRowSource = value;
-    }
-
-    #endregion
-
-    #region Métodos de ejecución con logging
-
-    /// <inheritdoc />
-    public override int ExecuteNonQuery()
-    {
-        using var sw = StopwatchHelper.StartNew("ExecuteNonQuery");
-        try
+        Title = "MS_BAN_38_UTH_RECAUDACION_PAGOS",
+        Version = "v1",
+        Description = "API para gestión de pagos mediante Ginih.",
+        Contact = new OpenApiContact
         {
-            int result = _innerCommand.ExecuteNonQuery();
-            _loggingService.WriteLog(_context, FormatSuccessLog(sw, result));
-            return result;
-        }
-        catch (Exception ex)
+            Name = "Ginih",
+            Email = "soporte@api.com",
+            Url = new Uri("https://api.com")
+        },
+        License = new OpenApiLicense
         {
-            _loggingService.WriteLog(_context, FormatErrorLog(sw, ex));
-            throw;
+            Name = "License",
+            Url = new Uri("https://api.com")
         }
-    }
+    });
 
-    /// <inheritdoc />
-    public override object? ExecuteScalar()
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+
+    options.IncludeXmlComments(xmlPath);
+});
+
+//builder.Services.AddSwaggerGenNewtonsoftSupport();
+
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
+{
+    app.UseSwagger(c =>
     {
-        using var sw = StopwatchHelper.StartNew("ExecuteScalar");
-        try
-        {
-            var result = _innerCommand.ExecuteScalar();
-            _loggingService.WriteLog(_context, FormatSuccessLog(sw, result));
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _loggingService.WriteLog(_context, FormatErrorLog(sw, ex));
-            throw;
-        }
-    }
+        c.RouteTemplate = "swagger/{documentName}/swagger.json";
+    });
 
-    /// <inheritdoc />
-    protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
+    app.UseSwaggerUI(c =>
     {
-        using var sw = StopwatchHelper.StartNew("ExecuteReader");
-        try
-        {
-            var reader = _innerCommand.ExecuteReader(behavior);
-            _loggingService.WriteLog(_context, FormatSuccessLog(sw, "DbDataReader opened"));
-            return reader;
-        }
-        catch (Exception ex)
-        {
-            _loggingService.WriteLog(_context, FormatErrorLog(sw, ex));
-            throw;
-        }
-    }
-
-    /// <inheritdoc />
-    protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
-    {
-        using var sw = StopwatchHelper.StartNew("ExecuteReaderAsync");
-        try
-        {
-            var reader = await _innerCommand.ExecuteReaderAsync(behavior, cancellationToken);
-            _loggingService.WriteLog(_context, FormatSuccessLog(sw, "DbDataReader opened async"));
-            return reader;
-        }
-        catch (Exception ex)
-        {
-            _loggingService.WriteLog(_context, FormatErrorLog(sw, ex));
-            throw;
-        }
-    }
-
-    #endregion
-
-    #region Métodos auxiliares
-
-    /// <inheritdoc />
-    public override void Cancel() => _innerCommand.Cancel();
-
-    /// <inheritdoc />
-    public override void Prepare() => _innerCommand.Prepare();
-
-    /// <inheritdoc />
-    protected override DbParameter CreateDbParameter() => _innerCommand.CreateParameter();
-
-    /// <inheritdoc />
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            _innerCommand.Dispose();
-        }
-
-        base.Dispose(disposing);
-    }
-
-    /// <summary>
-    /// Formatea un mensaje de éxito para ser registrado en el log.
-    /// </summary>
-    /// <param name="sw">Instancia de StopwatchHelper utilizada para medir el tiempo.</param>
-    /// <param name="result">Resultado devuelto por el comando.</param>
-    private string FormatSuccessLog(StopwatchHelper sw, object? result)
-    {
-        return $"[DB SUCCESS]\nSQL: {CommandText}\nResultado: {result}\nDuración: {sw.ElapsedMilliseconds} ms";
-    }
-
-    /// <summary>
-    /// Formatea un mensaje de error para ser registrado en el log.
-    /// </summary>
-    /// <param name="sw">Instancia de StopwatchHelper utilizada para medir el tiempo.</param>
-    /// <param name="ex">Excepción capturada durante la ejecución del comando.</param>
-    private string FormatErrorLog(StopwatchHelper sw, Exception ex)
-    {
-        return $"[DB ERROR]\nSQL: {CommandText}\nExcepción: {ex.Message}\nDuración: {sw.ElapsedMilliseconds} ms";
-    }
-
-    #endregion
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "API para gestión de pagos mediante Ginih.");
+    });
 }
+
+//app.UseHeaderValidation();
+
+app.UseHttpsRedirection();
+
+app.UseAuthorization();
+
+app.UseMiddleware<LoggingMiddleware>();
+
+app.MapControllers();
+
+app.Run();
