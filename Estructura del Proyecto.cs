@@ -1,114 +1,70 @@
 /// <summary>
-/// Formatea un bloque estructurado de ejecución SQL para los archivos de log.
-/// Incluye detalles como IP, puerto, base de datos, biblioteca, tabla afectada,
-/// las sentencias ejecutadas, cantidad de ejecuciones, resultado, hora y duración.
+/// Formatea un bloque de log para errores en ejecución SQL, incluyendo contexto y detalles de excepción.
 /// </summary>
-/// <param name="nombreBD">Nombre de la base de datos objetivo.</param>
-/// <param name="ip">Dirección IP o nombre del host del servidor de base de datos.</param>
-/// <param name="puerto">Puerto utilizado para la conexión a la base de datos.</param>
-/// <param name="biblioteca">Biblioteca o esquema asociado (si aplica).</param>
-/// <param name="tabla">Nombre de la tabla afectada por la operación (si es detectable).</param>
-/// <param name="sentenciasSQL">Lista de sentencias SQL ejecutadas en la operación.</param>
-/// <param name="cantidadEjecuciones">Número de veces que se ejecutaron las sentencias.</param>
-/// <param name="resultado">Resultado de la operación (por ejemplo: filas afectadas).</param>
-/// <param name="horaInicio">Hora exacta en que comenzó la ejecución.</param>
-/// <param name="duracion">Duración total de la operación como <see cref="TimeSpan"/>.</param>
-/// <returns>Texto formateado para incluir en el log estructurado.</returns>
-public static string FormatDbExecution(
+/// <param name="nombreBD">Nombre de la base de datos.</param>
+/// <param name="ip">IP del servidor de base de datos.</param>
+/// <param name="puerto">Puerto utilizado en la conexión.</param>
+/// <param name="biblioteca">Biblioteca o esquema objetivo.</param>
+/// <param name="tabla">Tabla afectada por la operación fallida.</param>
+/// <param name="sentenciaSQL">Sentencia SQL que generó el error.</param>
+/// <param name="exception">Excepción lanzada por el proveedor de datos.</param>
+/// <param name="horaError">Hora en la que ocurrió el error.</param>
+/// <returns>Texto formateado para almacenar como log de error estructurado.</returns>
+public static string FormatDbExecutionError(
     string nombreBD,
     string ip,
     int puerto,
     string biblioteca,
     string tabla,
-    List<string> sentenciasSQL,
-    int cantidadEjecuciones,
-    object resultado,
-    DateTime horaInicio,
-    TimeSpan duracion)
+    string sentenciaSQL,
+    Exception exception,
+    DateTime horaError)
 {
     var sb = new StringBuilder();
 
-    sb.AppendLine("============= DB EXECUTION =============");
+    sb.AppendLine("============= DB ERROR =============");
     sb.AppendLine($"Nombre BD: {nombreBD}");
     sb.AppendLine($"IP: {ip}");
     sb.AppendLine($"Puerto: {puerto}");
     sb.AppendLine($"Biblioteca: {biblioteca}");
     sb.AppendLine($"Tabla: {tabla}");
-    sb.AppendLine("SQL:");
-
-    foreach (var sentencia in sentenciasSQL)
-    {
-        sb.AppendLine(sentencia);
-    }
-
+    sb.AppendLine($"Hora del error: {horaError:yyyy-MM-dd HH:mm:ss}");
+    sb.AppendLine("Sentencia SQL:");
+    sb.AppendLine(sentenciaSQL);
     sb.AppendLine();
-    sb.AppendLine($"Cantidad de ejecuciones: {cantidadEjecuciones}");
-    sb.AppendLine($"Resultado: {resultado}");
-    sb.AppendLine($"Hora de inicio: {horaInicio:yyyy-MM-dd HH:mm:ss}");
-    sb.AppendLine($"Duración: {duracion.TotalMilliseconds} ms");
-    sb.AppendLine("============= END DB ===================");
+    sb.AppendLine("Excepción:");
+    sb.AppendLine(exception.Message);
+    sb.AppendLine("StackTrace:");
+    sb.AppendLine(exception.StackTrace ?? "Sin detalles de stack.");
+    sb.AppendLine("============= END DB ERROR ===================");
 
     return sb.ToString();
 }
 
 
-
-/// <summary>
-/// Extrae el nombre de la tabla desde una sentencia SQL básica (INSERT, UPDATE, DELETE, SELECT).
-/// </summary>
-/// <param name="sql">Sentencia SQL.</param>
-/// <returns>Nombre de la tabla o "Desconocida".</returns>
-public static string ExtractTableName(string sql)
-{
-    if (string.IsNullOrWhiteSpace(sql)) return "Desconocida";
-
-    string lowerSql = sql.ToLowerInvariant();
-
-    var patterns = new[]
-    {
-        @"insert\s+into\s+([a-zA-Z0-9_\.]+)",
-        @"update\s+([a-zA-Z0-9_\.]+)",
-        @"delete\s+from\s+([a-zA-Z0-9_\.]+)",
-        @"from\s+([a-zA-Z0-9_\.]+)"
-    };
-
-    foreach (var pattern in patterns)
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(lowerSql, pattern);
-        if (match.Success && match.Groups.Count > 1)
-            return match.Groups[1].Value;
-    }
-
-    return "Desconocida";
-}
-
-
-
-
-public void LogDatabaseSuccess(DbCommand command, long elapsedMs, HttpContext? context = null, string? customMessage = null)
+public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null)
 {
     try
     {
         var connectionInfo = LogHelper.ExtractDbConnectionInfo(command.Connection?.ConnectionString);
         var tabla = LogHelper.ExtractTableName(command.CommandText);
 
-        var formatted = LogFormatter.FormatDbExecution(
+        var formatted = LogFormatter.FormatDbExecutionError(
             nombreBD: connectionInfo.Database,
             ip: connectionInfo.Ip,
             puerto: connectionInfo.Port,
             biblioteca: connectionInfo.Library,
             tabla: tabla,
-            sentenciasSQL: new List<string> { command.CommandText },
-            cantidadEjecuciones: 1,
-            resultado: customMessage ?? "Éxito",
-            horaInicio: DateTime.Now.AddMilliseconds(-elapsedMs),
-            duracion: TimeSpan.FromMilliseconds(elapsedMs)
+            sentenciaSQL: command.CommandText,
+            exception: ex,
+            horaError: DateTime.Now
         );
 
         WriteLog(context, formatted);
+        AddExceptionLog(ex); // También lo guardás como log general si usás esa ruta
     }
-    catch (Exception ex)
+    catch (Exception errorAlLoguear)
     {
-        LogInternalError(ex);
+        LogInternalError(errorAlLoguear);
     }
 }
