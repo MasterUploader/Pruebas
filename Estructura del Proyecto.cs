@@ -1,76 +1,72 @@
 using Connections.Interfaces;
+using Connections.Managers;
 using Logging.Abstractions;
+using Logging.Decorators;
 using Microsoft.AspNetCore.Http;
 using System.Data.Common;
+using System.Data.OleDb;
 
-namespace Connections.Managers;
+namespace Connections.Providers.Database;
 
 /// <summary>
-/// Clase base reutilizable para conexiones de base de datos con soporte de logging estructurado.
-/// Encapsula la lógica común para abrir, cerrar y obtener comandos SQL instrumentados con logs.
+/// Proveedor de conexión a base de datos AS400 utilizando OleDb.
+/// Esta implementación está optimizada para ejecución directa de comandos SQL y logging estructurado.
 /// </summary>
-public abstract class LoggingDatabaseConnection : IDatabaseConnection
+public partial class AS400ConnectionProvider : LoggingDatabaseConnectionWrapper
 {
-    /// <summary>
-    /// Instancia de la conexión subyacente a la base de datos.
-    /// </summary>
-    protected readonly DbConnection _connection;
+    private readonly OleDbConnection _oleDbConnection;
+    private readonly ILoggingService _loggingService;
 
     /// <summary>
-    /// Servicio de logging utilizado para registrar los comandos SQL y sus métricas.
+    /// Inicializa una nueva instancia de <see cref="AS400ConnectionProvider"/>.
     /// </summary>
-    protected readonly ILoggingService _loggingService;
-
-    /// <summary>
-    /// Inicializa una nueva instancia de <see cref="LoggingDatabaseConnection"/>.
-    /// </summary>
-    /// <param name="connection">Conexión de base de datos concreta (por ejemplo, OleDbConnection).</param>
-    /// <param name="loggingService">Servicio de logging estructurado a utilizar.</param>
-    protected LoggingDatabaseConnection(DbConnection connection, ILoggingService loggingService)
+    /// <param name="connectionString">Cadena de conexión a AS400 en formato OleDb.</param>
+    /// <param name="loggingService">Servicio de logging estructurado.</param>
+    public AS400ConnectionProvider(string connectionString, ILoggingService loggingService) : base(new OleDbConnection(connectionString), loggingService)
     {
-        _connection = connection ?? throw new ArgumentNullException(nameof(connection));
-        _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
+        _oleDbConnection = new OleDbConnection(connectionString);
+        _loggingService = loggingService;
     }
 
     /// <summary>
-    /// Abre la conexión si aún no está abierta.
+    /// Abre la conexión si no está ya abierta.
     /// </summary>
     public void Open()
     {
-        if (_connection.State != System.Data.ConnectionState.Open)
-            _connection.Open();
+        if (_oleDbConnection.State != System.Data.ConnectionState.Open)
+            _oleDbConnection.Open();
     }
 
     /// <summary>
-    /// Cierra la conexión si aún no está cerrada.
+    /// Cierra la conexión si está abierta.
     /// </summary>
     public void Close()
     {
-        if (_connection.State != System.Data.ConnectionState.Closed)
-            _connection.Close();
+        if (_oleDbConnection.State != System.Data.ConnectionState.Closed)
+            _oleDbConnection.Close();
     }
 
     /// <summary>
     /// Indica si la conexión está actualmente abierta.
     /// </summary>
-    public bool IsConnected => _connection?.State == System.Data.ConnectionState.Open;
+    public bool IsConnected => _oleDbConnection?.State == System.Data.ConnectionState.Open;
 
     /// <summary>
-    /// Obtiene un comando de base de datos decorado con soporte de logging estructurado.
+    /// Obtiene un <see cref="DbCommand"/> decorado con soporte de logging estructurado.
     /// </summary>
-    /// <param name="context">Contexto HTTP opcional (puede usarse para incluir información de trazabilidad).</param>
-    /// <returns>Instancia de <see cref="DbCommand"/> decorada.</returns>
+    /// <param name="context">Contexto HTTP opcional para trazabilidad adicional.</param>
+    /// <returns>Comando decorado con logging.</returns>
     public DbCommand GetDbCommand(HttpContext? context = null)
     {
-        var command = _connection.CreateCommand();
-        return new LoggingDbCommandWrapper(command, _loggingService);
+        var command = _oleDbConnection.CreateCommand();
+        return new LoggingDbCommandWrapper(command, _loggingService); // ← El decorador correcto
     }
 
     /// <summary>
-    /// Libera los recursos utilizados por la conexión.
+    /// Libera los recursos de la conexión.
     /// </summary>
     public void Dispose()
     {
-        _connection?.Dispose();
+        _oleDbConnection?.Dispose();
     }
 }
