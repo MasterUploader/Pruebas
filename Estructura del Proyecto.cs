@@ -1,98 +1,39 @@
-using System.Diagnostics;
+<Project Sdk="Microsoft.NET.Sdk">
 
-namespace Common.Helpers;
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
 
-/// <summary>
-/// Clase utilitaria para medir tiempos de ejecución mediante Stopwatch de forma simplificada.
-/// </summary>
-public sealed class StopwatchHelper : IDisposable
-{
-    private readonly Stopwatch _stopwatch;
-    private readonly Action<string>? _onDisposeMessage;
-    private readonly string? _label;
+		<!-- NuGet Metadata -->
+		<PackageId>RestUtilities.Common</PackageId>
+		<Version>1.0.0</Version>
+		<Authors>Brayan René Banegas Mejía</Authors>
+		<Description>Componentes comunes reutilizables para utilidades en .NET 8: helpers, constantes y modelos base para APIs.</Description>
+		<PackageTags>Common;Utilities;Helpers;Regex;JSON;XML</PackageTags>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PlatformTarget>x64</PlatformTarget>
+		<Platforms>x64</Platforms>
+		<IncludeBuildOutput>true</IncludeBuildOutput>
+		<RemoveUnnecessaryImports>true</RemoveUnnecessaryImports>
+	</PropertyGroup>
 
-    /// <summary>
-    /// Crea una nueva instancia y empieza la medición automáticamente.
-    /// </summary>
-    private StopwatchHelper(string? label = null, Action<string>? onDisposeMessage = null)
-    {
-        _label = label;
-        _onDisposeMessage = onDisposeMessage;
-        _stopwatch = Stopwatch.StartNew();
-    }
+	
 
-    /// <summary>
-    /// Inicia un nuevo cronómetro.
-    /// </summary>
-    public static StopwatchHelper StartNew(string? label = null, Action<string>? onDisposeMessage = null)
-        => new(label, onDisposeMessage);
+</Project>
 
-    /// <summary>
-    /// Devuelve el tiempo transcurrido como TimeSpan.
-    /// </summary>
-    public TimeSpan Elapsed => _stopwatch.Elapsed;
 
-    /// <summary>
-    /// Devuelve el tiempo transcurrido en milisegundos.
-    /// </summary>
-    public long ElapsedMilliseconds => _stopwatch.ElapsedMilliseconds;
 
-    /// <summary>
-    /// Devuelve el tiempo transcurrido en segundos como número decimal.
-    /// </summary>
-    public double ElapsedSeconds => _stopwatch.Elapsed.TotalSeconds;
-
-    /// <summary>
-    /// Reinicia el cronómetro.
-    /// </summary>
-    public void Restart() => _stopwatch.Restart();
-
-    /// <summary>
-    /// Detiene el cronómetro.
-    /// </summary>
-    public void Stop() => _stopwatch.Stop();
-
-    /// <summary>
-    /// Devuelve una representación legible del tiempo transcurrido, por ejemplo: "1.234 segundos".
-    /// </summary>
-    public string ToReadable()
-        => $"{Elapsed.TotalSeconds:F3} segundos";
-
-    /// <summary>
-    /// Devuelve una cadena formateada con una etiqueta personalizada.
-    /// </summary>
-    public string ToLogFormat()
-        => string.IsNullOrWhiteSpace(_label)
-            ? $"Duración: {ToReadable()}"
-            : $"{_label} tomó {ToReadable()}";
-
-    /// <summary>
-    /// Detiene el cronómetro y devuelve el tiempo legible.
-    /// </summary>
-    public string StopAndGetReadable()
-    {
-        Stop();
-        return ToReadable();
-    }
-
-    /// <summary>
-    /// Detiene el cronómetro y devuelve la cadena de log con formato.
-    /// </summary>
-    public string StopAndGetLog()
-    {
-        Stop();
-        return ToLogFormat();
-    }
-
-    /// <summary>
-    /// Detiene y ejecuta la acción con el mensaje de log si se proporcionó.
-    /// </summary>
-    public void Dispose()
-    {
-        Stop();
-        if (_onDisposeMessage != null)
-        {
-            _onDisposeMessage(ToLogFormat());
-        }
-    }
-}
+<?xml version="1.0"?>
+<package >
+	<metadata>
+		<id>RestUtilities.Common</id>
+		<version>1.0.0</version>
+		<authors>Brayan René Banegas Mejía</authors>
+		<owners>Brayan René Banegas Mejía</owners>
+		<requireLicenseAcceptance>false</requireLicenseAcceptance>
+		<description>Componentes comunes reutilizables para proyectos .NET 8, incluyendo helpers, constantes y modelos base.</description>
+		<tags>Common Helpers Regex JSON XML Utilities .NET8</tags>
+		<copyright>Copyright © 2025</copyright>
+	</metadata>
+</package>
