@@ -8,8 +8,8 @@ using System.Diagnostics;
 namespace Connections.Providers.Database;
 
 /// <summary>
-/// Proveedor de conexión para AS400 usando únicamente OleDbCommand.
-/// No utiliza DbContext ni Entity Framework.
+/// Proveedor de conexión a base de datos AS400 utilizando OleDb.
+/// Esta implementación está optimizada para ejecución directa de comandos SQL y registra automáticamente logs estructurados.
 /// </summary>
 public class As400ConnectionProvider : LoggingDatabaseConnection
 {
@@ -19,6 +19,8 @@ public class As400ConnectionProvider : LoggingDatabaseConnection
     /// <summary>
     /// Inicializa una nueva instancia de <see cref="As400ConnectionProvider"/>.
     /// </summary>
+    /// <param name="connectionString">Cadena de conexión a AS400 en formato OleDb.</param>
+    /// <param name="loggingService">Instancia del servicio de logging para registrar las operaciones SQL.</param>
     public As400ConnectionProvider(string connectionString, ILoggingService loggingService)
         : base(new OleDbConnection(connectionString), loggingService)
     {
@@ -26,32 +28,36 @@ public class As400ConnectionProvider : LoggingDatabaseConnection
         _loggingService = loggingService;
     }
 
+    /// <summary>
+    /// Abre la conexión a AS400 si aún no está abierta.
+    /// </summary>
     public new void Open()
     {
         if (_oleDbConnection.State != ConnectionState.Open)
             _oleDbConnection.Open();
     }
 
+    /// <summary>
+    /// Cierra la conexión a AS400 si se encuentra abierta.
+    /// </summary>
     public new void Close()
     {
         if (_oleDbConnection.State == ConnectionState.Open)
             _oleDbConnection.Close();
     }
 
+    /// <summary>
+    /// Indica si la conexión a AS400 está actualmente activa.
+    /// </summary>
+    /// <returns>True si la conexión está abierta; False en caso contrario.</returns>
     public new bool IsConnected()
     {
         return _oleDbConnection.State == ConnectionState.Open;
     }
 
     /// <summary>
-    /// Retorna un comando OleDb sin ejecución.
+    /// Libera los recursos de la conexión AS400 y su conexión base.
     /// </summary>
-    public DbCommand GetDbCommand()
-    {
-        Open();
-        return _oleDbConnection.CreateCommand();
-    }
-
     public new void Dispose()
     {
         base.Dispose();
@@ -59,128 +65,170 @@ public class As400ConnectionProvider : LoggingDatabaseConnection
     }
 
     /// <summary>
-    /// Ejecuta un comando con ExecuteReader y registra el log.
+    /// Obtiene un comando OleDb que está envuelto para registrar automáticamente logs de ejecución SQL.
+    /// El comando intercepta los métodos Execute* para registrar éxito o error.
     /// </summary>
-    public DbDataReader ExecuteReaderWithLog(DbCommand command)
+    /// <returns>Instancia de <see cref="DbCommand"/> que registra logs automáticamente al ejecutarse.</returns>
+    public override DbCommand GetDbCommand()
     {
-        var stopwatch = Stopwatch.StartNew();
-        try
-        {
-            var reader = command.ExecuteReader();
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseSuccess(command, stopwatch.ElapsedMilliseconds);
-            return reader;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseError(command, ex);
-            throw;
-        }
+        Open();
+        var command = _oleDbConnection.CreateCommand();
+        return new LoggingDbCommandWrapper(command, _loggingService);
     }
 
     /// <summary>
-    /// Ejecuta un comando con ExecuteNonQuery y registra el log.
+    /// Clase interna que envuelve un DbCommand real e intercepta los métodos Execute para registrar logs automáticamente.
+    /// No altera la firma pública del comando y permite usarse de forma transparente.
     /// </summary>
-    public int ExecuteNonQueryWithLog(DbCommand command)
+    private class LoggingDbCommandWrapper : DbCommand
     {
-        var stopwatch = Stopwatch.StartNew();
-        try
-        {
-            int affectedRows = command.ExecuteNonQuery();
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseSuccess(command, stopwatch.ElapsedMilliseconds, null, $"Filas afectadas: {affectedRows}");
-            return affectedRows;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseError(command, ex);
-            throw;
-        }
-    }
+        private readonly DbCommand _inner;
+        private readonly ILoggingService _loggingService;
 
-    /// <summary>
-    /// Ejecuta un comando con ExecuteScalar y registra el log.
-    /// </summary>
-    public object? ExecuteScalarWithLog(DbCommand command)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        try
+        /// <summary>
+        /// Inicializa un nuevo comando que encapsula la ejecución real con soporte de logging estructurado.
+        /// </summary>
+        /// <param name="inner">Instancia real de DbCommand.</param>
+        /// <param name="loggingService">Servicio de logging a utilizar.</param>
+        public LoggingDbCommandWrapper(DbCommand inner, ILoggingService loggingService)
         {
-            var result = command.ExecuteScalar();
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseSuccess(command, stopwatch.ElapsedMilliseconds, null, $"Resultado: {result}");
-            return result;
+            _inner = inner;
+            _loggingService = loggingService;
         }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseError(command, ex);
-            throw;
-        }
-    }
 
-    /// <summary>
-    /// Ejecuta un comando asincrónicamente con ExecuteReaderAsync y registra el log.
-    /// </summary>
-    public async Task<DbDataReader> ExecuteReaderWithLogAsync(DbCommand command)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        try
-        {
-            var reader = await ((OleDbCommand)command).ExecuteReaderAsync();
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseSuccess(command, stopwatch.ElapsedMilliseconds);
-            return reader;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseError(command, ex);
-            throw;
-        }
-    }
+        public override string CommandText { get => _inner.CommandText; set => _inner.CommandText = value; }
+        public override int CommandTimeout { get => _inner.CommandTimeout; set => _inner.CommandTimeout = value; }
+        public override CommandType CommandType { get => _inner.CommandType; set => _inner.CommandType = value; }
+        public override UpdateRowSource UpdatedRowSource { get => _inner.UpdatedRowSource; set => _inner.UpdatedRowSource = value; }
 
-    /// <summary>
-    /// Ejecuta un comando asincrónicamente con ExecuteNonQueryAsync y registra el log.
-    /// </summary>
-    public async Task<int> ExecuteNonQueryWithLogAsync(DbCommand command)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        try
-        {
-            int affectedRows = await ((OleDbCommand)command).ExecuteNonQueryAsync();
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseSuccess(command, stopwatch.ElapsedMilliseconds, null, $"Filas afectadas: {affectedRows}");
-            return affectedRows;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseError(command, ex);
-            throw;
-        }
-    }
+        protected override DbConnection DbConnection { get => _inner.Connection; set => _inner.Connection = value; }
+        protected override DbTransaction DbTransaction { get => _inner.Transaction; set => _inner.Transaction = value; }
+        public override bool DesignTimeVisible { get => _inner.DesignTimeVisible; set => _inner.DesignTimeVisible = value; }
 
-    /// <summary>
-    /// Ejecuta un comando asincrónicamente con ExecuteScalarAsync y registra el log.
-    /// </summary>
-    public async Task<object?> ExecuteScalarWithLogAsync(DbCommand command)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        try
+        protected override DbParameterCollection DbParameterCollection => _inner.Parameters;
+
+        public override void Cancel() => _inner.Cancel();
+        public override void Prepare() => _inner.Prepare();
+        protected override DbParameter CreateDbParameter() => _inner.CreateParameter();
+
+        /// <summary>
+        /// Ejecuta el comando como operación no consultiva (INSERT, UPDATE, DELETE) y registra automáticamente el log.
+        /// </summary>
+        public override int ExecuteNonQuery()
         {
-            var result = await ((OleDbCommand)command).ExecuteScalarAsync();
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseSuccess(command, stopwatch.ElapsedMilliseconds, null, $"Resultado: {result}");
-            return result;
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                int result = _inner.ExecuteNonQuery();
+                sw.Stop();
+                _loggingService?.LogDatabaseSuccess(_inner, sw.ElapsedMilliseconds, null, $"Filas afectadas: {result}");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                _loggingService?.LogDatabaseError(_inner, ex);
+                throw;
+            }
         }
-        catch (Exception ex)
+
+        /// <summary>
+        /// Ejecuta el comando y retorna el primer valor de la primera fila del resultado.
+        /// Registra automáticamente el log de ejecución.
+        /// </summary>
+        public override object? ExecuteScalar()
         {
-            stopwatch.Stop();
-            _loggingService?.LogDatabaseError(command, ex);
-            throw;
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                var result = _inner.ExecuteScalar();
+                sw.Stop();
+                _loggingService?.LogDatabaseSuccess(_inner, sw.ElapsedMilliseconds, null, $"Resultado: {result}");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                _loggingService?.LogDatabaseError(_inner, ex);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Ejecuta el comando como consulta con lectura de datos y registra automáticamente el log.
+        /// </summary>
+        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
+        {
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                var reader = _inner.ExecuteReader(behavior);
+                sw.Stop();
+                _loggingService?.LogDatabaseSuccess(_inner, sw.ElapsedMilliseconds);
+                return reader;
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                _loggingService?.LogDatabaseError(_inner, ex);
+                throw;
+            }
+        }
+
+        // Métodos asincrónicos
+
+        public override async Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+        {
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                int result = await ((OleDbCommand)_inner).ExecuteNonQueryAsync(cancellationToken);
+                sw.Stop();
+                _loggingService?.LogDatabaseSuccess(_inner, sw.ElapsedMilliseconds, null, $"Filas afectadas: {result}");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                _loggingService?.LogDatabaseError(_inner, ex);
+                throw;
+            }
+        }
+
+        public override async Task<object?> ExecuteScalarAsync(CancellationToken cancellationToken)
+        {
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                var result = await ((OleDbCommand)_inner).ExecuteScalarAsync(cancellationToken);
+                sw.Stop();
+                _loggingService?.LogDatabaseSuccess(_inner, sw.ElapsedMilliseconds, null, $"Resultado: {result}");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                _loggingService?.LogDatabaseError(_inner, ex);
+                throw;
+            }
+        }
+
+        protected override async Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+        {
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                var reader = await ((OleDbCommand)_inner).ExecuteReaderAsync(behavior, cancellationToken);
+                sw.Stop();
+                _loggingService?.LogDatabaseSuccess(_inner, sw.ElapsedMilliseconds);
+                return reader;
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                _loggingService?.LogDatabaseError(_inner, ex);
+                throw;
+            }
         }
     }
 }
