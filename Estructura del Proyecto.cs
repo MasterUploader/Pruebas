@@ -1,164 +1,214 @@
 using Connections.Interfaces;
-using Microsoft.AspNetCore.Mvc;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Models.Dtos.CompaniesDtos;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.IServiceReference;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Utils;
-using Newtonsoft.Json;
+using MS_BAN_38_UTH_RECAUDACION_PAGOS.Models.Dtos.AutenticacionDtos;
+using SUNITP.LIB.ManagerProcedures;
+using SUNITP.LIB.ManagerProcedures.Concrete;
+using SUNITP.LIB.QueryStringGenerator;
 using System.Data.OleDb;
-using System.Net;
+using System.Globalization;
 
-namespace MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Companies.Companies_Services;
-
+namespace MS_BAN_38_UTH_RECAUDACION_PAGOS.Utils;
 /// <summary>
-/// Clase de Servicio CompaniesServices
+/// Clase Utilitaria Token, contiene multiples métodos requeridos para manipular los tokens de Ginih.
 /// </summary>
-/// <param name="_httpClientFactory">Instancia de IHttpClientFactory.</param>
-/// <param name="_connection">Instancia de IDatabaseConnection</param>
-/// <param name="_contextAccessor">Instancia de IHttpContextAccesor</param>
-public class CompaniesServices(IHttpClientFactory _httpClientFactory, IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : ICompaniesServices
+public class Token 
 {
+    private readonly IDatabaseConnection _connection;
+    private readonly IHttpContextAccessor _contextAccessor;
+    private EasyMappingTool response = new();
+    private readonly string? _tableName = "TOKENUTH";
+    private readonly string? _library = "BCAH96DTA";
+    private readonly string _status = string.Empty;
+    private readonly string _message = string.Empty;
+    private readonly string _rToken = string.Empty;
+    private readonly string _createdAt = string.Empty;
+    private readonly string _timeStamp = string.Empty;
+    private readonly string _value = string.Empty;
+    private readonly string _name = string.Empty;
+    private string _vence = string.Empty;
+    private string _creado = string.Empty;
+    private string _token = string.Empty;
 
     /// <summary>
-    /// Método DoProcessAsync para Companies.
+    /// Constructor de la Clase Token.
     /// </summary>
-    /// <param name="getCompaniesDto">Objeto DTO.</param>
-    /// <returns>Objeto GetCompaniesResponseDto.</returns>
-    public async Task<GetCompaniesResponseDto> DoProcessAsync(GetCompaniesDto getCompaniesDto)
+    /// <param name="tokenStructure">Instancia de PostLoginResponseDto</param>
+    /// <param name="connection">Instancia de IDatabaseConnection. </param>
+    public Token(PostLoginResponseDto tokenStructure, IDatabaseConnection connection, IHttpContextAccessor contextAccessor)
     {
-        GetCompaniesResponseDto response = await ConsumoWebServiceConsultaCompañiasPorCobrar(getCompaniesDto);
-
-        return MapResponse(getCompaniesDto, response);
+        _status = tokenStructure.Status;
+        _message = tokenStructure.Message;
+        _rToken = tokenStructure.Data.RefreshToken;
+        _createdAt = tokenStructure.Data.CreatedAt;
+        _timeStamp = tokenStructure.TimeStamp;
+        _value = tokenStructure.Code.Value;
+        _name = tokenStructure.Code.Name;
+        _connection = connection;
+        _contextAccessor = contextAccessor;
     }
 
-    [HttpGet]
-    private async Task<GetCompaniesResponseDto> ConsumoWebServiceConsultaCompañiasPorCobrar(GetCompaniesDto getCompaniesDto)
+    /// <summary>
+    /// Constructo de Clase Token sin parametros de ingreso, inicializa campos.
+    /// </summary>
+    public Token(IDatabaseConnection connection, IHttpContextAccessor contextAccessor)
     {
-        GetCompaniesResponseDto _getCompaniesResponseDto = new();
-        RefreshToken _refreshToken = new(_connection, _contextAccessor);
-        URLsExt _url = new();
-
-        //Obtenemos las variables globales
-        string _baseUrl = GlobalConnection.Current.Host;
-
-        var refresResponse = await _refreshToken.DoRefreshToken();
-
-        string _JWTToken = refresResponse.Data.JWT;
-        string _limit = getCompaniesDto.Limit;
-        string _nextToken = getCompaniesDto.NextToken;
-
-        var baseAddressExtra = _baseUrl + "/companies?limit=" + _limit + "&NextToken=" + _nextToken;
-
-        if (refresResponse.Status.Equals("success"))
-        {
-            try
-            {
-                using var client = _httpClientFactory.CreateClient("GINIH");
-
-                if (!string.IsNullOrEmpty(_baseUrl) && Uri.IsWellFormedUriString(_baseUrl, UriKind.RelativeOrAbsolute))
-                {
-                    client.BaseAddress = new Uri(_url.QuerySchemeEmptyFilter(baseAddressExtra));
-                }
-                client.DefaultRequestHeaders.Add("Authorization", _JWTToken);
-
-                using HttpResponseMessage response = await client.GetAsync(client.BaseAddress);
-                var json_Respuesta = await response.Content.ReadAsStringAsync();
-                var deserialized = JsonConvert.DeserializeObject<GetCompaniesResponseDto>(json_Respuesta);
-
-                if (deserialized?.Data.Count != 0 && deserialized != null && (response.StatusCode.ToString().Equals("OK") || response.StatusCode.ToString().Equals("success")))
-                {
-                    _getCompaniesResponseDto = deserialized;
-                    _getCompaniesResponseDto.Status = response.StatusCode.ToString();
-                    _getCompaniesResponseDto.Error = "0";
-                    _getCompaniesResponseDto.Mensaje = "Proceso ejecutado Satisfactoriamente";
-                    return _getCompaniesResponseDto;
-                }
-                _getCompaniesResponseDto = deserialized ?? new GetCompaniesResponseDto();
-                _getCompaniesResponseDto.Status = response.StatusCode.ToString();
-                _getCompaniesResponseDto.Message = "La consulta no devolvio valores";
-                _getCompaniesResponseDto.Error = "1";
-                _getCompaniesResponseDto.Mensaje = "Proceso ejecutado InSatisfactoriamente";
-                return _getCompaniesResponseDto;
-            }
-            catch (Exception ex)
-            {
-                _getCompaniesResponseDto.Status = HttpStatusCode.NotFound.ToString();
-                _getCompaniesResponseDto.Message = ex.Message;
-                _getCompaniesResponseDto.Error = "1";
-                _getCompaniesResponseDto.Mensaje = "Proceso ejecutado InSatisfactoriamente";
-                return _getCompaniesResponseDto;
-            }
-        }
-        _getCompaniesResponseDto.Status = HttpStatusCode.BadRequest.ToString();
-        _getCompaniesResponseDto.Message = "¡¡El JWT no se valido Correctamente!!";
-        _getCompaniesResponseDto.Error = "1";
-        _getCompaniesResponseDto.Mensaje = "Proceso ejecutado InSatisfactoriamente";
-        return _getCompaniesResponseDto;
+        _connection = connection;
+        _contextAccessor = contextAccessor;
     }
 
-    private GetCompaniesResponseDto MapResponse(GetCompaniesDto getCompaniesDto, GetCompaniesResponseDto getCompaniesResponseDto)
+    /// <summary>
+    /// Guarda el Token en la tabla en el as400
+    /// </summary>
+    /// <returns>Retorna un valor boleano segun sea exitoso o no el almacenamiento</returns>
+    public bool SavenTokenUTH()
     {
-        _connection.Open();
-
         try
         {
-            if ((getCompaniesResponseDto.Status == "success" || getCompaniesResponseDto.Status == "OK") && _connection.IsConnected)
+            var temp = DateTime.ParseExact(_createdAt, "yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture).AddYears(2);
+            _vence = temp.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+
+            _connection.Open();
+
+            var oleDBCommand = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+            if (oleDBCommand.Connection is not OleDbConnection oleDbConnection)
             {
-
-                int correlativo = 0;
-                GetCompaniesResponseDto[] arrayCompanies = new[] { getCompaniesResponseDto };
-                string jsonString = JsonConvert.SerializeObject(arrayCompanies);
-                var listGetCompaniesResponse = JsonConvert.DeserializeObject<List<GetCompaniesResponseDto>>(jsonString)!;
-                FieldsQuery param = new();
-
-                foreach (GetCompaniesResponseDto list2 in listGetCompaniesResponse)
-                {
-                    foreach (var list3 in list2.Data)
-                    {
-                        string sqlQuery = "INSERT INTO BCAH96DTA.UTH01CCC (CCC00GUID, CCC01CORR, CCC02FECH, CCC03HORA, CCC04CAJE, CCC05BANC, CCC06SUCU, CCC07TERM, CCC08LIMI, CCC09NTOK, CCC10STAT, CCC11MESS, CCC12DTID, CCC12DTNA, CCC13DTPO, CCC13TIST, CCC14MDTI, CCC15MDHM, CCC16MDNT, CCC17COVA, CCC18CONA, CCC19ERRO, CCC20MENS) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-                        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-                        command.CommandText = sqlQuery;
-
-                        command.CommandType = System.Data.CommandType.Text;
-                        param.AddOleDbParameter(command,"CCC00GUID", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Guid);
-                        param.AddOleDbParameter(command,"CCC01CORR", OleDbType.Char, correlativo.ToString());
-                        param.AddOleDbParameter(command,"CCC02FECH", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Fecha);
-                        param.AddOleDbParameter(command,"CCC03HORA", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Hora);
-                        param.AddOleDbParameter(command,"CCC04CAJE", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Cajero);
-                        param.AddOleDbParameter(command,"CCC05BANC", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Banco);
-                        param.AddOleDbParameter(command,"CCC06SUCU", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Sucursal);
-                        param.AddOleDbParameter(command,"CCC07TERM", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Terminal);
-                        param.AddOleDbParameter(command,"CCC08LIMI", OleDbType.Char, getCompaniesDto.Limit);
-                        param.AddOleDbParameter(command,"CCC09NTOK", OleDbType.Char, getCompaniesDto.NextToken);
-                        param.AddOleDbParameter(command,"CCC10STAT", OleDbType.Char, list2.Status);
-                        param.AddOleDbParameter(command,"CCC11MESS", OleDbType.Char, list2.Message);
-                        param.AddOleDbParameter(command,"CCC12DTID", OleDbType.Char, list3.Id);
-                        param.AddOleDbParameter(command,"CCC12DTNA", OleDbType.Char, list3.Name);
-                        param.AddOleDbParameter(command,"CCC13DTPO", OleDbType.Char, (list3.PayableOptions == null) ? "Nulo" : string.Join(",", list3.PayableOptions));
-                        param.AddOleDbParameter(command,"CCC13TIST", OleDbType.Char, list2.Timestamp.ToString());
-                        param.AddOleDbParameter(command,"CCC14MDTI", OleDbType.Char, list2.Metadata.Items);
-                        param.AddOleDbParameter(command,"CCC15MDHM", OleDbType.Char, ((list2.Metadata.HasMore.ToString() == null) ? "NO" : list2.Metadata.HasMore.ToString()));
-                        param.AddOleDbParameter(command,"CCC16MDNT", OleDbType.Char, ((list2.Metadata.NextToken == null) ? "" : list2.Metadata.NextToken));
-                        param.AddOleDbParameter(command,"CCC17COVA", OleDbType.Char, ((list2.Code.Value.ToString() == null) ? "124" : list2.Code.Value.ToString()));
-                        param.AddOleDbParameter(command,"CCC18CONA", OleDbType.Char, ((list2.Code.Name == null) ? "" : list2.Code.Name));
-                        param.AddOleDbParameter(command,"CCC19ERRO", OleDbType.Char, getCompaniesResponseDto.Error);
-                        param.AddOleDbParameter(command,"CCC20MENS", OleDbType.Char, ((getCompaniesResponseDto.Mensaje == null) ? "Proceso ejecutado Satisfactoriamente" : getCompaniesResponseDto.Mensaje));
-
-                        command.ExecuteNonQuery();
-
-                        correlativo++;
-                    }
-                }
+                return false;
             }
-            return getCompaniesResponseDto;
+            var oleDBConnection = (OleDbConnection)oleDBCommand.Connection;
+
+            var sqsg = new ServiceQueryStringGenerator();
+            EasyCrudDataModels ecdm = new(oleDBConnection);
+            var fQuery = new FieldsQuery();
+            var validacion = fQuery.FieldQuery("ID", "1", OleDbType.Integer, 1, "0");
+
+            sqsg._iQueryStringGenerator.SelectAll();
+            sqsg._iQueryStringGenerator.From(_library, _tableName);
+            sqsg._iQueryStringGenerator.WhereAnd(validacion, "=");
+            var responseS = ecdm.SelectExecute(sqsg);
+
+            if (responseS.Count == 0)
+            {
+                sqsg = new ServiceQueryStringGenerator();
+                sqsg._iQueryStringGenerator.InsertIntoFrom(_library, _tableName);
+                sqsg._iQueryStringGenerator.InsertValue("ID", "1", OleDbType.Integer, 1, 0);
+                sqsg._iQueryStringGenerator.InsertValue("STATUS", _status, OleDbType.VarChar, 50, 0);
+                sqsg._iQueryStringGenerator.InsertValue("MESSAGE", _message, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.InsertValue("RTOKEN", _rToken, OleDbType.VarChar, 2000, 0);
+                sqsg._iQueryStringGenerator.InsertValue("CREATEDAT", _createdAt, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.InsertValue("TIMESTAMP", _timeStamp, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.InsertValue("VALUE", _value, OleDbType.VarChar, 3, 0);
+                sqsg._iQueryStringGenerator.InsertValue("NAME", _name, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.InsertValue("VENCE", _vence, OleDbType.VarChar, 100, 0);
+
+                //respuesta del query
+                response = ecdm.InsertExecute(sqsg);
+            }
+            else
+            {
+                sqsg = new ServiceQueryStringGenerator();
+                sqsg._iQueryStringGenerator.UpdateFrom(_library, _tableName);
+                sqsg._iQueryStringGenerator.UpdateSet("ID", "1", OleDbType.Integer, 1, 0);
+                sqsg._iQueryStringGenerator.UpdateSet("STATUS", _status, OleDbType.VarChar, 50, 0);
+                sqsg._iQueryStringGenerator.UpdateSet("MESSAGE", _message, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.UpdateSet("RTOKEN", _rToken, OleDbType.VarChar, 2000, 0);
+                sqsg._iQueryStringGenerator.UpdateSet("CREATEDAT", _createdAt, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.UpdateSet("TIMESTAMP", _timeStamp, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.UpdateSet("VALUE", _value, OleDbType.VarChar, 3, 0);
+                sqsg._iQueryStringGenerator.UpdateSet("NAME", _name, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.UpdateSet("VENCE", _vence, OleDbType.VarChar, 100, 0);
+                sqsg._iQueryStringGenerator.WhereAnd(validacion, "=");
+
+                //respuesta del query
+                response = ecdm.UpdateExecute(sqsg);
+            }
+
+
+            if (response.GetEasyParameter("_defaultError").value.Equals(""))
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
         }
         catch (Exception ex)
         {
-            getCompaniesResponseDto.Mensaje = ex.Message;
-            getCompaniesResponseDto.Error = "106";
-            getCompaniesResponseDto.Status = "InternalServerError";
-
-
-            return getCompaniesResponseDto;
+            //Temporal hasta manejar los logs
+            Console.Clear();
+            Console.WriteLine(ex.Message);
+            return false;
         }
+    }
+
+    /// <summary>
+    /// Metodo que obtiene el token secreto de la tabla en el as400
+    /// </summary>
+    /// <param name="rToken">Token registrado.</param>
+    /// <returns>Retorna un string de tipo out por parametro</returns>
+
+    public bool GetToken(out string rToken)
+    {
+        try
+        {
+            _connection.Open();
+            var oleDBCommand = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+            if (oleDBCommand.Connection is not OleDbConnection oleDbConnection)
+            {
+                rToken = "";
+                return false;
+            }
+
+            var oleDBConnection = (OleDbConnection)oleDBCommand.Connection;
+
+            var sqsg = new ServiceQueryStringGenerator();
+            EasyCrudDataModels ecdm = new(oleDBConnection);
+
+            var fQuery = new FieldsQuery();
+            var validacion = fQuery.FieldQuery("ID", "1", OleDbType.Integer, 1, "0");
+
+            sqsg._iQueryStringGenerator.SelectAll();
+            sqsg._iQueryStringGenerator.From(_library, _tableName);
+            sqsg._iQueryStringGenerator.WhereAnd(validacion, "=");
+            var responseS = ecdm.SelectExecute(sqsg);
+
+            //Cerrar Conexión
+            _connection.Close();
+
+            if (responseS.Count == 0)
+            {
+                rToken = "";
+                return false;
+            }
+
+            foreach (var item in responseS)
+            {
+                _vence = item.GetValue("VENCE");
+                _creado = item.GetValue("CREATEDAT");
+                _token = item.GetValue("RTOKEN");
+            }
+
+            DateTime date1 = DateTime.ParseExact(_vence, "yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+            DateTime date2 = DateTime.ParseExact(_creado, "yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+
+            var diferenceTime = date1 - date2;
+
+            if (diferenceTime.Days > 0)
+            {
+                rToken = _token;
+                return true;
+            }
+            rToken = "";
+            return false;
+        }
+        catch (Exception ex)
+        {
+            //Temporal hasta manejar los logs
+            Console.Clear();
+            Console.WriteLine(ex.Message);
+            _connection.Close();
+            rToken = "";
+            return false;
+        }
+
     }
 }
