@@ -1,33 +1,58 @@
-namespace Logging.Models
+using Connections.Interfaces;
+using Connections.Logging;
+using Logging.Abstractions;
+using Microsoft.AspNetCore.Http;
+using System.Data.Common;
+
+namespace Connections.Managers;
+
+/// <summary>
+/// Clase base reutilizable para conexiones de base de datos que requieren logging automático.
+/// Proporciona funcionalidad estándar para apertura, cierre y monitoreo de comandos SQL.
+/// </summary>
+public abstract class LoggingDatabaseConnection : IDatabaseConnection
 {
+    protected readonly ILoggingService _loggingService;
+    protected DbConnection _connection;
+
     /// <summary>
-    /// Representa la información de una ejecución SQL realizada mediante un comando.
+    /// Inicializa una nueva instancia de la clase <see cref="LoggingDatabaseConnection"/>.
     /// </summary>
-    public class DbExecutionInfo
+    /// <param name="connection">Instancia de conexión a base de datos subyacente.</param>
+    /// <param name="loggingService">Servicio de logging estructurado.</param>
+    protected LoggingDatabaseConnection(DbConnection connection, ILoggingService loggingService)
     {
-        /// <summary>
-        /// Comando SQL ejecutado.
-        /// </summary>
-        public string Sql { get; set; } = string.Empty;
+        _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+        _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
+    }
 
-        /// <summary>
-        /// Tiempo total de ejecución en milisegundos.
-        /// </summary>
-        public long DurationMs { get; set; }
+    /// <inheritdoc />
+    public void Open()
+    {
+        if (_connection.State != System.Data.ConnectionState.Open)
+            _connection.Open();
+    }
 
-        /// <summary>
-        /// Resultado de la ejecución (cantidad de filas afectadas, lector, etc.).
-        /// </summary>
-        public object? Result { get; set; }
+    /// <inheritdoc />
+    public void Close()
+    {
+        if (_connection.State != System.Data.ConnectionState.Closed)
+            _connection.Close();
+    }
 
-        /// <summary>
-        /// Hora de inicio de la ejecución.
-        /// </summary>
-        public DateTime StartTime { get; set; }
+    /// <inheritdoc />
+    public bool IsConnected => _connection?.State == System.Data.ConnectionState.Open;
 
-        /// <summary>
-        /// Tipo de operación ejecutada (ExecuteNonQuery, ExecuteScalar, etc.).
-        /// </summary>
-        public string CommandType { get; set; } = string.Empty;
+    /// <inheritdoc />
+    public DbCommand GetDbCommand(HttpContext? context = null)
+    {
+        var command = _connection.CreateCommand();
+        return new LoggingDbCommand(command, context, _loggingService);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _connection?.Dispose();
     }
 }
