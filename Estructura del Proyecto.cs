@@ -1,49 +1,70 @@
 using System;
-using System.Data;
 
 namespace RestUtilities.QueryBuilder.Attributes
 {
     /// <summary>
-    /// Atributo utilizado para mapear una propiedad de una clase con una columna SQL.
-    /// Permite definir el nombre exacto de la columna en la base de datos,
-    /// el tipo de dato SQL y su longitud o precisión.
+    /// Atributo utilizado para excluir una propiedad de una clase
+    /// durante la generación automática de sentencias SQL.
+    /// 
+    /// Este atributo indica que la propiedad no debe incluirse en cláusulas
+    /// como SELECT, INSERT o UPDATE al construir dinámicamente una consulta.
     /// </summary>
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
-    public class SqlColumnAttribute : Attribute
+    public class SqlIgnoreAttribute : Attribute
     {
         /// <summary>
-        /// Nombre exacto de la columna en la base de datos.
+        /// Inicializa una nueva instancia del atributo SqlIgnoreAttribute.
         /// </summary>
-        public string ColumnName { get; }
-
-        /// <summary>
-        /// Tipo de dato SQL que se debe utilizar (compatible con OleDbType).
-        /// </summary>
-        public OleDbType SqlType { get; }
-
-        /// <summary>
-        /// Longitud máxima permitida del campo (opcional, aplicable a tipos CHAR, VARCHAR, etc.).
-        /// </summary>
-        public int? Length { get; }
-
-        /// <summary>
-        /// Número de decimales permitidos (opcional, para tipos numéricos con precisión).
-        /// </summary>
-        public int? Scale { get; }
-
-        /// <summary>
-        /// Inicializa una nueva instancia del atributo SqlColumnAttribute.
-        /// </summary>
-        /// <param name="columnName">Nombre de la columna SQL.</param>
-        /// <param name="sqlType">Tipo de dato SQL (OleDbType).</param>
-        /// <param name="length">Longitud máxima permitida (opcional).</param>
-        /// <param name="scale">Número de decimales (opcional).</param>
-        public SqlColumnAttribute(string columnName, OleDbType sqlType, int? length = null, int? scale = null)
+        public SqlIgnoreAttribute()
         {
-            ColumnName = columnName;
-            SqlType = sqlType;
-            Length = length;
-            Scale = scale;
+        }
+    }
+}
+
+
+using System;
+
+namespace RestUtilities.QueryBuilder.Attributes
+{
+    /// <summary>
+    /// Atributo utilizado para marcar una propiedad como clave primaria en una tabla SQL.
+    /// Esto permite identificar la columna como parte de la llave al generar WHERE en UPDATE o DELETE.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    public class SqlKeyAttribute : Attribute
+    {
+        /// <summary>
+        /// Inicializa una nueva instancia del atributo SqlKeyAttribute.
+        /// </summary>
+        public SqlKeyAttribute()
+        {
+        }
+    }
+}
+
+using System;
+
+namespace RestUtilities.QueryBuilder.Attributes
+{
+    /// <summary>
+    /// Atributo utilizado para indicar explícitamente el nombre de la tabla
+    /// asociada a una clase cuando no coincide con el nombre de la clase en C#.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    public class SqlTableAttribute : Attribute
+    {
+        /// <summary>
+        /// Nombre de la tabla en la base de datos.
+        /// </summary>
+        public string TableName { get; }
+
+        /// <summary>
+        /// Inicializa una nueva instancia del atributo SqlTableAttribute.
+        /// </summary>
+        /// <param name="tableName">Nombre de la tabla.</param>
+        public SqlTableAttribute(string tableName)
+        {
+            TableName = tableName;
         }
     }
 }
