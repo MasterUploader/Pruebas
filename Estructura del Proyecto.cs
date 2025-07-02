@@ -1,298 +1,173 @@
-using Connections.Interfaces;
-using Microsoft.AspNetCore.Mvc;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Models.Dtos.AutenticacionDtos;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Repository.IRepository.Autenticacion;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Utils;
-using Newtonsoft.Json;
-using System.Net;
-using System.Text;
+using Logging.Abstractions;
+using Logging.Models;
+using Microsoft.AspNetCore.Http;
+using System.Data.Common;
+using System.Diagnostics;
 
-namespace MS_BAN_38_UTH_RECAUDACION_PAGOS.Repository;
+namespace Logging.Decorators;
 
 /// <summary>
-/// Clase Login Repository.
+/// Decorador para interceptar y registrar automáticamente logs SQL al ejecutar comandos de base de datos.
+/// Guarda el log acumulado al hacer <see cref="Dispose"/>.
 /// </summary>
-public class LoginRepository(IHttpClientFactory _httpClientFactory, IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : ILoginRepository
+public class LoggingDbCommandWrapper : DbCommand
 {
+    private readonly DbCommand _innerCommand;
+    private readonly ILoggingService _loggingService;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly Stopwatch _stopwatch = new();
+    private readonly object _lock = new();
+
+    private int _executionCount = 0;
+    private int _totalAffectedRows = 0;
+    private DateTime _startTime;
+    private string _commandText = string.Empty;
+    private bool _isFinalized = false;
 
     /// <summary>
-    /// Para obtener un refresh-token necesitas hacer una llamada al endpoint de login. La respuesta a esta llamada obtendrá un secret token que necesitarás para obtener JWT válidos para los request. 
-    /// El JWT dura 5 minutos y el refresh-token tiene una duración por defecto de 2 años (Recibirás una notificación para que puedas renovarlo antes de vencer). Si ya tienes acceso al portal de integración, puedes acceder o volver a generar uno nuevo en la vista developer -> secret.
+    /// Inicializa una nueva instancia del decorador <see cref="LoggingDbCommandWrapper"/>.
     /// </summary>
-    /// <param name="usuarioLoginDto">Objeto de Transferencia Dto</param>
-    /// <returns>Retorna un Objeto de Tipo PostLoginResponseDto</returns>
-
-    [HttpPost]
-    public async Task<PostLoginResponseDto> Login(PostUsuarioLoginDto usuarioLoginDto)
+    /// <param name="innerCommand">Comando original a decorar.</param>
+    /// <param name="loggingService">Servicio de logging estructurado.</param>
+    /// <param name="httpContextAccessor">Accessor para el contexto HTTP, útil para trazabilidad.</param>
+    public LoggingDbCommandWrapper(DbCommand innerCommand, ILoggingService loggingService, IHttpContextAccessor? httpContextAccessor = null)
     {
-        try
+        _innerCommand = innerCommand;
+        _loggingService = loggingService;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    /// <inheritdoc />
+    public override int ExecuteNonQuery()
+    {
+        StartIfNeeded();
+        var result = _innerCommand.ExecuteNonQuery();
+        RegisterExecution(result);
+        return result;
+    }
+
+    /// <inheritdoc />
+    public override object? ExecuteScalar()
+    {
+        StartIfNeeded();
+        var result = _innerCommand.ExecuteScalar();
+        RegisterExecution(result != null ? 1 : 0);
+        return result;
+    }
+
+    /// <inheritdoc />
+    public override DbDataReader ExecuteReader()
+    {
+        StartIfNeeded();
+        var reader = _innerCommand.ExecuteReader();
+        RegisterExecution(-1);
+        return reader;
+    }
+
+    /// <inheritdoc />
+    public override DbDataReader ExecuteReader(System.Data.CommandBehavior behavior)
+    {
+        StartIfNeeded();
+        var reader = _innerCommand.ExecuteReader(behavior);
+        RegisterExecution(-1);
+        return reader;
+    }
+
+    /// <summary>
+    /// Guarda automáticamente el log al liberar el comando si hubo ejecuciones.
+    /// </summary>
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        _innerCommand.Dispose();
+        FinalizeAndLog();
+    }
+
+    /// <summary>
+    /// Consolida y guarda el log estructurado si no ha sido registrado aún.
+    /// </summary>
+    private void FinalizeAndLog()
+    {
+        lock (_lock)
         {
-            //Obtenemos las variables globales
-            string _baseUrl = GlobalConnection.Current.Host;
+            if (_isFinalized || _executionCount == 0)
+                return;
 
-            PostLoginResponseDto _postLoginResponseDto = new();
+            _stopwatch.Stop();
+            _isFinalized = true;
 
-            using var client = _httpClientFactory.CreateClient("GINIH");
-            if (!string.IsNullOrEmpty(_baseUrl) && Uri.IsWellFormedUriString(_baseUrl, UriKind.RelativeOrAbsolute))
+            var log = new SqlLogModel
             {
-                client.BaseAddress = new Uri(_baseUrl);
-            }
-
-            var content = new StringContent(JsonConvert.SerializeObject(usuarioLoginDto), Encoding.UTF8);
-
-            using HttpResponseMessage response = await client.PostAsync(client.BaseAddress + "/users/login", content);
-            var responseContent = response.Content.ReadAsStringAsync().Result;
-            var deserialized = JsonConvert.DeserializeObject<PostLoginResponseDto>(responseContent);
-
-            if (response.IsSuccessStatusCode && deserialized is not null)
-            {
-                _postLoginResponseDto = deserialized;
-                _postLoginResponseDto.Status = response.StatusCode.ToString();
-                var saveToken = new Token(deserialized, _connection, _contextAccessor);
-                var badResponse = new PostLoginResponseDto
-                {
-                    Status = HttpStatusCode.NotFound.ToString(),
-                    Message = "No se pudo guardar datos en la tabla de token"
-                };
-                return saveToken.SavenTokenUTH() ? _postLoginResponseDto : badResponse;
-            }
-            else if (!response.IsSuccessStatusCode && deserialized is not null)
-            {
-                _postLoginResponseDto = deserialized;
-                _postLoginResponseDto.Status = response.StatusCode.ToString();
-                return _postLoginResponseDto;
-            }
-            _postLoginResponseDto.Status = response.StatusCode.ToString();
-            _postLoginResponseDto.Message = deserialized!.Message ?? "No devolvio valores la consulta";
-            return _postLoginResponseDto;
-        }
-        catch (Exception ex)
-        {
-            PostLoginResponseDto _postLoginResponseDto = new()
-            {
-                Status = HttpStatusCode.NotFound.ToString(),
-                Message = ex.Message
+                Sql = _commandText,
+                ExecutionCount = _executionCount,
+                TotalAffectedRows = _totalAffectedRows,
+                StartTime = _startTime,
+                Duration = _stopwatch.Elapsed,
+                DatabaseName = _innerCommand.Connection?.Database ?? "Desconocida",
+                Ip = _innerCommand.Connection?.DataSource ?? "Desconocida",
+                Port = 0,
+                TableName = ExtraerNombreTablaDesdeSql(_commandText),
+                Schema = ExtraerEsquemaDesdeSql(_commandText)
             };
 
-            return _postLoginResponseDto;
+            _loggingService.LogDatabaseSuccess(log, _httpContextAccessor?.HttpContext);
         }
     }
-}
 
-
-
-
-using Connections.Interfaces;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Models.Dtos.AutenticacionDtos;
-using SUNITP.LIB.ManagerProcedures;
-using SUNITP.LIB.ManagerProcedures.Concrete;
-using SUNITP.LIB.QueryStringGenerator;
-using System.Data.OleDb;
-using System.Globalization;
-
-namespace MS_BAN_38_UTH_RECAUDACION_PAGOS.Utils;
-/// <summary>
-/// Clase Utilitaria Token, contiene multiples métodos requeridos para manipular los tokens de Ginih.
-/// </summary>
-public class Token 
-{
-    private readonly IDatabaseConnection _connection;
-    private readonly IHttpContextAccessor _contextAccessor;
-    private EasyMappingTool response = new();
-    private readonly string? _tableName = "TOKENUTH";
-    private readonly string? _library = "BCAH96DTA";
-    private readonly string _status = string.Empty;
-    private readonly string _message = string.Empty;
-    private readonly string _rToken = string.Empty;
-    private readonly string _createdAt = string.Empty;
-    private readonly string _timeStamp = string.Empty;
-    private readonly string _value = string.Empty;
-    private readonly string _name = string.Empty;
-    private string _vence = string.Empty;
-    private string _creado = string.Empty;
-    private string _token = string.Empty;
-
-    /// <summary>
-    /// Constructor de la Clase Token.
-    /// </summary>
-    /// <param name="tokenStructure">Instancia de PostLoginResponseDto</param>
-    /// <param name="connection">Instancia de IDatabaseConnection. </param>
-    public Token(PostLoginResponseDto tokenStructure, IDatabaseConnection connection, IHttpContextAccessor contextAccessor)
+    private void StartIfNeeded()
     {
-        _status = tokenStructure.Status;
-        _message = tokenStructure.Message;
-        _rToken = tokenStructure.Data.RefreshToken;
-        _createdAt = tokenStructure.Data.CreatedAt;
-        _timeStamp = tokenStructure.TimeStamp;
-        _value = tokenStructure.Code.Value;
-        _name = tokenStructure.Code.Name;
-        _connection = connection;
-        _contextAccessor = contextAccessor;
+        lock (_lock)
+        {
+            if (_executionCount == 0)
+            {
+                _startTime = DateTime.Now;
+                _commandText = _innerCommand.CommandText;
+                _stopwatch.Restart();
+            }
+        }
     }
 
-    /// <summary>
-    /// Constructo de Clase Token sin parametros de ingreso, inicializa campos.
-    /// </summary>
-    public Token(IDatabaseConnection connection, IHttpContextAccessor contextAccessor)
+    private void RegisterExecution(int affectedRows)
     {
-        _connection = connection;
-        _contextAccessor = contextAccessor;
+        lock (_lock)
+        {
+            _executionCount++;
+            if (affectedRows > 0)
+                _totalAffectedRows += affectedRows;
+        }
     }
 
-    /// <summary>
-    /// Guarda el Token en la tabla en el as400
-    /// </summary>
-    /// <returns>Retorna un valor boleano segun sea exitoso o no el almacenamiento</returns>
-    public bool SavenTokenUTH()
+    private static string ExtraerNombreTablaDesdeSql(string sql)
     {
         try
         {
-            var temp = DateTime.ParseExact(_createdAt, "yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture).AddYears(2);
-            _vence = temp.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
-
-            _connection.Open();
-
-            var oleDBCommand = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-            if (oleDBCommand.Connection is not OleDbConnection oleDbConnection)
-            {
-                return false;
-            }
-            var oleDBConnection = (OleDbConnection)oleDBCommand.Connection;
-
-            var sqsg = new ServiceQueryStringGenerator();
-            EasyCrudDataModels ecdm = new(oleDBConnection);
-            var fQuery = new FieldsQuery();
-            var validacion = fQuery.FieldQuery("ID", "1", OleDbType.Integer, 1, "0");
-
-            sqsg._iQueryStringGenerator.SelectAll();
-            sqsg._iQueryStringGenerator.From(_library, _tableName);
-            sqsg._iQueryStringGenerator.WhereAnd(validacion, "=");
-            var responseS = ecdm.SelectExecute(sqsg);
-
-            if (responseS.Count == 0)
-            {
-                sqsg = new ServiceQueryStringGenerator();
-                sqsg._iQueryStringGenerator.InsertIntoFrom(_library, _tableName);
-                sqsg._iQueryStringGenerator.InsertValue("ID", "1", OleDbType.Integer, 1, 0);
-                sqsg._iQueryStringGenerator.InsertValue("STATUS", _status, OleDbType.VarChar, 50, 0);
-                sqsg._iQueryStringGenerator.InsertValue("MESSAGE", _message, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.InsertValue("RTOKEN", _rToken, OleDbType.VarChar, 2000, 0);
-                sqsg._iQueryStringGenerator.InsertValue("CREATEDAT", _createdAt, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.InsertValue("TIMESTAMP", _timeStamp, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.InsertValue("VALUE", _value, OleDbType.VarChar, 3, 0);
-                sqsg._iQueryStringGenerator.InsertValue("NAME", _name, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.InsertValue("VENCE", _vence, OleDbType.VarChar, 100, 0);
-
-                //respuesta del query
-                response = ecdm.InsertExecute(sqsg);
-            }
-            else
-            {
-                sqsg = new ServiceQueryStringGenerator();
-                sqsg._iQueryStringGenerator.UpdateFrom(_library, _tableName);
-                sqsg._iQueryStringGenerator.UpdateSet("ID", "1", OleDbType.Integer, 1, 0);
-                sqsg._iQueryStringGenerator.UpdateSet("STATUS", _status, OleDbType.VarChar, 50, 0);
-                sqsg._iQueryStringGenerator.UpdateSet("MESSAGE", _message, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.UpdateSet("RTOKEN", _rToken, OleDbType.VarChar, 2000, 0);
-                sqsg._iQueryStringGenerator.UpdateSet("CREATEDAT", _createdAt, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.UpdateSet("TIMESTAMP", _timeStamp, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.UpdateSet("VALUE", _value, OleDbType.VarChar, 3, 0);
-                sqsg._iQueryStringGenerator.UpdateSet("NAME", _name, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.UpdateSet("VENCE", _vence, OleDbType.VarChar, 100, 0);
-                sqsg._iQueryStringGenerator.WhereAnd(validacion, "=");
-
-                //respuesta del query
-                response = ecdm.UpdateExecute(sqsg);
-            }
-
-
-            if (response.GetEasyParameter("_defaultError").value.Equals(""))
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            var tokens = sql.ToLower().Split(' ');
+            var index = Array.FindIndex(tokens, t => t == "into" || t == "from" || t == "update");
+            return index >= 0 && tokens.Length > index + 1 ? tokens[index + 1] : "Desconocida";
         }
-        catch (Exception ex)
-        {
-            //Temporal hasta manejar los logs
-            Console.Clear();
-            Console.WriteLine(ex.Message);
-            return false;
-        }
+        catch { return "Desconocida"; }
     }
 
-    /// <summary>
-    /// Metodo que obtiene el token secreto de la tabla en el as400
-    /// </summary>
-    /// <param name="rToken">Token registrado.</param>
-    /// <returns>Retorna un string de tipo out por parametro</returns>
-
-    public bool GetToken(out string rToken)
+    private static string ExtraerEsquemaDesdeSql(string sql)
     {
-        try
-        {
-            _connection.Open();
-            var oleDBCommand = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-            if (oleDBCommand.Connection is not OleDbConnection oleDbConnection)
-            {
-                rToken = "";
-                return false;
-            }
-
-            var oleDBConnection = (OleDbConnection)oleDBCommand.Connection;
-
-            var sqsg = new ServiceQueryStringGenerator();
-            EasyCrudDataModels ecdm = new(oleDBConnection);
-
-            var fQuery = new FieldsQuery();
-            var validacion = fQuery.FieldQuery("ID", "1", OleDbType.Integer, 1, "0");
-
-            sqsg._iQueryStringGenerator.SelectAll();
-            sqsg._iQueryStringGenerator.From(_library, _tableName);
-            sqsg._iQueryStringGenerator.WhereAnd(validacion, "=");
-            var responseS = ecdm.SelectExecute(sqsg);
-
-            //Cerrar Conexión
-            _connection.Close();
-
-            if (responseS.Count == 0)
-            {
-                rToken = "";
-                return false;
-            }
-
-            foreach (var item in responseS)
-            {
-                _vence = item.GetValue("VENCE");
-                _creado = item.GetValue("CREATEDAT");
-                _token = item.GetValue("RTOKEN");
-            }
-
-            DateTime date1 = DateTime.ParseExact(_vence, "yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
-            DateTime date2 = DateTime.ParseExact(_creado, "yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
-
-            var diferenceTime = date1 - date2;
-
-            if (diferenceTime.Days > 0)
-            {
-                rToken = _token;
-                return true;
-            }
-            rToken = "";
-            return false;
-        }
-        catch (Exception ex)
-        {
-            //Temporal hasta manejar los logs
-            Console.Clear();
-            Console.WriteLine(ex.Message);
-            _connection.Close();
-            rToken = "";
-            return false;
-        }
-
+        var tabla = ExtraerNombreTablaDesdeSql(sql);
+        var partes = tabla.Split('.');
+        return partes.Length > 1 ? partes[0] : "Desconocida";
     }
+
+    #region Delegación al comando interno
+
+    public override string CommandText { get => _innerCommand.CommandText; set => _innerCommand.CommandText = value; }
+    public override int CommandTimeout { get => _innerCommand.CommandTimeout; set => _innerCommand.CommandTimeout = value; }
+    public override System.Data.CommandType CommandType { get => _innerCommand.CommandType; set => _innerCommand.CommandType = value; }
+    public override bool DesignTimeVisible { get => _innerCommand.DesignTimeVisible; set => _innerCommand.DesignTimeVisible = value; }
+    public override UpdateRowSource UpdatedRowSource { get => _innerCommand.UpdatedRowSource; set => _innerCommand.UpdatedRowSource = value; }
+    protected override DbConnection DbConnection { get => _innerCommand.Connection!; set => _innerCommand.Connection = value; }
+    protected override DbTransaction? DbTransaction { get => _innerCommand.Transaction; set => _innerCommand.Transaction = value; }
+    protected override DbParameterCollection DbParameterCollection => _innerCommand.Parameters;
+    public override void Cancel() => _innerCommand.Cancel();
+    protected override DbParameter CreateDbParameter() => _innerCommand.CreateParameter();
+    public override void Prepare() => _innerCommand.Prepare();
+
+    #endregion
 }
