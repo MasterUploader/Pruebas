@@ -1,95 +1,117 @@
-using System;
+using RestUtilities.QueryBuilder.Interfaces;
+using RestUtilities.QueryBuilder.Enums;
 using System.Collections.Generic;
+using System.Text;
 
-namespace RestUtilities.QueryBuilder.Interfaces
+namespace RestUtilities.QueryBuilder.Builders
 {
     /// <summary>
-    /// Define las operaciones principales que debe implementar un generador de consultas SQL.
-    /// Permite construir sentencias SELECT, INSERT, UPDATE y DELETE de forma fluida.
+    /// Constructor de consultas SQL del tipo SELECT.
+    /// Permite construir dinámicamente sentencias SELECT con soporte para filtros, ordenamientos, paginación, joins, etc.
     /// </summary>
-    public interface IQueryBuilder
+    public class SelectQueryBuilder : IQueryBuilder
     {
-        /// <summary>
-        /// Define la tabla principal sobre la que se construirá la consulta.
-        /// </summary>
-        /// <param name="tableName">Nombre de la tabla.</param>
-        /// <returns>Instancia fluida del generador.</returns>
-        IQueryBuilder From(string tableName);
+        private string _table;
+        private readonly List<string> _columns = new();
+        private readonly List<string> _whereConditions = new();
+        private readonly List<string> _orderBy = new();
+        private int? _offset;
+        private int? _fetch;
 
-        /// <summary>
-        /// Agrega una lista de columnas a seleccionar.
-        /// </summary>
-        /// <param name="columns">Nombres de columnas.</param>
-        /// <returns>Instancia fluida del generador.</returns>
-        IQueryBuilder Select(params string[] columns);
+        /// <inheritdoc/>
+        public IQueryBuilder From(string tableName)
+        {
+            _table = tableName;
+            return this;
+        }
 
-        /// <summary>
-        /// Agrega condiciones a la cláusula WHERE.
-        /// </summary>
-        /// <param name="condition">Condición SQL como texto.</param>
-        /// <returns>Instancia fluida del generador.</returns>
-        IQueryBuilder Where(string condition);
+        /// <inheritdoc/>
+        public IQueryBuilder Select(params string[] columns)
+        {
+            _columns.AddRange(columns);
+            return this;
+        }
 
-        /// <summary>
-        /// Agrega una cláusula ORDER BY a la consulta.
-        /// </summary>
-        /// <param name="column">Nombre de la columna.</param>
-        /// <param name="direction">Dirección del ordenamiento.</param>
-        /// <returns>Instancia fluida del generador.</returns>
-        IQueryBuilder OrderBy(string column, Enums.SqlSortDirection direction);
+        /// <inheritdoc/>
+        public IQueryBuilder Where(string condition)
+        {
+            _whereConditions.Add(condition);
+            return this;
+        }
 
-        /// <summary>
-        /// Establece un valor para OFFSET (paginación).
-        /// </summary>
-        /// <param name="offset">Cantidad de filas a omitir.</param>
-        IQueryBuilder Offset(int offset);
+        /// <inheritdoc/>
+        public IQueryBuilder OrderBy(string column, SqlSortDirection direction)
+        {
+            _orderBy.Add($"{column} {(direction == SqlSortDirection.Ascending ? "ASC" : "DESC")}");
+            return this;
+        }
 
-        /// <summary>
-        /// Establece un valor para FETCH NEXT (paginación).
-        /// </summary>
-        /// <param name="size">Cantidad de filas a obtener.</param>
-        IQueryBuilder FetchNext(int size);
+        /// <inheritdoc/>
+        public IQueryBuilder Offset(int offset)
+        {
+            _offset = offset;
+            return this;
+        }
 
-        /// <summary>
-        /// Devuelve la consulta SQL generada como string.
-        /// </summary>
-        /// <returns>Consulta SQL completa.</returns>
-        string Build();
+        /// <inheritdoc/>
+        public IQueryBuilder FetchNext(int size)
+        {
+            _fetch = size;
+            return this;
+        }
+
+        /// <inheritdoc/>
+        public string Build()
+        {
+            var sb = new StringBuilder();
+            sb.Append("SELECT ");
+            sb.Append(_columns.Count > 0 ? string.Join(", ", _columns) : "*");
+            sb.Append(" FROM ").Append(_table);
+
+            if (_whereConditions.Count > 0)
+                sb.Append(" WHERE ").Append(string.Join(" AND ", _whereConditions));
+
+            if (_orderBy.Count > 0)
+                sb.Append(" ORDER BY ").Append(string.Join(", ", _orderBy));
+
+            if (_offset.HasValue && _fetch.HasValue)
+                sb.Append($" OFFSET {_offset.Value} ROWS FETCH NEXT {_fetch.Value} ROWS ONLY");
+
+            return sb.ToString();
+        }
     }
 }
 
-using System;
-using System.Linq.Expressions;
+using System.Collections.Generic;
+using System.Text;
 
-namespace RestUtilities.QueryBuilder.Interfaces
+namespace RestUtilities.QueryBuilder.Builders
 {
     /// <summary>
-    /// Proporciona una interfaz para traducir expresiones lambda a condiciones SQL.
-    /// Es utilizada por la capa de expresión avanzada para facilitar el uso de expresiones tipadas.
+    /// Constructor de consultas SQL del tipo INSERT.
+    /// Permite construir dinámicamente sentencias INSERT INTO con columnas y valores parametrizados.
     /// </summary>
-    public interface ISqlExpressionEvaluator
+    public class InsertQueryBuilder
     {
+        /// <summary>Nombre de la tabla destino.</summary>
+        public string Table { get; set; }
+
+        /// <summary>Lista de columnas a insertar.</summary>
+        public List<string> Columns { get; set; } = new();
+
+        /// <summary>Lista de valores asociados a las columnas.</summary>
+        public List<string> Values { get; set; } = new();
+
         /// <summary>
-        /// Traduce una expresión lambda a su equivalente en SQL.
+        /// Construye la consulta SQL INSERT basada en los valores proporcionados.
         /// </summary>
-        /// <param name="expression">Expresión lambda.</param>
-        /// <returns>Condición SQL generada.</returns>
-        string Translate(Expression expression);
-    }
-}
-namespace RestUtilities.QueryBuilder.Interfaces
-{
-    /// <summary>
-    /// Define la interfaz que traduce sentencias SQL a su sintaxis específica
-    /// dependiendo del motor de base de datos (AS400, SQL Server, Oracle, etc.).
-    /// </summary>
-    public interface ISqlEngineTranslator
-    {
-        /// <summary>
-        /// Traduce la consulta SQL genérica a la sintaxis del motor objetivo.
-        /// </summary>
-        /// <param name="query">Consulta SQL generada.</param>
-        /// <returns>Consulta adaptada al motor SQL.</returns>
-        string TranslateEngineSpecific(string query);
+        /// <returns>Consulta SQL generada.</returns>
+        public string Build()
+        {
+            var sb = new StringBuilder();
+            sb.Append($"INSERT INTO {Table} ({string.Join(", ", Columns)}) ");
+            sb.Append($"VALUES ({string.Join(", ", Values)})");
+            return sb.ToString();
+        }
     }
 }
