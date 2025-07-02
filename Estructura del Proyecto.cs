@@ -1,123 +1,116 @@
-using RestUtilities.QueryBuilder.Interfaces;
+using System;
+using System.Globalization;
 
-namespace RestUtilities.QueryBuilder.Engines
+namespace RestUtilities.QueryBuilder.Extensions
 {
     /// <summary>
-    /// Traductor de sentencias SQL específico para IBM AS400 (DB2 for i).
-    /// Adapta ciertas funciones y cláusulas que varían respecto a SQL estándar.
+    /// Métodos de extensión para manipulación de cadenas útiles en la generación de queries SQL.
     /// </summary>
-    public class As400SqlTranslator : ISqlEngineTranslator
+    public static class StringExtensions
     {
-        /// <inheritdoc />
-        public string TranslateEngineSpecific(string query)
+        /// <summary>
+        /// Convierte una cadena a PascalCase eliminando guiones bajos y capitalizando cada palabra.
+        /// </summary>
+        /// <param name="value">Texto de entrada.</param>
+        /// <returns>Texto convertido a PascalCase.</returns>
+        public static string ToPascalCase(this string value)
         {
-            // Adaptaciones específicas para AS400:
-            // - FETCH FIRST N ROWS ONLY no siempre está soportado, se puede usar RRN o subquery
-            // - NVL() en lugar de COALESCE()
-            // - CONCAT con ||
-            // Aquí se podrían aplicar transformaciones condicionales
-            return query
-                .Replace("COALESCE", "NVL")
-                .Replace("||", " CONCAT ")
-                .Replace("FETCH NEXT", "FETCH FIRST"); // si aplica según versión
+            if (string.IsNullOrEmpty(value))
+                return value;
+
+            var words = value.Split('_');
+            for (int i = 0; i < words.Length; i++)
+                words[i] = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(words[i].ToLower());
+
+            return string.Concat(words);
+        }
+
+        /// <summary>
+        /// Escapa comillas simples para evitar errores o inyección en valores de tipo string.
+        /// </summary>
+        /// <param name="value">Valor de entrada.</param>
+        /// <returns>Valor escapado para SQL.</returns>
+        public static string EscapeSql(this string value)
+        {
+            return value?.Replace("'", "''");
         }
     }
 }
 
-using RestUtilities.QueryBuilder.Interfaces;
+using System;
+using System.Linq.Expressions;
+using System.Text;
 
-namespace RestUtilities.QueryBuilder.Engines
+namespace RestUtilities.QueryBuilder.Extensions
 {
     /// <summary>
-    /// Traductor de sentencias SQL específico para Microsoft SQL Server.
-    /// Adapta funciones como ISNULL, TOP, y FETCH según compatibilidad.
+    /// Métodos de extensión para análisis de expresiones lambda.
+    /// Útil para convertir expresiones como c => c.Nombre == "Pedro" a SQL.
     /// </summary>
-    public class SqlServerSqlTranslator : ISqlEngineTranslator
+    public static class ExpressionExtensions
     {
-        /// <inheritdoc />
-        public string TranslateEngineSpecific(string query)
+        /// <summary>
+        /// Convierte una expresión lambda simple en una condición SQL.
+        /// </summary>
+        /// <typeparam name="T">Tipo del objeto origen.</typeparam>
+        /// <param name="expression">Expresión lambda.</param>
+        /// <returns>Condición SQL equivalente.</returns>
+        public static string ToSqlCondition<T>(this Expression<Func<T, bool>> expression)
         {
-            return query
-                .Replace("COALESCE", "ISNULL") // SQL Server prefiere ISNULL
-                .Replace("LIMIT", "")          // No se usa LIMIT
-                .Replace("FETCH FIRST", "FETCH NEXT"); // si se usa OFFSET/FETCH
+            var visitor = new SqlExpressionVisitor();
+            visitor.Visit(expression);
+            return visitor.Condition;
         }
     }
-}
 
-using RestUtilities.QueryBuilder.Interfaces;
-
-namespace RestUtilities.QueryBuilder.Engines
-{
     /// <summary>
-    /// Traductor de sentencias SQL específico para Oracle Database.
-    /// Incluye adaptaciones como NVL, ROWNUM y funciones propias de Oracle.
+    /// Visitor personalizado para analizar árboles de expresión y traducirlos a SQL.
     /// </summary>
-    public class OracleSqlTranslator : ISqlEngineTranslator
+    internal class SqlExpressionVisitor : ExpressionVisitor
     {
-        /// <inheritdoc />
-        public string TranslateEngineSpecific(string query)
+        private readonly StringBuilder _sb = new();
+
+        /// <summary>
+        /// Condición SQL resultante.
+        /// </summary>
+        public string Condition => _sb.ToString();
+
+        protected override Expression VisitBinary(BinaryExpression node)
         {
-            return query
-                .Replace("COALESCE", "NVL")
-                .Replace("LIMIT", "") // Oracle usa ROWNUM o FETCH
-                .Replace("FETCH NEXT", "FETCH FIRST");
+            _sb.Append("(");
+            Visit(node.Left);
+            _sb.Append($" {GetSqlOperator(node.NodeType)} ");
+            Visit(node.Right);
+            _sb.Append(")");
+            return node;
         }
-    }
-}
 
-using RestUtilities.QueryBuilder.Interfaces;
-
-namespace RestUtilities.QueryBuilder.Engines
-{
-    /// <summary>
-    /// Traductor de sentencias SQL específico para PostgreSQL.
-    /// Soporta LIMIT, OFFSET, COALESCE y funciones estándar.
-    /// </summary>
-    public class PostgreSqlTranslator : ISqlEngineTranslator
-    {
-        /// <inheritdoc />
-        public string TranslateEngineSpecific(string query)
+        protected override Expression VisitMember(MemberExpression node)
         {
-            return query; // PostgreSQL usa muchas convenciones estándar
+            _sb.Append(node.Member.Name);
+            return node;
         }
-    }
-}
-using RestUtilities.QueryBuilder.Interfaces;
 
-namespace RestUtilities.QueryBuilder.Engines
-{
-    /// <summary>
-    /// Traductor de sentencias SQL específico para MySQL.
-    /// Incluye soporte para funciones como IFNULL, LIMIT y operadores estándar.
-    /// </summary>
-    public class MySqlTranslator : ISqlEngineTranslator
-    {
-        /// <inheritdoc />
-        public string TranslateEngineSpecific(string query)
+        protected override Expression VisitConstant(ConstantExpression node)
         {
-            return query
-                .Replace("COALESCE", "IFNULL");
+            _sb.Append(node.Type == typeof(string)
+                ? $"'{node.Value}'"
+                : node.Value?.ToString());
+            return node;
         }
-    }
-}
 
-using RestUtilities.QueryBuilder.Interfaces;
-
-namespace RestUtilities.QueryBuilder.Engines
-{
-    /// <summary>
-    /// Traductor de sentencias SQL específico para MySQL.
-    /// Incluye soporte para funciones como IFNULL, LIMIT y operadores estándar.
-    /// </summary>
-    public class MySqlTranslator : ISqlEngineTranslator
-    {
-        /// <inheritdoc />
-        public string TranslateEngineSpecific(string query)
+        private static string GetSqlOperator(ExpressionType type) => type switch
         {
-            return query
-                .Replace("COALESCE", "IFNULL");
-        }
+            ExpressionType.Equal => "=",
+            ExpressionType.NotEqual => "<>",
+            ExpressionType.GreaterThan => ">",
+            ExpressionType.LessThan => "<",
+            ExpressionType.GreaterThanOrEqual => ">=",
+            ExpressionType.LessThanOrEqual => "<=",
+            ExpressionType.AndAlso => "AND",
+            ExpressionType.OrElse => "OR",
+            _ => throw new NotSupportedException($"Operador no soportado: {type}")
+        };
     }
 }
 
