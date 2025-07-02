@@ -1,119 +1,112 @@
-namespace RestUtilities.QueryBuilder.Models
-{
-    /// <summary>
-    /// Representa la definición de un parámetro SQL.
-    /// Incluye el nombre del parámetro, su tipo de datos y su valor.
-    /// </summary>
-    public class SqlParameterDefinition
-    {
-        /// <summary>
-        /// Nombre del parámetro, incluyendo el prefijo @ si es necesario.
-        /// </summary>
-        public string Name { get; set; }
-
-        /// <summary>
-        /// Valor que se asignará al parámetro.
-        /// </summary>
-        public object Value { get; set; }
-
-        /// <summary>
-        /// Tipo de datos esperado por el motor SQL (por ejemplo, VARCHAR, INT).
-        /// </summary>
-        public string DataType { get; set; }
-
-        /// <summary>
-        /// Tamaño o precisión del dato, si aplica (por ejemplo, 20 o 10,2).
-        /// </summary>
-        public string Size { get; set; }
-    }
-}
-
-
+using RestUtilities.QueryBuilder.Interfaces;
+using RestUtilities.QueryBuilder.Models;
 using System.Collections.Generic;
 
-namespace RestUtilities.QueryBuilder.Models
+namespace RestUtilities.QueryBuilder.Services
 {
     /// <summary>
-    /// Representa una tabla SQL y su definición estructural.
-    /// Incluye el nombre, alias, columnas y posibles restricciones.
+    /// Servicio principal para la construcción de consultas SQL.
+    /// Expone métodos para generar dinámicamente sentencias SELECT, INSERT, UPDATE y DELETE.
     /// </summary>
-    public class TableDefinition
+    public class QueryBuilderService : IQueryBuilderService
     {
-        /// <summary>
-        /// Nombre de la tabla tal como aparece en la base de datos.
-        /// </summary>
-        public string Name { get; set; }
+        private readonly ISqlDialectService _dialect;
 
         /// <summary>
-        /// Alias opcional para usar en la consulta SQL.
+        /// Inicializa una nueva instancia de QueryBuilderService con un dialecto específico.
         /// </summary>
-        public string Alias { get; set; }
+        /// <param name="dialect">Servicio de dialecto SQL para el motor correspondiente.</param>
+        public QueryBuilderService(ISqlDialectService dialect)
+        {
+            _dialect = dialect;
+        }
 
-        /// <summary>
-        /// Lista de columnas que componen la tabla.
-        /// </summary>
-        public List<ColumnDefinition> Columns { get; set; } = new();
+        /// <inheritdoc/>
+        public QueryMetadata BuildSelect<T>(T criteria) where T : class
+        {
+            return _dialect.BuildSelect(criteria);
+        }
+
+        /// <inheritdoc/>
+        public QueryMetadata BuildInsert<T>(T entity) where T : class
+        {
+            return _dialect.BuildInsert(entity);
+        }
+
+        /// <inheritdoc/>
+        public QueryMetadata BuildUpdate<T>(T entity, object keys) where T : class
+        {
+            return _dialect.BuildUpdate(entity, keys);
+        }
+
+        /// <inheritdoc/>
+        public QueryMetadata BuildDelete<T>(object keys) where T : class
+        {
+            return _dialect.BuildDelete<T>(keys);
+        }
     }
 }
 
-namespace RestUtilities.QueryBuilder.Models
+using RestUtilities.QueryBuilder.Interfaces;
+using RestUtilities.QueryBuilder.Models;
+
+namespace RestUtilities.QueryBuilder.Services
 {
     /// <summary>
-    /// Representa una columna de una tabla SQL.
-    /// Incluye nombre, tipo, tamaño y si es clave primaria o permite nulos.
+    /// Clase base para los servicios de dialecto SQL por motor.
+    /// Define la estructura común para crear consultas dinámicamente.
     /// </summary>
-    public class ColumnDefinition
+    public abstract class SqlDialectServiceBase : ISqlDialectService
     {
-        /// <summary>
-        /// Nombre de la columna.
-        /// </summary>
-        public string Name { get; set; }
-
-        /// <summary>
-        /// Tipo de dato SQL (por ejemplo: VARCHAR, INT, DECIMAL).
-        /// </summary>
-        public string DataType { get; set; }
-
-        /// <summary>
-        /// Tamaño o precisión del campo, si aplica.
-        /// </summary>
-        public string Size { get; set; }
-
-        /// <summary>
-        /// Indica si la columna permite valores nulos.
-        /// </summary>
-        public bool IsNullable { get; set; }
-
-        /// <summary>
-        /// Indica si la columna es clave primaria.
-        /// </summary>
-        public bool IsPrimaryKey { get; set; }
+        public abstract QueryMetadata BuildSelect<T>(T criteria) where T : class;
+        public abstract QueryMetadata BuildInsert<T>(T entity) where T : class;
+        public abstract QueryMetadata BuildUpdate<T>(T entity, object keys) where T : class;
+        public abstract QueryMetadata BuildDelete<T>(object keys) where T : class;
     }
 }
 
-using System.Collections.Generic;
+using RestUtilities.QueryBuilder.Models;
 
-namespace RestUtilities.QueryBuilder.Models
+namespace RestUtilities.QueryBuilder.Services
 {
     /// <summary>
-    /// Representa los metadatos generales asociados a una consulta SQL generada.
-    /// Permite almacenar el SQL, los parámetros y otra información útil.
+    /// Implementación del dialecto SQL para AS400 (DB2 for i).
+    /// Genera queries compatibles con la sintaxis específica de este motor.
     /// </summary>
-    public class QueryMetadata
+    public class As400DialectService : SqlDialectServiceBase
     {
-        /// <summary>
-        /// Consulta SQL final generada.
-        /// </summary>
-        public string Sql { get; set; }
+        public override QueryMetadata BuildSelect<T>(T criteria)
+        {
+            // Implementación simplificada inicial.
+            return new QueryMetadata
+            {
+                Sql = $"SELECT * FROM {typeof(T).Name}" // Ejemplo simple, reemplazable por lógica de reflexión avanzada
+            };
+        }
 
-        /// <summary>
-        /// Lista de parámetros que deben asignarse antes de ejecutar la consulta.
-        /// </summary>
-        public List<SqlParameterDefinition> Parameters { get; set; } = new();
+        public override QueryMetadata BuildInsert<T>(T entity)
+        {
+            // Generar INSERT dinámico a partir del objeto
+            return new QueryMetadata
+            {
+                Sql = $"INSERT INTO {typeof(T).Name} (...) VALUES (...)"
+            };
+        }
 
-        /// <summary>
-        /// Información adicional para depuración o ejecución (por ejemplo, tiempo estimado).
-        /// </summary>
-        public Dictionary<string, string> Metadata { get; set; } = new();
+        public override QueryMetadata BuildUpdate<T>(T entity, object keys)
+        {
+            return new QueryMetadata
+            {
+                Sql = $"UPDATE {typeof(T).Name} SET ... WHERE ..."
+            };
+        }
+
+        public override QueryMetadata BuildDelete<T>(object keys)
+        {
+            return new QueryMetadata
+            {
+                Sql = $"DELETE FROM {typeof(T).Name} WHERE ..."
+            };
+        }
     }
 }
