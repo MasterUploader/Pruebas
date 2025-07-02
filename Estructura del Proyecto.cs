@@ -1,50 +1,40 @@
-using QueryBuilder.Interfaces;
-using System;
-using System.Linq.Expressions;
+<?xml version="1.0"?>
+<package >
+  <metadata>
+    <id>RestUtilities.QueryBuilder</id>
+    <version>1.0.0</version>
+    <authors>RestUtilities Team</authors>
+    <owners>RestUtilities</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Librería modular para la construcción dinámica, segura y multiplataforma de consultas SQL (SELECT, INSERT, UPDATE, JOIN, WHERE, etc.) basada en modelos, expresiones lambda y compatibilidad con múltiples motores (SQL Server, Oracle, AS400, etc.).</description>
+    <copyright>Copyright © 2025</copyright>
+    <tags>sql querybuilder lambda orm dbcontext dynamic safe generator restutilities</tags>
+    <repository type="git" url="https://github.com/RestUtilities/QueryBuilder" />
+    <dependencies>
+      <dependency id="Microsoft.Extensions.DependencyInjection.Abstractions" version="8.0.0" />
+    </dependencies>
+  </metadata>
+</package>
 
-namespace QueryBuilder.Engines
-{
-    /// <summary>
-    /// Motor de generación SQL específico para SQL Server.
-    /// Implementa lógica para construir sentencias SQL basadas en modelos genéricos.
-    /// </summary>
-    public class SqlServerEngine : ISqlEngine
-    {
-        /// <inheritdoc />
-        public string GenerateSelectQuery<TModel>(Expression<Func<TModel, bool>>? filter = null)
-        {
-            // Esto es un ejemplo básico. Deberías reemplazar con generación dinámica basada en el modelo.
-            string tableName = typeof(TModel).Name;
-            string whereClause = filter != null ? "-- WHERE (filtro dinámico aún no implementado)" : string.Empty;
 
-            return $"SELECT * FROM {tableName} {whereClause}";
-        }
+<Project Sdk="Microsoft.NET.Sdk">
 
-        /// <inheritdoc />
-        public string GenerateInsertQuery<TModel>(TModel insertValues)
-        {
-            // Esto es un ejemplo estático. Aquí normalmente usarías reflexión para construir el SQL dinámico.
-            string tableName = typeof(TModel).Name;
-            return $"-- Generar INSERT dinámico para {tableName}";
-        }
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Version>1.0.0</Version>
+    <Authors>RestUtilities Team</Authors>
+    <Company>RestUtilities</Company>
+    <Description>Librería modular para generar consultas SQL dinámicas multiplataforma (compatible con SQL Server, Oracle, AS400, etc.) con soporte para modelos, atributos, expresiones lambda y validaciones de tipo.</Description>
+    <PackageId>RestUtilities.QueryBuilder</PackageId>
+    <RepositoryUrl>https://github.com/RestUtilities/QueryBuilder</RepositoryUrl>
+    <PackageTags>sql querybuilder lambda expressions orm dbcontext restutilities</PackageTags>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
 
-        /// <inheritdoc />
-        public string GenerateUpdateQuery<TModel>(TModel updateValues, Expression<Func<TModel, bool>> filter)
-        {
-            // Esto es un ejemplo estático. Aquí normalmente usarías reflexión para construir el SQL dinámico.
-            string tableName = typeof(TModel).Name;
-            return $"-- Generar UPDATE dinámico para {tableName} con filtro";
-        }
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+  </ItemGroup>
 
-        /// <inheritdoc />
-        public string GenerateMetadataQuery(string tableName)
-        {
-            // Esta consulta obtiene las columnas de la tabla en SQL Server.
-            return $@"
-                SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME = '{tableName.Replace("'", "''")}'
-            ";
-        }
-    }
-}
+</Project>
