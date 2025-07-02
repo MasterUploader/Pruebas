@@ -1,80 +1,122 @@
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
-namespace RestUtilities.QueryBuilder.Compatibility
+namespace RestUtilities.QueryBuilder.DbContextSupport
 {
     /// <summary>
-    /// Servicio que permite validar si una función, cláusula u operador SQL
-    /// es compatible con un determinado motor de base de datos.
+    /// Servicio encargado de ejecutar consultas SQL generadas usando una instancia de DbContext.
     /// </summary>
-    public static class SqlCompatibilityService
+    public class DbContextQueryExecutor
     {
+        private readonly DbContext _context;
+
         /// <summary>
-        /// Enum que representa los motores de bases de datos soportados.
+        /// Inicializa una nueva instancia del ejecutor con el contexto especificado.
         /// </summary>
-        public enum SqlEngine
+        /// <param name="context">Instancia activa de DbContext.</param>
+        public DbContextQueryExecutor(DbContext context)
         {
-            As400,
-            SqlServer,
-            Oracle,
-            MySql,
-            PostgreSql
+            _context = context;
         }
 
         /// <summary>
-        /// Diccionario que mapea cada función SQL a los motores donde está soportada.
+        /// Ejecuta una consulta SELECT usando FromSqlRaw y devuelve una lista de resultados tipados.
         /// </summary>
-        private static readonly Dictionary<string, HashSet<SqlEngine>> _compatibilityMap = new(StringComparer.OrdinalIgnoreCase)
+        /// <typeparam name="T">Tipo de entidad o DTO esperado como resultado.</typeparam>
+        /// <param name="sql">Cadena SQL generada dinámicamente.</param>
+        /// <param name="parameters">Parámetros opcionales para la consulta.</param>
+        /// <returns>Lista de resultados de tipo T.</returns>
+        public async Task<List<T>> ExecuteQueryAsync<T>(string sql, params object[]? parameters) where T : class
         {
-            { "FETCH", new() { SqlEngine.As400, SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.PostgreSql } },
-            { "OFFSET", new() { SqlEngine.As400, SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.PostgreSql } },
-            { "ISNULL", new() { SqlEngine.SqlServer } },
-            { "IFNULL", new() { SqlEngine.MySql } },
-            { "NVL", new() { SqlEngine.Oracle } },
-            { "COALESCE", new() { SqlEngine.As400, SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.MySql } },
-            { "TOP", new() { SqlEngine.SqlServer } },
-            { "LIMIT", new() { SqlEngine.MySql, SqlEngine.PostgreSql } },
-            { "ROWNUM", new() { SqlEngine.Oracle } },
-            { "SELECT INTO", new() { SqlEngine.SqlServer, SqlEngine.As400 } },
-            { "INSERT INTO SELECT", new() { SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.As400 } },
-            { "CASE", new() { SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.As400, SqlEngine.MySql } },
-            { "EXISTS", new() { SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.As400 } },
-            { "ALL", new() { SqlEngine.SqlServer, SqlEngine.Oracle } },
-            { "ANY", new() { SqlEngine.SqlServer, SqlEngine.Oracle } },
-        };
-
-        /// <summary>
-        /// Determina si una función o cláusula está soportada por un motor SQL.
-        /// </summary>
-        /// <param name="sqlFeature">Nombre de la función o cláusula (por ejemplo: "ISNULL", "LIMIT").</param>
-        /// <param name="engine">Motor SQL objetivo.</param>
-        /// <returns>Verdadero si está soportado, falso en caso contrario.</returns>
-        public static bool IsCompatible(string sqlFeature, SqlEngine engine)
-        {
-            if (_compatibilityMap.TryGetValue(sqlFeature.ToUpperInvariant(), out var engines))
-            {
-                return engines.Contains(engine);
-            }
-
-            // Si no está registrado, asumimos que no es compatible
-            return false;
+            return await _context.Set<T>()
+                                 .FromSqlRaw(sql, parameters ?? Array.Empty<object>())
+                                 .ToListAsync();
         }
 
         /// <summary>
-        /// Devuelve la lista de motores compatibles con una función SQL específica.
+        /// Ejecuta una instrucción SQL de modificación (INSERT, UPDATE o DELETE).
         /// </summary>
-        /// <param name="sqlFeature">Nombre de la función o palabra clave.</param>
-        /// <returns>Lista de motores compatibles.</returns>
-        public static List<SqlEngine> GetCompatibleEngines(string sqlFeature)
+        /// <param name="sql">Cadena SQL generada dinámicamente.</param>
+        /// <param name="parameters">Parámetros opcionales.</param>
+        /// <returns>Número de filas afectadas.</returns>
+        public async Task<int> ExecuteCommandAsync(string sql, params object[]? parameters)
         {
-            if (_compatibilityMap.TryGetValue(sqlFeature.ToUpperInvariant(), out var engines))
-            {
-                return new List<SqlEngine>(engines);
-            }
-
-            return new List<SqlEngine>();
+            return await _context.Database.ExecuteSqlRawAsync(sql, parameters ?? Array.Empty<object>());
         }
     }
 }
 
 
+using Microsoft.EntityFrameworkCore;
+using RestUtilities.QueryBuilder.Models;
+using RestUtilities.QueryBuilder.Services;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+namespace RestUtilities.QueryBuilder.DbContextSupport
+{
+    /// <summary>
+    /// Adaptador que combina la generación de consultas con su ejecución a través de Entity Framework.
+    /// </summary>
+    public class DbContextQueryBuilderAdapter
+    {
+        private readonly SqlQueryService _queryService;
+        private readonly DbContextQueryExecutor _executor;
+
+        /// <summary>
+        /// Inicializa una nueva instancia del adaptador para DbContext.
+        /// </summary>
+        /// <param name="queryService">Servicio que construye sentencias SQL.</param>
+        /// <param name="executor">Ejecutor que utiliza DbContext para ejecutar las consultas.</param>
+        public DbContextQueryBuilderAdapter(SqlQueryService queryService, DbContextQueryExecutor executor)
+        {
+            _queryService = queryService;
+            _executor = executor;
+        }
+
+        /// <summary>
+        /// Genera y ejecuta una consulta SELECT basada en un modelo definido por el usuario.
+        /// </summary>
+        /// <typeparam name="TModel">Modelo que representa la tabla base de datos.</typeparam>
+        /// <typeparam name="TResult">Tipo esperado del resultado (entidad o DTO).</typeparam>
+        /// <param name="filter">Filtro expresado como predicado.</param>
+        /// <returns>Lista de resultados obtenidos desde la base de datos.</returns>
+        public async Task<List<TResult>> SelectAsync<TModel, TResult>(Func<TModel, bool> filter)
+            where TModel : class, new()
+            where TResult : class
+        {
+            var sql = _queryService.BuildSelect<TModel>(filter);
+            return await _executor.ExecuteQueryAsync<TResult>(sql);
+        }
+
+        /// <summary>
+        /// Ejecuta una consulta de actualización generada dinámicamente para el modelo proporcionado.
+        /// </summary>
+        /// <typeparam name="TModel">Modelo fuente.</typeparam>
+        /// <param name="updateValues">Objeto con los valores a actualizar.</param>
+        /// <param name="filter">Condición de filtro.</param>
+        /// <returns>Cantidad de filas afectadas.</returns>
+        public async Task<int> UpdateAsync<TModel>(object updateValues, Func<TModel, bool> filter)
+            where TModel : class, new()
+        {
+            var sql = _queryService.BuildUpdate<TModel>(updateValues, filter);
+            return await _executor.ExecuteCommandAsync(sql);
+        }
+
+        /// <summary>
+        /// Ejecuta una inserción de datos basada en el modelo proporcionado.
+        /// </summary>
+        /// <typeparam name="TModel">Modelo base.</typeparam>
+        /// <param name="insertValues">Objeto con los valores a insertar.</param>
+        /// <returns>Cantidad de filas insertadas.</returns>
+        public async Task<int> InsertAsync<TModel>(object insertValues)
+            where TModel : class, new()
+        {
+            var sql = _queryService.BuildInsert<TModel>(insertValues);
+            return await _executor.ExecuteCommandAsync(sql);
+        }
+    }
+}
