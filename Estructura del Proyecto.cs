@@ -1,116 +1,119 @@
-using System;
-using System.Globalization;
-
-namespace RestUtilities.QueryBuilder.Extensions
+namespace RestUtilities.QueryBuilder.Models
 {
     /// <summary>
-    /// Métodos de extensión para manipulación de cadenas útiles en la generación de queries SQL.
+    /// Representa la definición de un parámetro SQL.
+    /// Incluye el nombre del parámetro, su tipo de datos y su valor.
     /// </summary>
-    public static class StringExtensions
+    public class SqlParameterDefinition
     {
         /// <summary>
-        /// Convierte una cadena a PascalCase eliminando guiones bajos y capitalizando cada palabra.
+        /// Nombre del parámetro, incluyendo el prefijo @ si es necesario.
         /// </summary>
-        /// <param name="value">Texto de entrada.</param>
-        /// <returns>Texto convertido a PascalCase.</returns>
-        public static string ToPascalCase(this string value)
-        {
-            if (string.IsNullOrEmpty(value))
-                return value;
-
-            var words = value.Split('_');
-            for (int i = 0; i < words.Length; i++)
-                words[i] = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(words[i].ToLower());
-
-            return string.Concat(words);
-        }
+        public string Name { get; set; }
 
         /// <summary>
-        /// Escapa comillas simples para evitar errores o inyección en valores de tipo string.
+        /// Valor que se asignará al parámetro.
         /// </summary>
-        /// <param name="value">Valor de entrada.</param>
-        /// <returns>Valor escapado para SQL.</returns>
-        public static string EscapeSql(this string value)
-        {
-            return value?.Replace("'", "''");
-        }
+        public object Value { get; set; }
+
+        /// <summary>
+        /// Tipo de datos esperado por el motor SQL (por ejemplo, VARCHAR, INT).
+        /// </summary>
+        public string DataType { get; set; }
+
+        /// <summary>
+        /// Tamaño o precisión del dato, si aplica (por ejemplo, 20 o 10,2).
+        /// </summary>
+        public string Size { get; set; }
     }
 }
 
-using System;
-using System.Linq.Expressions;
-using System.Text;
 
-namespace RestUtilities.QueryBuilder.Extensions
+using System.Collections.Generic;
+
+namespace RestUtilities.QueryBuilder.Models
 {
     /// <summary>
-    /// Métodos de extensión para análisis de expresiones lambda.
-    /// Útil para convertir expresiones como c => c.Nombre == "Pedro" a SQL.
+    /// Representa una tabla SQL y su definición estructural.
+    /// Incluye el nombre, alias, columnas y posibles restricciones.
     /// </summary>
-    public static class ExpressionExtensions
+    public class TableDefinition
     {
         /// <summary>
-        /// Convierte una expresión lambda simple en una condición SQL.
+        /// Nombre de la tabla tal como aparece en la base de datos.
         /// </summary>
-        /// <typeparam name="T">Tipo del objeto origen.</typeparam>
-        /// <param name="expression">Expresión lambda.</param>
-        /// <returns>Condición SQL equivalente.</returns>
-        public static string ToSqlCondition<T>(this Expression<Func<T, bool>> expression)
-        {
-            var visitor = new SqlExpressionVisitor();
-            visitor.Visit(expression);
-            return visitor.Condition;
-        }
-    }
-
-    /// <summary>
-    /// Visitor personalizado para analizar árboles de expresión y traducirlos a SQL.
-    /// </summary>
-    internal class SqlExpressionVisitor : ExpressionVisitor
-    {
-        private readonly StringBuilder _sb = new();
+        public string Name { get; set; }
 
         /// <summary>
-        /// Condición SQL resultante.
+        /// Alias opcional para usar en la consulta SQL.
         /// </summary>
-        public string Condition => _sb.ToString();
+        public string Alias { get; set; }
 
-        protected override Expression VisitBinary(BinaryExpression node)
-        {
-            _sb.Append("(");
-            Visit(node.Left);
-            _sb.Append($" {GetSqlOperator(node.NodeType)} ");
-            Visit(node.Right);
-            _sb.Append(")");
-            return node;
-        }
-
-        protected override Expression VisitMember(MemberExpression node)
-        {
-            _sb.Append(node.Member.Name);
-            return node;
-        }
-
-        protected override Expression VisitConstant(ConstantExpression node)
-        {
-            _sb.Append(node.Type == typeof(string)
-                ? $"'{node.Value}'"
-                : node.Value?.ToString());
-            return node;
-        }
-
-        private static string GetSqlOperator(ExpressionType type) => type switch
-        {
-            ExpressionType.Equal => "=",
-            ExpressionType.NotEqual => "<>",
-            ExpressionType.GreaterThan => ">",
-            ExpressionType.LessThan => "<",
-            ExpressionType.GreaterThanOrEqual => ">=",
-            ExpressionType.LessThanOrEqual => "<=",
-            ExpressionType.AndAlso => "AND",
-            ExpressionType.OrElse => "OR",
-            _ => throw new NotSupportedException($"Operador no soportado: {type}")
-        };
+        /// <summary>
+        /// Lista de columnas que componen la tabla.
+        /// </summary>
+        public List<ColumnDefinition> Columns { get; set; } = new();
     }
 }
 
+namespace RestUtilities.QueryBuilder.Models
+{
+    /// <summary>
+    /// Representa una columna de una tabla SQL.
+    /// Incluye nombre, tipo, tamaño y si es clave primaria o permite nulos.
+    /// </summary>
+    public class ColumnDefinition
+    {
+        /// <summary>
+        /// Nombre de la columna.
+        /// </summary>
+        public string Name { get; set; }
+
+        /// <summary>
+        /// Tipo de dato SQL (por ejemplo: VARCHAR, INT, DECIMAL).
+        /// </summary>
+        public string DataType { get; set; }
+
+        /// <summary>
+        /// Tamaño o precisión del campo, si aplica.
+        /// </summary>
+        public string Size { get; set; }
+
+        /// <summary>
+        /// Indica si la columna permite valores nulos.
+        /// </summary>
+        public bool IsNullable { get; set; }
+
+        /// <summary>
+        /// Indica si la columna es clave primaria.
+        /// </summary>
+        public bool IsPrimaryKey { get; set; }
+    }
+}
+
+using System.Collections.Generic;
+
+namespace RestUtilities.QueryBuilder.Models
+{
+    /// <summary>
+    /// Representa los metadatos generales asociados a una consulta SQL generada.
+    /// Permite almacenar el SQL, los parámetros y otra información útil.
+    /// </summary>
+    public class QueryMetadata
+    {
+        /// <summary>
+        /// Consulta SQL final generada.
+        /// </summary>
+        public string Sql { get; set; }
+
+        /// <summary>
+        /// Lista de parámetros que deben asignarse antes de ejecutar la consulta.
+        /// </summary>
+        public List<SqlParameterDefinition> Parameters { get; set; } = new();
+
+        /// <summary>
+        /// Información adicional para depuración o ejecución (por ejemplo, tiempo estimado).
+        /// </summary>
+        public Dictionary<string, string> Metadata { get; set; } = new();
+    }
+}
