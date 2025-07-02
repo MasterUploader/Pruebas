@@ -1,70 +1,114 @@
-using System;
-
-namespace RestUtilities.QueryBuilder.Attributes
+namespace RestUtilities.QueryBuilder.Enums
 {
     /// <summary>
-    /// Atributo utilizado para excluir una propiedad de una clase
-    /// durante la generación automática de sentencias SQL.
-    /// 
-    /// Este atributo indica que la propiedad no debe incluirse en cláusulas
-    /// como SELECT, INSERT o UPDATE al construir dinámicamente una consulta.
+    /// Representa los operadores de comparación que pueden usarse en condiciones SQL.
     /// </summary>
-    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
-    public class SqlIgnoreAttribute : Attribute
+    public enum SqlOperator
     {
-        /// <summary>
-        /// Inicializa una nueva instancia del atributo SqlIgnoreAttribute.
-        /// </summary>
-        public SqlIgnoreAttribute()
-        {
-        }
+        /// <summary>Igual (=)</summary>
+        Equal,
+
+        /// <summary>Diferente (<> o !=)</summary>
+        NotEqual,
+
+        /// <summary>Mayor que (>)</summary>
+        GreaterThan,
+
+        /// <summary>Menor que (<)</summary>
+        LessThan,
+
+        /// <summary>Mayor o igual que (>=)</summary>
+        GreaterThanOrEqual,
+
+        /// <summary>Menor o igual que (<=)</summary>
+        LessThanOrEqual,
+
+        /// <summary>Contiene (LIKE %valor%)</summary>
+        Contains,
+
+        /// <summary>Empieza con (LIKE valor%)</summary>
+        StartsWith,
+
+        /// <summary>Termina con (LIKE %valor)</summary>
+        EndsWith,
+
+        /// <summary>IN (lista de valores)</summary>
+        In,
+
+        /// <summary>NOT IN (lista de valores)</summary>
+        NotIn,
+
+        /// <summary>IS NULL</summary>
+        IsNull,
+
+        /// <summary>IS NOT NULL</summary>
+        IsNotNull,
+
+        /// <summary>BETWEEN (rango)</summary>
+        Between
     }
 }
 
 
-using System;
-
-namespace RestUtilities.QueryBuilder.Attributes
+namespace RestUtilities.QueryBuilder.Enums
 {
     /// <summary>
-    /// Atributo utilizado para marcar una propiedad como clave primaria en una tabla SQL.
-    /// Esto permite identificar la columna como parte de la llave al generar WHERE en UPDATE o DELETE.
+    /// Define los tipos de JOIN utilizados en SQL.
     /// </summary>
-    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
-    public class SqlKeyAttribute : Attribute
+    public enum SqlJoinType
     {
-        /// <summary>
-        /// Inicializa una nueva instancia del atributo SqlKeyAttribute.
-        /// </summary>
-        public SqlKeyAttribute()
-        {
-        }
+        /// <summary>JOIN INTERNO (INNER JOIN)</summary>
+        Inner,
+
+        /// <summary>JOIN IZQUIERDO (LEFT JOIN)</summary>
+        Left,
+
+        /// <summary>JOIN DERECHO (RIGHT JOIN)</summary>
+        Right,
+
+        /// <summary>JOIN COMPLETO (FULL OUTER JOIN)</summary>
+        Full,
+
+        /// <summary>SELF JOIN</summary>
+        Self
     }
 }
 
-using System;
-
-namespace RestUtilities.QueryBuilder.Attributes
+namespace RestUtilities.QueryBuilder.Enums
 {
     /// <summary>
-    /// Atributo utilizado para indicar explícitamente el nombre de la tabla
-    /// asociada a una clase cuando no coincide con el nombre de la clase en C#.
+    /// Define la dirección de ordenamiento utilizada en las cláusulas ORDER BY.
     /// </summary>
-    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
-    public class SqlTableAttribute : Attribute
+    public enum SqlSortDirection
     {
-        /// <summary>
-        /// Nombre de la tabla en la base de datos.
-        /// </summary>
-        public string TableName { get; }
+        /// <summary>Orden ascendente (ASC)</summary>
+        Ascending,
 
-        /// <summary>
-        /// Inicializa una nueva instancia del atributo SqlTableAttribute.
-        /// </summary>
-        /// <param name="tableName">Nombre de la tabla.</param>
-        public SqlTableAttribute(string tableName)
-        {
-            TableName = tableName;
-        }
+        /// <summary>Orden descendente (DESC)</summary>
+        Descending
+    }
+}
+
+namespace RestUtilities.QueryBuilder.Enums
+{
+    /// <summary>
+    /// Define los motores de base de datos soportados por el generador de consultas.
+    /// </summary>
+    public enum SqlEngineType
+    {
+        /// <summary>AS400 (IBM iSeries)</summary>
+        AS400,
+
+        /// <summary>Microsoft SQL Server</summary>
+        SqlServer,
+
+        /// <summary>Oracle</summary>
+        Oracle,
+
+        /// <summary>PostgreSQL</summary>
+        PostgreSql,
+
+        /// <summary>MySQL</summary>
+        MySql
     }
 }
