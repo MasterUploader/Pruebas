@@ -1,27 +1,63 @@
-public static class LogFormatter
-{
-    /// <summary>
-    /// Da formato al log estructurado de una ejecución SQL para fines de almacenamiento en log de texto plano.
-    /// </summary>
-    /// <param name="model">Modelo de log SQL estructurado.</param>
-    /// <returns>Cadena con formato estándar para logging de SQL.</returns>
-    public static string FormatDbExecution(SqlLogModel model)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("===== LOG DE EJECUCIÓN SQL =====");
-        sb.AppendLine($"Fecha y Hora      : {model.StartTime:yyyy-MM-dd HH:mm:ss.fff}");
-        sb.AppendLine($"Duración          : {model.Duration.TotalMilliseconds} ms");
-        sb.AppendLine($"Base de Datos     : {model.DatabaseName}");
-        sb.AppendLine($"IP                : {model.Ip}");
-        sb.AppendLine($"Puerto            : {model.Port}");
-        sb.AppendLine($"Esquema           : {model.Schema}");
-        sb.AppendLine($"Tabla             : {model.TableName}");
-        sb.AppendLine($"Veces Ejecutado   : {model.ExecutionCount}");
-        sb.AppendLine($"Filas Afectadas   : {model.TotalAffectedRows}");
-        sb.AppendLine("SQL:");
-        sb.AppendLine(model.Sql);
-        sb.AppendLine("================================");
+using Microsoft.AspNetCore.Http;
+using System;
+using System.IO;
 
-        return sb.ToString();
+namespace Logging.Helpers
+{
+    public static class LogHelper
+    {
+        /// <summary>
+        /// Guarda un log estructurado en un archivo de texto, utilizando el contexto HTTP si está disponible.
+        /// </summary>
+        /// <param name="formattedLog">El contenido del log ya formateado (por ejemplo, SQL estructurado, logs HTTP, etc.).</param>
+        /// <param name="context">
+        /// Opcional: contexto HTTP de la solicitud actual. Si se proporciona, se usará para nombrar el archivo de log con TraceId, endpoint, etc.
+        /// </param>
+        public static void SaveStructuredLog(string formattedLog, HttpContext? context)
+        {
+            try
+            {
+                // Obtener ruta del log dinámicamente
+                var path = GetPathFromContext(context);
+
+                // Asegurar que el directorio exista
+                var directory = Path.GetDirectoryName(path);
+                if (!Directory.Exists(directory))
+                    Directory.CreateDirectory(directory!);
+
+                // Guardar el log estructurado
+                File.AppendAllText(path, formattedLog + Environment.NewLine);
+            }
+            catch (Exception ex)
+            {
+                // Temporal: manejo silencioso en caso de error de escritura
+                Console.WriteLine($"[LogHelper Error] {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Construye la ruta dinámica para guardar logs basada en el contexto HTTP.
+        /// Si no hay contexto, se genera una ruta genérica con timestamp.
+        /// </summary>
+        /// <param name="context">Contexto HTTP actual (puede ser null).</param>
+        /// <returns>Ruta absoluta del archivo de log.</returns>
+        private static string GetPathFromContext(HttpContext? context)
+        {
+            var basePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+
+            if (context != null)
+            {
+                var traceId = context.TraceIdentifier;
+                var endpoint = context.Request.Path.Value?.Trim('/').Replace("/", "_") ?? "endpoint";
+                var date = DateTime.UtcNow.ToString("yyyyMMdd");
+
+                var filename = $"{traceId}_{endpoint}_{date}.txt";
+                return Path.Combine(basePath, filename);
+            }
+
+            // Sin contexto: log general
+            var genericName = $"GeneralLog_{DateTime.UtcNow:yyyyMMdd_HHmmssfff}.txt";
+            return Path.Combine(basePath, genericName);
+        }
     }
 }
