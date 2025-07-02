@@ -1,186 +1,80 @@
-using RestUtilities.QueryBuilder.Models;
-
-namespace RestUtilities.QueryBuilder.Translators
-{
-    /// <summary>
-    /// Define un contrato para traducir un objeto de construcción de consulta a una sentencia SQL final.
-    /// </summary>
-    public interface IQueryTranslator
-    {
-        /// <summary>
-        /// Traduce el contexto de consulta a SQL final compatible con el motor correspondiente.
-        /// </summary>
-        /// <param name="context">Contexto con la consulta construida.</param>
-        /// <returns>Cadena SQL final traducida.</returns>
-        string Translate(QueryTranslationContext context);
-    }
-}
-
-
-using RestUtilities.QueryBuilder.Models;
-using System.Text;
-
-namespace RestUtilities.QueryBuilder.Translators
-{
-    /// <summary>
-    /// Traductor de consultas específico para AS400 (DB2).
-    /// </summary>
-    public class As400QueryTranslator : IQueryTranslator
-    {
-        /// <inheritdoc />
-        public string Translate(QueryTranslationContext context)
-        {
-            var sb = new StringBuilder();
-
-            // Ejemplo: Traducción básica
-            sb.Append("SELECT ");
-            sb.Append(string.Join(", ", context.SelectColumns));
-            sb.Append(" FROM ");
-            sb.Append(context.TableName);
-
-            if (!string.IsNullOrWhiteSpace(context.WhereClause))
-            {
-                sb.Append(" WHERE ");
-                sb.Append(context.WhereClause);
-            }
-
-            if (!string.IsNullOrWhiteSpace(context.OrderByClause))
-            {
-                sb.Append(" ORDER BY ");
-                sb.Append(context.OrderByClause);
-            }
-
-            if (context.Offset.HasValue && context.Limit.HasValue)
-            {
-                sb.Append($" OFFSET {context.Offset.Value} ROWS FETCH NEXT {context.Limit.Value} ROWS ONLY");
-            }
-
-            return sb.ToString();
-        }
-    }
-}
-
-using RestUtilities.QueryBuilder.Models;
-using System.Text;
-
-namespace RestUtilities.QueryBuilder.Translators
-{
-    /// <summary>
-    /// Traductor de consultas para bases de datos Oracle.
-    /// </summary>
-    public class OracleQueryTranslator : IQueryTranslator
-    {
-        /// <inheritdoc />
-        public string Translate(QueryTranslationContext context)
-        {
-            var sb = new StringBuilder();
-
-            sb.Append("SELECT ");
-            sb.Append(string.Join(", ", context.SelectColumns));
-            sb.Append(" FROM ");
-            sb.Append(context.TableName);
-
-            if (!string.IsNullOrWhiteSpace(context.WhereClause))
-            {
-                sb.Append(" WHERE ");
-                sb.Append(context.WhereClause);
-            }
-
-            if (!string.IsNullOrWhiteSpace(context.OrderByClause))
-            {
-                sb.Append(" ORDER BY ");
-                sb.Append(context.OrderByClause);
-            }
-
-            if (context.Offset.HasValue && context.Limit.HasValue)
-            {
-                sb.Append($" OFFSET {context.Offset.Value} ROWS FETCH NEXT {context.Limit.Value} ROWS ONLY");
-            }
-
-            return sb.ToString();
-        }
-    }
-}
-
-using RestUtilities.QueryBuilder.Models;
-using System.Text;
-
-namespace RestUtilities.QueryBuilder.Translators
-{
-    /// <summary>
-    /// Traductor de consultas para SQL Server.
-    /// </summary>
-    public class SqlServerQueryTranslator : IQueryTranslator
-    {
-        /// <inheritdoc />
-        public string Translate(QueryTranslationContext context)
-        {
-            var sb = new StringBuilder();
-
-            sb.Append("SELECT ");
-            sb.Append(string.Join(", ", context.SelectColumns));
-            sb.Append(" FROM ");
-            sb.Append(context.TableName);
-
-            if (!string.IsNullOrWhiteSpace(context.WhereClause))
-            {
-                sb.Append(" WHERE ");
-                sb.Append(context.WhereClause);
-            }
-
-            if (!string.IsNullOrWhiteSpace(context.OrderByClause))
-            {
-                sb.Append(" ORDER BY ");
-                sb.Append(context.OrderByClause);
-            }
-
-            if (context.Offset.HasValue && context.Limit.HasValue)
-            {
-                sb.Append($" OFFSET {context.Offset.Value} ROWS FETCH NEXT {context.Limit.Value} ROWS ONLY");
-            }
-
-            return sb.ToString();
-        }
-    }
-}
-
+using System;
 using System.Collections.Generic;
 
-namespace RestUtilities.QueryBuilder.Models
+namespace RestUtilities.QueryBuilder.Compatibility
 {
     /// <summary>
-    /// Representa el contexto que contiene los elementos necesarios para construir una consulta SQL.
+    /// Servicio que permite validar si una función, cláusula u operador SQL
+    /// es compatible con un determinado motor de base de datos.
     /// </summary>
-    public class QueryTranslationContext
+    public static class SqlCompatibilityService
     {
         /// <summary>
-        /// Nombre de la tabla sobre la que se ejecutará la consulta.
+        /// Enum que representa los motores de bases de datos soportados.
         /// </summary>
-        public string TableName { get; set; }
+        public enum SqlEngine
+        {
+            As400,
+            SqlServer,
+            Oracle,
+            MySql,
+            PostgreSql
+        }
 
         /// <summary>
-        /// Lista de columnas a seleccionar.
+        /// Diccionario que mapea cada función SQL a los motores donde está soportada.
         /// </summary>
-        public List<string> SelectColumns { get; set; } = new();
+        private static readonly Dictionary<string, HashSet<SqlEngine>> _compatibilityMap = new(StringComparer.OrdinalIgnoreCase)
+        {
+            { "FETCH", new() { SqlEngine.As400, SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.PostgreSql } },
+            { "OFFSET", new() { SqlEngine.As400, SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.PostgreSql } },
+            { "ISNULL", new() { SqlEngine.SqlServer } },
+            { "IFNULL", new() { SqlEngine.MySql } },
+            { "NVL", new() { SqlEngine.Oracle } },
+            { "COALESCE", new() { SqlEngine.As400, SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.MySql } },
+            { "TOP", new() { SqlEngine.SqlServer } },
+            { "LIMIT", new() { SqlEngine.MySql, SqlEngine.PostgreSql } },
+            { "ROWNUM", new() { SqlEngine.Oracle } },
+            { "SELECT INTO", new() { SqlEngine.SqlServer, SqlEngine.As400 } },
+            { "INSERT INTO SELECT", new() { SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.As400 } },
+            { "CASE", new() { SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.As400, SqlEngine.MySql } },
+            { "EXISTS", new() { SqlEngine.SqlServer, SqlEngine.Oracle, SqlEngine.As400 } },
+            { "ALL", new() { SqlEngine.SqlServer, SqlEngine.Oracle } },
+            { "ANY", new() { SqlEngine.SqlServer, SqlEngine.Oracle } },
+        };
 
         /// <summary>
-        /// Cláusula WHERE generada dinámicamente.
+        /// Determina si una función o cláusula está soportada por un motor SQL.
         /// </summary>
-        public string? WhereClause { get; set; }
+        /// <param name="sqlFeature">Nombre de la función o cláusula (por ejemplo: "ISNULL", "LIMIT").</param>
+        /// <param name="engine">Motor SQL objetivo.</param>
+        /// <returns>Verdadero si está soportado, falso en caso contrario.</returns>
+        public static bool IsCompatible(string sqlFeature, SqlEngine engine)
+        {
+            if (_compatibilityMap.TryGetValue(sqlFeature.ToUpperInvariant(), out var engines))
+            {
+                return engines.Contains(engine);
+            }
+
+            // Si no está registrado, asumimos que no es compatible
+            return false;
+        }
 
         /// <summary>
-        /// Cláusula ORDER BY.
+        /// Devuelve la lista de motores compatibles con una función SQL específica.
         /// </summary>
-        public string? OrderByClause { get; set; }
+        /// <param name="sqlFeature">Nombre de la función o palabra clave.</param>
+        /// <returns>Lista de motores compatibles.</returns>
+        public static List<SqlEngine> GetCompatibleEngines(string sqlFeature)
+        {
+            if (_compatibilityMap.TryGetValue(sqlFeature.ToUpperInvariant(), out var engines))
+            {
+                return new List<SqlEngine>(engines);
+            }
 
-        /// <summary>
-        /// Número de filas a omitir (para paginación).
-        /// </summary>
-        public int? Offset { get; set; }
-
-        /// <summary>
-        /// Número de filas a recuperar después del OFFSET.
-        /// </summary>
-        public int? Limit { get; set; }
+            return new List<SqlEngine>();
+        }
     }
 }
+
+
