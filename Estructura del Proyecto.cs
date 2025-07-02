@@ -1,38 +1,49 @@
-RestUtilities.QueryBuilder/
-│
-├── Attributes/            # Atributos personalizados (como [SqlColumn], [SqlIgnore])
-│
-├── Builders/              # Construcción de queries SQL
-│   ├── Select/
-│   ├── Insert/
-│   ├── Update/
-│   ├── Delete/
-│   └── Common/            # Componentes comunes reutilizados por todos los builders
-│
-├── Compatibility/         # Verifica soporte por motor SQL (ej. EXISTS no disponible en AS400)
-│
-├── DbContextSupport/      # Integración opcional con Entity Framework (FromSqlRaw, etc.)
-│
-├── Enums/                 # Enumeraciones como operadores, tipos de join, tipo de motor SQL
-│
-├── Extensions/            # Métodos de extensión para facilitar la fluidez del API
-│
-├── Interfaces/            # Contratos públicos para desacoplar lógica interna
-│
-├── Metadata/              # Extracción de metadatos desde clases y atributos (nombres, tipos, tamaños)
-│
-├── Models/                # Estructuras para filtros, condiciones, joins, subqueries, etc.
-│
-├── Translators/           # Traduce expresiones y queries según el motor (AS400, Oracle, etc.)
-│   ├── AS400/
-│   ├── SqlServer/
-│   ├── Oracle/
-│   ├── PostgreSql/
-│   └── MySql/
-│
-├── Utilities/             # Clases auxiliares (ej: conversores, generadores de alias, formateadores)
-│
-├── Validators/            # Validaciones de tipos, longitudes, nulls, seguridad (inyección SQL)
-│
-├── RestUtilities.QueryBuilder.csproj
-└── README.md              # Documentación del paquete
+using System;
+using System.Data;
+
+namespace RestUtilities.QueryBuilder.Attributes
+{
+    /// <summary>
+    /// Atributo utilizado para mapear una propiedad de una clase con una columna SQL.
+    /// Permite definir el nombre exacto de la columna en la base de datos,
+    /// el tipo de dato SQL y su longitud o precisión.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    public class SqlColumnAttribute : Attribute
+    {
+        /// <summary>
+        /// Nombre exacto de la columna en la base de datos.
+        /// </summary>
+        public string ColumnName { get; }
+
+        /// <summary>
+        /// Tipo de dato SQL que se debe utilizar (compatible con OleDbType).
+        /// </summary>
+        public OleDbType SqlType { get; }
+
+        /// <summary>
+        /// Longitud máxima permitida del campo (opcional, aplicable a tipos CHAR, VARCHAR, etc.).
+        /// </summary>
+        public int? Length { get; }
+
+        /// <summary>
+        /// Número de decimales permitidos (opcional, para tipos numéricos con precisión).
+        /// </summary>
+        public int? Scale { get; }
+
+        /// <summary>
+        /// Inicializa una nueva instancia del atributo SqlColumnAttribute.
+        /// </summary>
+        /// <param name="columnName">Nombre de la columna SQL.</param>
+        /// <param name="sqlType">Tipo de dato SQL (OleDbType).</param>
+        /// <param name="length">Longitud máxima permitida (opcional).</param>
+        /// <param name="scale">Número de decimales (opcional).</param>
+        public SqlColumnAttribute(string columnName, OleDbType sqlType, int? length = null, int? scale = null)
+        {
+            ColumnName = columnName;
+            SqlType = sqlType;
+            Length = length;
+            Scale = scale;
+        }
+    }
+}
