@@ -1,26 +1,27 @@
-/// <summary>
-/// Registra un log estructurado de éxito para una operación SQL usando un modelo preformateado.
-/// </summary>
-/// <param name="model">Modelo con los datos del comando SQL ejecutado.</param>
-/// <param name="context">Contexto HTTP para trazabilidad opcional.</param>
-void LogDatabaseSuccess(SqlLogModel model, HttpContext? context = null);
-
-
-/// <inheritdoc />
-public void LogDatabaseSuccess(SqlLogModel model, HttpContext? context = null)
+public static class LogFormatter
 {
-    var traceId = context?.TraceIdentifier ?? Guid.NewGuid().ToString();
+    /// <summary>
+    /// Da formato al log estructurado de una ejecución SQL para fines de almacenamiento en log de texto plano.
+    /// </summary>
+    /// <param name="model">Modelo de log SQL estructurado.</param>
+    /// <returns>Cadena con formato estándar para logging de SQL.</returns>
+    public static string FormatDbExecution(SqlLogModel model)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("===== LOG DE EJECUCIÓN SQL =====");
+        sb.AppendLine($"Fecha y Hora      : {model.StartTime:yyyy-MM-dd HH:mm:ss.fff}");
+        sb.AppendLine($"Duración          : {model.Duration.TotalMilliseconds} ms");
+        sb.AppendLine($"Base de Datos     : {model.DatabaseName}");
+        sb.AppendLine($"IP                : {model.Ip}");
+        sb.AppendLine($"Puerto            : {model.Port}");
+        sb.AppendLine($"Esquema           : {model.Schema}");
+        sb.AppendLine($"Tabla             : {model.TableName}");
+        sb.AppendLine($"Veces Ejecutado   : {model.ExecutionCount}");
+        sb.AppendLine($"Filas Afectadas   : {model.TotalAffectedRows}");
+        sb.AppendLine("SQL:");
+        sb.AppendLine(model.Sql);
+        sb.AppendLine("================================");
 
-    // Usa el formateador que ya tienes para texto plano, si lo deseas
-    var formatted = LogFormatter.FormatDbExecution(model);
-
-    SaveStructuredLog(
-        traceId: traceId,
-        timestamp: model.StartTime,
-        service: "Database",
-        database: model.DatabaseName ?? "Desconocida",
-        ip: model.Ip ?? "Desconocida",
-        port: model.Port ?? 0,
-        message: formatted
-    );
+        return sb.ToString();
+    }
 }
