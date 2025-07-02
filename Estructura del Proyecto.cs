@@ -1,117 +1,120 @@
-using RestUtilities.QueryBuilder.Interfaces;
-using RestUtilities.QueryBuilder.Enums;
 using System.Collections.Generic;
 using System.Text;
 
 namespace RestUtilities.QueryBuilder.Builders
 {
     /// <summary>
-    /// Constructor de consultas SQL del tipo SELECT.
-    /// Permite construir dinámicamente sentencias SELECT con soporte para filtros, ordenamientos, paginación, joins, etc.
+    /// Constructor de consultas SQL del tipo UPDATE.
+    /// Permite construir sentencias UPDATE con asignación de columnas y condiciones WHERE.
     /// </summary>
-    public class SelectQueryBuilder : IQueryBuilder
+    public class UpdateQueryBuilder
     {
-        private string _table;
-        private readonly List<string> _columns = new();
-        private readonly List<string> _whereConditions = new();
-        private readonly List<string> _orderBy = new();
-        private int? _offset;
-        private int? _fetch;
+        /// <summary>Nombre de la tabla a actualizar.</summary>
+        public string Table { get; set; }
 
-        /// <inheritdoc/>
-        public IQueryBuilder From(string tableName)
-        {
-            _table = tableName;
-            return this;
-        }
+        /// <summary>Columnas a actualizar con sus valores nuevos.</summary>
+        public Dictionary<string, string> SetColumns { get; set; } = new();
 
-        /// <inheritdoc/>
-        public IQueryBuilder Select(params string[] columns)
-        {
-            _columns.AddRange(columns);
-            return this;
-        }
+        /// <summary>Condiciones para la cláusula WHERE.</summary>
+        public List<string> WhereConditions { get; set; } = new();
 
-        /// <inheritdoc/>
-        public IQueryBuilder Where(string condition)
-        {
-            _whereConditions.Add(condition);
-            return this;
-        }
-
-        /// <inheritdoc/>
-        public IQueryBuilder OrderBy(string column, SqlSortDirection direction)
-        {
-            _orderBy.Add($"{column} {(direction == SqlSortDirection.Ascending ? "ASC" : "DESC")}");
-            return this;
-        }
-
-        /// <inheritdoc/>
-        public IQueryBuilder Offset(int offset)
-        {
-            _offset = offset;
-            return this;
-        }
-
-        /// <inheritdoc/>
-        public IQueryBuilder FetchNext(int size)
-        {
-            _fetch = size;
-            return this;
-        }
-
-        /// <inheritdoc/>
+        /// <summary>
+        /// Construye la sentencia SQL UPDATE.
+        /// </summary>
+        /// <returns>Consulta SQL generada.</returns>
         public string Build()
         {
             var sb = new StringBuilder();
-            sb.Append("SELECT ");
-            sb.Append(_columns.Count > 0 ? string.Join(", ", _columns) : "*");
-            sb.Append(" FROM ").Append(_table);
+            sb.Append($"UPDATE {Table} SET ");
 
-            if (_whereConditions.Count > 0)
-                sb.Append(" WHERE ").Append(string.Join(" AND ", _whereConditions));
+            var setParts = new List<string>();
+            foreach (var kvp in SetColumns)
+                setParts.Add($"{kvp.Key} = {kvp.Value}");
 
-            if (_orderBy.Count > 0)
-                sb.Append(" ORDER BY ").Append(string.Join(", ", _orderBy));
+            sb.Append(string.Join(", ", setParts));
 
-            if (_offset.HasValue && _fetch.HasValue)
-                sb.Append($" OFFSET {_offset.Value} ROWS FETCH NEXT {_fetch.Value} ROWS ONLY");
+            if (WhereConditions.Count > 0)
+                sb.Append(" WHERE ").Append(string.Join(" AND ", WhereConditions));
 
             return sb.ToString();
         }
     }
 }
 
+
 using System.Collections.Generic;
 using System.Text;
 
 namespace RestUtilities.QueryBuilder.Builders
 {
     /// <summary>
-    /// Constructor de consultas SQL del tipo INSERT.
-    /// Permite construir dinámicamente sentencias INSERT INTO con columnas y valores parametrizados.
+    /// Constructor de consultas SQL del tipo DELETE.
+    /// Permite construir sentencias DELETE con condiciones WHERE.
     /// </summary>
-    public class InsertQueryBuilder
+    public class DeleteQueryBuilder
     {
-        /// <summary>Nombre de la tabla destino.</summary>
+        /// <summary>Nombre de la tabla desde la que se eliminarán los registros.</summary>
         public string Table { get; set; }
 
-        /// <summary>Lista de columnas a insertar.</summary>
-        public List<string> Columns { get; set; } = new();
-
-        /// <summary>Lista de valores asociados a las columnas.</summary>
-        public List<string> Values { get; set; } = new();
+        /// <summary>Condiciones WHERE que limitan la eliminación.</summary>
+        public List<string> WhereConditions { get; set; } = new();
 
         /// <summary>
-        /// Construye la consulta SQL INSERT basada en los valores proporcionados.
+        /// Construye la sentencia SQL DELETE.
         /// </summary>
         /// <returns>Consulta SQL generada.</returns>
         public string Build()
         {
             var sb = new StringBuilder();
-            sb.Append($"INSERT INTO {Table} ({string.Join(", ", Columns)}) ");
-            sb.Append($"VALUES ({string.Join(", ", Values)})");
+            sb.Append($"DELETE FROM {Table}");
+
+            if (WhereConditions.Count > 0)
+                sb.Append(" WHERE ").Append(string.Join(" AND ", WhereConditions));
+
             return sb.ToString();
+        }
+    }
+}
+
+
+using RestUtilities.QueryBuilder.Enums;
+using System.Text;
+
+namespace RestUtilities.QueryBuilder.Builders
+{
+    /// <summary>
+    /// Constructor para sentencias JOIN SQL.
+    /// Permite agregar JOINs con sus respectivos tipos y condiciones ON.
+    /// </summary>
+    public class JoinBuilder
+    {
+        /// <summary>Tabla secundaria que se desea unir.</summary>
+        public string JoinTable { get; set; }
+
+        /// <summary>Condición que relaciona ambas tablas.</summary>
+        public string JoinCondition { get; set; }
+
+        /// <summary>Tipo de JOIN (INNER, LEFT, etc.).</summary>
+        public SqlJoinType JoinType { get; set; } = SqlJoinType.Inner;
+
+        /// <summary>
+        /// Construye el fragmento de JOIN SQL.
+        /// </summary>
+        /// <returns>Fragmento SQL del JOIN.</returns>
+        public string Build()
+        {
+            var joinTypeStr = JoinType switch
+            {
+                SqlJoinType.Left => "LEFT JOIN",
+                SqlJoinType.Right => "RIGHT JOIN",
+                SqlJoinType.Full => "FULL JOIN",
+                SqlJoinType.Self => "JOIN", // El SELF JOIN se especifica con alias
+                _ => "INNER JOIN"
+            };
+
+            return new StringBuilder()
+                .Append($"{joinTypeStr} {JoinTable} ON {JoinCondition}")
+                .ToString();
         }
     }
 }
