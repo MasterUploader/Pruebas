@@ -1,61 +1,45 @@
-using RestUtilities.QueryBuilder.Builders;
-using RestUtilities.QueryBuilder.Models;
+using System;
 
 namespace RestUtilities.QueryBuilder.Services
 {
     /// <summary>
-    /// Servicio encargado de construir consultas SQL dinámicas utilizando modelos definidos por el usuario.
-    /// Este servicio actúa como una fachada para los distintos tipos de operaciones (SELECT, INSERT, UPDATE),
-    /// delegando la construcción real al servicio `IQueryBuilderService`.
+    /// Define los métodos esenciales que debe implementar un generador de consultas SQL.
+    /// Proporciona métodos para construir consultas SELECT, INSERT y UPDATE de forma dinámica y segura.
     /// </summary>
-    public class SqlQueryService
+    public interface IQueryBuilderService
     {
-        private readonly IQueryBuilderService _queryBuilder;
-
         /// <summary>
-        /// Inicializa una nueva instancia de la clase <see cref="SqlQueryService"/>.
+        /// Genera una consulta SQL SELECT basada en un modelo de datos y un filtro opcional.
         /// </summary>
-        /// <param name="queryBuilder">Instancia de <see cref="IQueryBuilderService"/> utilizada para construir las consultas SQL.</param>
-        public SqlQueryService(IQueryBuilderService queryBuilder)
-        {
-            _queryBuilder = queryBuilder;
-        }
-
-        /// <summary>
-        /// Construye una consulta SQL de tipo SELECT basada en el modelo y un filtro opcional.
-        /// </summary>
-        /// <typeparam name="TModel">Tipo del modelo definido por el usuario que representa la tabla SQL.</typeparam>
+        /// <typeparam name="TModel">El tipo del modelo que representa la tabla SQL.</typeparam>
         /// <param name="filter">
-        /// Expresión lambda que representa los criterios WHERE de la consulta.
-        /// Si es <c>null</c>, se generará una consulta sin filtro (SELECT * FROM Tabla).
+        /// Una expresión opcional que representa la condición WHERE de la consulta.
+        /// Si se omite, se generará un SELECT sin filtro.
         /// </param>
-        /// <returns>Cadena con la consulta SQL SELECT generada.</returns>
-        public string BuildSelect<TModel>(Func<TModel, bool>? filter = null)
-        {
-            return _queryBuilder.BuildSelectQuery(filter);
-        }
+        /// <returns>Una cadena con la consulta SQL SELECT generada.</returns>
+        string BuildSelectQuery<TModel>(Func<TModel, bool>? filter = null);
 
         /// <summary>
-        /// Construye una consulta SQL de tipo INSERT basada en los valores proporcionados.
+        /// Genera una consulta SQL INSERT para insertar datos en una tabla basada en el modelo proporcionado.
         /// </summary>
-        /// <typeparam name="TModel">Tipo del modelo definido por el usuario que representa la tabla SQL.</typeparam>
-        /// <param name="insertValues">Objeto que contiene los valores a insertar en la tabla.</param>
-        /// <returns>Cadena con la consulta SQL INSERT generada.</returns>
-        public string BuildInsert<TModel>(object insertValues)
-        {
-            return _queryBuilder.BuildInsertQuery(insertValues);
-        }
+        /// <typeparam name="TModel">El tipo del modelo que representa la tabla SQL.</typeparam>
+        /// <param name="insertValues">
+        /// Un objeto que contiene los valores a insertar. Las propiedades deben coincidir con las columnas definidas.
+        /// </param>
+        /// <returns>Una cadena con la consulta SQL INSERT generada.</returns>
+        string BuildInsertQuery<TModel>(object insertValues);
 
         /// <summary>
-        /// Construye una consulta SQL de tipo UPDATE basada en los valores a actualizar y el filtro de selección.
+        /// Genera una consulta SQL UPDATE para actualizar registros en una tabla basada en el modelo proporcionado.
         /// </summary>
-        /// <typeparam name="TModel">Tipo del modelo definido por el usuario que representa la tabla SQL.</typeparam>
-        /// <param name="updateValues">Objeto con las propiedades y nuevos valores que serán actualizados.</param>
-        /// <param name="filter">Expresión lambda que representa los criterios WHERE de la actualización.</param>
-        /// <returns>Cadena con la consulta SQL UPDATE generada.</returns>
-        public string BuildUpdate<TModel>(object updateValues, Func<TModel, bool> filter)
-        {
-            return _queryBuilder.BuildUpdateQuery(updateValues, filter);
-        }
+        /// <typeparam name="TModel">El tipo del modelo que representa la tabla SQL.</typeparam>
+        /// <param name="updateValues">
+        /// Un objeto con las propiedades y nuevos valores que serán actualizados.
+        /// </param>
+        /// <param name="filter">
+        /// Una expresión lambda que representa los criterios WHERE de la actualización.
+        /// </param>
+        /// <returns>Una cadena con la consulta SQL UPDATE generada.</returns>
+        string BuildUpdateQuery<TModel>(object updateValues, Func<TModel, bool> filter);
     }
 }
