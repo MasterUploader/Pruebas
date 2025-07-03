@@ -1,76 +1,53 @@
-using System;
-using System.Xml.Serialization;
-using System.Collections.Generic;
+FieldsQuery param = new();
 
-[XmlRoot("DATA")]
-public class Data
-{
-    /// <summary>
-    /// Lista de actividades detalladas.
-    /// </summary>
-    [XmlElement("DET_ACT")]
-    public List<DetAct> DetActList { get; set; }
-}
+    DateTime nowUTC = DateTime.UtcNow;
+    string fechaISO8601 = nowUTC.ToString("yyyy-dd-MMTHH:mm:ss.fffZ");
 
-public class DetAct
-{
-    [XmlAttribute("ACTIVITY_DT")]
-    public string ActivityDate { get; set; }
+    if (_connection.IsConnected)
+    {
+        string sqlQuery = @"SELECT * FROM CYBERDTA.CYBUTHDP WHERE HDP00GUID = ?";
 
-    [XmlAttribute("AGENT_CD")]
-    public string AgentCode { get; set; }
+        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+        command.CommandText = sqlQuery;
+        command.CommandType = System.Data.CommandType.Text;
+        // command.Parameters.Add("HDP00GUID", OleDbType.Char).Value = guid;
+        param.AddOleDbParameter(command, "HDP00GUID", OleDbType.Char, guid);
 
-    [XmlAttribute("SERVICE_CD")]
-    public string ServiceCode { get; set; }
+        using DbDataReader reader = command.ExecuteReader();
 
-    [XmlAttribute("ORIG_COUNTRY_CD")]
-    public string OriginCountryCode { get; set; }
+        if (reader.HasRows)
+        {
+            while (reader.Read())
+            {
+                //Datos
 
-    [XmlAttribute("ORIG_CURRENCY_CD")]
-    public string OriginCurrencyCode { get; set; }
+                postPaymentDtoFinal.Amount.Value = ConvertirAEnteroGinih(reader, "HDP01MTTO"); //Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP01MTTO"))); //Value
+                postPaymentDtoFinal.Amount.Currency = reader.GetString(reader.GetOrdinal("HDP02MONE")); //Moneda
+                postPaymentDtoFinal.Amount.Breakdown.Subtotal = ConvertirAEnteroGinih(reader, "HDP03SUTO"); // Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP03SUTO"))); //Subtotal
+                postPaymentDtoFinal.Amount.Breakdown.ProcessingFee = ConvertirAEnteroGinih(reader, "HDP04PRFE"); //Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP04PRFE"))); //Processing Fee
+                postPaymentDtoFinal.Amount.Breakdown.Surcharge = ConvertirAEnteroGinih(reader, "HDP05MTCA"); //Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP05MTCA"))); //Surcharge cargo
+                postPaymentDtoFinal.Amount.Breakdown.Discount = ConvertirAEnteroGinih(reader, "HDP06MTDE"); //Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP06MTDE"))); //Discount descuento
+                postPaymentDtoFinal.Amount.Breakdown.Tax = ConvertirAEnteroGinih(reader, "HDP07MTIM"); //Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP07MTIM"))); //Tax impuesto
+                postPaymentDtoFinal.Amount.Breakdown.Total = ConvertirAEnteroGinih(reader, "HDP08MTTO"); //Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP08MTTO"))); //Total
+                postPaymentDtoFinal.CustomerID = reader.GetString(reader.GetOrdinal("HDP09CUID"));//Customer ID                                
+                postPaymentDtoFinal.PaymentDate = fechaISO8601;//Utilitarios.ConvertirFecha(reader.GetString(reader.GetOrdinal("HDP10PADA")));//Fecha Pago
+                postPaymentDtoFinal.ReferenceId = guid; //reader.GetString(reader.GetOrdinal("HDP11REID"));//Referencia
+                postPaymentDtoFinal.PayableOption = reader.GetString(reader.GetOrdinal("HDP12PAOP"));//Opcion de Pago
+                postPaymentDtoFinal.CompanyID = reader.GetString(reader.GetOrdinal("HDP13COID"));//Codigo Compañia
+                postPaymentDtoFinal.ReceivableID = reader.GetString(reader.GetOrdinal("HDP14GEN1"));//ReceivableID
 
-    [XmlAttribute("DEST_COUNTRY_CD")]
-    public string DestinationCountryCode { get; set; }
+                postPaymentDtoFinal.AdditionalData = "{\"PaymentMethod\": \"cash\" }";
+                postPaymentDtoFinal.Channel = "interbanca";
 
-    [XmlAttribute("DEST_CURRENCY_CD")]
-    public string DestinationCurrencyCode { get; set; }
+                //  postPaymentDtoFinal.PayableOption = reader.GetString(reader.GetOrdinal("HDP15GEN2"));//Opcion de Pago
 
-    [XmlAttribute("PAYMENT_TYPE_CD")]
-    public string PaymentTypeCode { get; set; }
+                // postPaymentDtoFinal.PayableOption =  Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP16GEN3")));//Opcion de Pago
 
-    [XmlAttribute("O_AGENT_CD")]
-    public string OriginAgentCode { get; set; }
 
-    [XmlElement("DETAILS")]
-    public Details Details { get; set; }
-}
+                // postPaymentDtoFinal.PayableOption =  Convert.ToInt32(reader.GetValue(reader.GetOrdinal("HDP17GEN4")));//Opcion de Pago
 
-public class Details
-{
-    [XmlElement("DETAIL")]
-    public List<Detail> DetailList { get; set; }
-}
-
-public class Detail
-{
-    [XmlAttribute("MOVEMENT_TYPE_CODE")]
-    public string MovementTypeCode { get; set; }
-
-    [XmlAttribute("CONFIRMATION_NM")]
-    public string ConfirmationNumber { get; set; }
-
-    [XmlAttribute("AGENT_ORDER_NM")]
-    public string AgentOrderNumber { get; set; }
-
-    [XmlAttribute("ORIGIN_AM")]
-    public decimal OriginAmount { get; set; }
-
-    [XmlAttribute("DESTINATION_AM")]
-    public decimal DestinationAmount { get; set; }
-
-    [XmlAttribute("FEE_AM")]
-    public decimal FeeAmount { get; set; }
-
-    [XmlAttribute("DISCOUNT_AM")]
-    public decimal DiscountAmount { get; set; }
-}
+                exitoso = true;
+            }
+        }
+    }
+    return postPaymentDtoFinal;
