@@ -1,25 +1,6 @@
-public void AddOleDbParameter(DbCommand command, string paramName, OleDbType type, object value, int size = 36)
-{
-    var param = new OleDbParameter
-    {
-        OleDbType = type,
-        Size = size,
-        Value = value
-    };
-
-    command.Parameters.Add(param);
-}
-
-public void AddOleDbParameter(DbCommand command, string paramName, OleDbType type, object value, int size = 36)
-{
-    var param = new OleDbParameter
-    {
-        OleDbType = type,
-        Size = size,
-        Value = value
-    };
-
-    command.Parameters.Add(param);
-}
-
-param.AddOleDbParameter(command, "HDP00GUID", OleDbType.Char, guid.ToString(), 36);
+var paramGuid = command.CreateParameter();
+paramGuid.ParameterName = "HDP00GUID";
+paramGuid.OleDbType = OleDbType.Char;
+paramGuid.Size = 100;
+paramGuid.Value = guid.PadRight(100);
+command.Parameters.Add(paramGuid);
