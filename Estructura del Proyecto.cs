@@ -1,25 +1,51 @@
-/// <summary>
-/// Agrega un parámetro a un DbCommand, compatible con OleDbCommand y decoradores como LoggingDatabaseCommand.
-/// </summary>
-/// <param name="cmd">Comando al cual se agregará el parámetro.</param>
-/// <param name="name">Nombre del parámetro.</param>
-/// <param name="type">Tipo OleDb del parámetro.</param>
-/// <param name="value">Valor del parámetro.</param>
-/// <param name="size">Tamaño fijo del campo (por ejemplo, 100 para CHAR(100)).</param>
-public void AddOleDbParameter(DbCommand cmd, string name, OleDbType type, object? value, int? size = null)
+private async Task GuardarDetalleReporteAsync(
+    IDatabaseConnection dbConnection,
+    string agentCd,
+    string agentTransTypeCode,
+    string contractTypeCd,
+    List<DetAct> detActList)
 {
-    var param = cmd.CreateParameter();
-    param.ParameterName = name;
+    if (detActList == null || detActList.Count == 0)
+        return;
 
-    if (param is OleDbParameter oleParam)
+    var today = DateTime.Now.ToString("ddMMyyyy");
+    int correlativo = 1;
+
+    foreach (var act in detActList)
     {
-        oleParam.OleDbType = type;
+        if (act?.Details?.DetailList == null)
+            continue;
 
-        // Solo aplica el Size si se especifica, sin modificar el valor
-        if (size.HasValue)
-            oleParam.Size = size.Value;
+        foreach (var detail in act.Details.DetailList)
+        {
+            using var command = dbConnection.GetDbCommand();
+            command.CommandText = @"
+                INSERT INTO TU_TABLA_REPORTE (
+                    CORRELATIVO, AGENT_CD, TRANS_TYPE_CD, ACTIVITY_DT,
+                    CONTRACT_TYPE_CD, MOVEMENT_TYPE_CODE, CONFIRMATION_NM,
+                    AGENT_ORDER_NM, ORIGIN_AM, DESTINATION_AM,
+                    FEE_AM, DISCOUNT_AM, FECHA_PROCESO
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )";
+
+            command.Parameters.Clear();
+            command.Parameters.Add(CreateParameter(command, correlativo));
+            command.Parameters.Add(CreateParameter(command, agentCd));
+            command.Parameters.Add(CreateParameter(command, agentTransTypeCode));
+            command.Parameters.Add(CreateParameter(command, act.ActivityDate));
+            command.Parameters.Add(CreateParameter(command, contractTypeCd));
+            command.Parameters.Add(CreateParameter(command, detail.MovementTypeCode));
+            command.Parameters.Add(CreateParameter(command, detail.ConfirmationNumber));
+            command.Parameters.Add(CreateParameter(command, detail.AgentOrderNumber));
+            command.Parameters.Add(CreateParameter(command, detail.OriginAmount));
+            command.Parameters.Add(CreateParameter(command, detail.DestinationAmount));
+            command.Parameters.Add(CreateParameter(command, detail.FeeAmount));
+            command.Parameters.Add(CreateParameter(command, detail.DiscountAmount));
+            command.Parameters.Add(CreateParameter(command, today));
+
+            await command.ExecuteNonQueryAsync();
+            correlativo++;
+        }
     }
-
-    param.Value = value ?? DBNull.Value;
-    cmd.Parameters.Add(param);
 }
