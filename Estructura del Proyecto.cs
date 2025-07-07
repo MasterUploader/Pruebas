@@ -10,43 +10,87 @@ private async Task InsertarEnIbtSactaAsync(
     {
         if (deposit?.Data == null) continue;
 
-        var data = deposit.Data;
+        var d = deposit.Data;
         FieldsQuery param = new();
 
         string insertSql = @"
             INSERT INTO BCAH96DTA.IBTSACTA (
-                INOCONFIR, ISERVICD, IDESPAIS, IDESMONE,
-                ISAGENCD, ISPAISCD, ISTATECD, IRAGENCD,
-                ITICUENTA, INOCUENTA,
-                ACODPAIS, ACODMONED, AMTOENVIA, AMTOCALCU, AFACTCAMB,
-                ESALEDT, EMONREFER, ETASAREFE, EMTOREF
+                INOCONFIR, IDATRECI, IHORRECI, IDATCONF, IHORCONF, IDATVAL, IHORVAL, IDATPAGO, IHORPAGO,
+                IDATACRE, IHORACRE, IDATRECH, IHORRECH, ITIPPAGO, ISERVICD, IDESPAIS, IDESMONE, ISAGENCD,
+                ISPAISCD, ISTATECD, IRAGENCD, ITICUENTA, INOCUENTA, INUMREFER, ISTSREM, ISTSPRO, IERR,
+                IERRDSC, IDSCRECH, ACODPAIS, ACODMONED, AMTOENVIA, AMTOCALCU, AFACTCAMB,
+                BPRIMNAME, BSECUNAME, BAPELLIDO, BSEGUAPE, BDIRECCIO, BCIUDAD, BESTADO, BPAIS,
+                BCODPOST, BTELEFONO, CPRIMNAME, CSECUNAME, CAPELLIDO, CSEGUAPE, CDIRECCIO,
+                CCIUDAD, CESTADO, CPAIS, CCODPOST, CTELEFONO, DTIDENT, ESALEDT, EMONREFER,
+                ETASAREFE, EMTOREF
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )";
 
         using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
         command.CommandText = insertSql;
         command.CommandType = CommandType.Text;
 
-        param.AddOleDbParameter(command, "INOCONFIR", OleDbType.Char, data.ConfirmationNumber);
-        param.AddOleDbParameter(command, "ISERVICD", OleDbType.Char, data.ServiceCode);
-        param.AddOleDbParameter(command, "IDESPAIS", OleDbType.Char, data.DestinationCountryCode);
-        param.AddOleDbParameter(command, "IDESMONE", OleDbType.Char, data.DestinationCurrencyCode);
-        param.AddOleDbParameter(command, "ISAGENCD", OleDbType.Char, data.SenderAgentCode);
-        param.AddOleDbParameter(command, "ISPAISCD", OleDbType.Char, data.SenderCountryCode);
-        param.AddOleDbParameter(command, "ISTATECD", OleDbType.Char, data.SenderStateCode);
-        param.AddOleDbParameter(command, "IRAGENCD", OleDbType.Char, data.RecipientAgentCode);
-        param.AddOleDbParameter(command, "ITICUENTA", OleDbType.Char, data.RecipientAccountTypeCode);
-        param.AddOleDbParameter(command, "INOCUENTA", OleDbType.Char, data.RecipientAccountNumber);
-        param.AddOleDbParameter(command, "ACODPAIS", OleDbType.Char, data.OriginCountryCode);
-        param.AddOleDbParameter(command, "ACODMONED", OleDbType.Char, data.OriginCurrencyCode);
-        param.AddOleDbParameter(command, "AMTOENVIA", OleDbType.Char, data.OriginAmount);
-        param.AddOleDbParameter(command, "AMTOCALCU", OleDbType.Char, data.DestinationAmount);
-        param.AddOleDbParameter(command, "AFACTCAMB", OleDbType.Char, data.ExchangeRateFx);
-        param.AddOleDbParameter(command, "ESALEDT", OleDbType.Char, data.SaleDate);
-        param.AddOleDbParameter(command, "EMONREFER", OleDbType.Char, data.MarketRefCurrencyCode);
-        param.AddOleDbParameter(command, "ETASAREFE", OleDbType.Char, data.MarketRefCurrencyFx);
-        param.AddOleDbParameter(command, "EMTOREF", OleDbType.Char, data.MarketRefCurrencyAmount);
+        // 🔹 Valores conocidos del XML
+        param.AddOleDbParameter(command, "INOCONFIR", OleDbType.Char, d.ConfirmationNumber);
+        param.AddOleDbParameter(command, "IDATRECI", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IHORRECI", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IDATCONF", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IHORCONF", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IDATVAL", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IHORVAL", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IDATPAGO", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IHORPAGO", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IDATACRE", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IHORACRE", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IDATRECH", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IHORRECH", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "ITIPPAGO", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "ISERVICD", OleDbType.Char, d.ServiceCode);
+        param.AddOleDbParameter(command, "IDESPAIS", OleDbType.Char, d.DestinationCountryCode);
+        param.AddOleDbParameter(command, "IDESMONE", OleDbType.Char, d.DestinationCurrencyCode);
+        param.AddOleDbParameter(command, "ISAGENCD", OleDbType.Char, d.SenderAgentCode);
+        param.AddOleDbParameter(command, "ISPAISCD", OleDbType.Char, d.SenderCountryCode);
+        param.AddOleDbParameter(command, "ISTATECD", OleDbType.Char, d.SenderStateCode);
+        param.AddOleDbParameter(command, "IRAGENCD", OleDbType.Char, d.RecipientAgentCode);
+        param.AddOleDbParameter(command, "ITICUENTA", OleDbType.Char, d.RecipientAccountTypeCode);
+        param.AddOleDbParameter(command, "INOCUENTA", OleDbType.Char, d.RecipientAccountNumber);
+        param.AddOleDbParameter(command, "INUMREFER", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "ISTSREM", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "ISTSPRO", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IERR", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IERRDSC", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "IDSCRECH", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "ACODPAIS", OleDbType.Char, d.OriginCountryCode);
+        param.AddOleDbParameter(command, "ACODMONED", OleDbType.Char, d.OriginCurrencyCode);
+        param.AddOleDbParameter(command, "AMTOENVIA", OleDbType.Char, d.OriginAmount);
+        param.AddOleDbParameter(command, "AMTOCALCU", OleDbType.Char, d.DestinationAmount);
+        param.AddOleDbParameter(command, "AFACTCAMB", OleDbType.Char, d.ExchangeRateFx);
+        param.AddOleDbParameter(command, "BPRIMNAME", OleDbType.Char, d.Sender.FirstName);
+        param.AddOleDbParameter(command, "BSECUNAME", OleDbType.Char, d.Sender.MiddleName);
+        param.AddOleDbParameter(command, "BAPELLIDO", OleDbType.Char, d.Sender.LastName);
+        param.AddOleDbParameter(command, "BSEGUAPE", OleDbType.Char, d.Sender.MotherMaidenName);
+        param.AddOleDbParameter(command, "BDIRECCIO", OleDbType.Char, d.Sender.Address.AddressLine);
+        param.AddOleDbParameter(command, "BCIUDAD", OleDbType.Char, d.Sender.Address.City);
+        param.AddOleDbParameter(command, "BESTADO", OleDbType.Char, d.Sender.Address.StateCode);
+        param.AddOleDbParameter(command, "BPAIS", OleDbType.Char, d.Sender.Address.CountryCode);
+        param.AddOleDbParameter(command, "BCODPOST", OleDbType.Char, d.Sender.Address.ZipCode);
+        param.AddOleDbParameter(command, "BTELEFONO", OleDbType.Char, d.Sender.Address.Phone);
+        param.AddOleDbParameter(command, "CPRIMNAME", OleDbType.Char, d.Recipient.FirstName);
+        param.AddOleDbParameter(command, "CSECUNAME", OleDbType.Char, d.Recipient.MiddleName);
+        param.AddOleDbParameter(command, "CAPELLIDO", OleDbType.Char, d.Recipient.LastName);
+        param.AddOleDbParameter(command, "CSEGUAPE", OleDbType.Char, d.Recipient.MotherMaidenName);
+        param.AddOleDbParameter(command, "CDIRECCIO", OleDbType.Char, d.Recipient.Address.AddressLine);
+        param.AddOleDbParameter(command, "CCIUDAD", OleDbType.Char, d.Recipient.Address.City);
+        param.AddOleDbParameter(command, "CESTADO", OleDbType.Char, d.Recipient.Address.StateCode);
+        param.AddOleDbParameter(command, "CPAIS", OleDbType.Char, d.Recipient.Address.CountryCode);
+        param.AddOleDbParameter(command, "CCODPOST", OleDbType.Char, d.Recipient.Address.ZipCode);
+        param.AddOleDbParameter(command, "CTELEFONO", OleDbType.Char, d.Recipient.Address.Phone);
+        param.AddOleDbParameter(command, "DTIDENT", OleDbType.Char, " ");
+        param.AddOleDbParameter(command, "ESALEDT", OleDbType.Char, d.SaleDate);
+        param.AddOleDbParameter(command, "EMONREFER", OleDbType.Char, d.MarketRefCurrencyCode);
+        param.AddOleDbParameter(command, "ETASAREFE", OleDbType.Char, d.MarketRefCurrencyFx);
+        param.AddOleDbParameter(command, "EMTOREF", OleDbType.Char, d.MarketRefCurrencyAmount);
 
         await command.ExecuteNonQueryAsync();
     }
