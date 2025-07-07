@@ -1,47 +1,141 @@
-A                                      UNIQUE                       
-A          R $BTS02REP                                               
-A            REP00UID   100A         COLHDG('Guid')               
-A            REP01DCOR   14S 0       COLHDG('Group Correlativo') 
-A            REP02DCOR   14S 0       COLHDG('Detail Correlativo')
-A            REP03CNM    11A         COLHDG('Confirmation Number')
-A            REP04SID    10A         COLHDG('Sale Movement ID')  
-A            REP05SDT     8A         COLHDG('Sale Date')          
-A            REP06STM     6A         COLHDG('Sale Time')          
-A            REP07SCD     3A         COLHDG('Service Code')       
-A            REP08PTC     3A         COLHDG('Payment Type Code')  
-A            REP09OCC     3A         COLHDG('Orig Country Code')  
-A            REP10OCY     3A         COLHDG('Orig Currency Code') 
-A            REP11DCC     3A         COLHDG('Dest Country Code')  
-A            REP12DCY     3A         COLHDG('Dest Currency Code') 
-A            REP13OAM    15A         COLHDG('Origin Amount')      
-A            REP14DAM    15A         COLHDG('Destination Amount') 
-A            REP15FX     15A         COLHDG('Exchange Rate FX')  
-A            REP16MRC     3A         COLHDG('Market Ref Cur Code')
-A            REP17MRF    15A         COLHDG('Market Ref FX')      
-A            REP18MRA    15A         COLHDG('Market Ref Amount')  
-A            REP19SAG     3A         COLHDG('Sender Agent Code')  
-A            REP20SCO     3A         COLHDG('Sender Country Code')
-A            REP21SST     3A         COLHDG('Sender State Code')  
-A            REP22RTC     3A         COLHDG('Rec Acc Type Code')  
-A            REP23RAN    20A         COLHDG('Rec Acc Number')     
-A            REP24RAG     3A         COLHDG('Rec Agent Code')     
-A            REP25SNF    15A         COLHDG('Sender First Name')  
-A            REP26SNM    15A         COLHDG('Sender Middle Name') 
-A            REP27SLN    15A         COLHDG('Sender Last Name')   
-A            REP28SMM    15A         COLHDG('Sender Mother Name') 
-A            REP29SAD    30A         COLHDG('Sender Address')     
-A            REP30SCI    20A         COLHDG('Sender City')        
-A            REP31SSTC    3A         COLHDG('Sender State Cd')    
-A            REP32SCNT    3A         COLHDG('Sender Country Cd')  
-A            REP33SZIP    10A        COLHDG('Sender Zip Code')    
-A            REP34SPHN    15A        COLHDG('Sender Phone')       
-A            REP35RNF    15A         COLHDG('Rec First Name')     
-A            REP36RNM    15A         COLHDG('Rec Middle Name')    
-A            REP37RLN    15A         COLHDG('Rec Last Name')      
-A            REP38RMM    15A         COLHDG('Rec Mother Name')    
-A            REP39RAD    30A         COLHDG('Rec Address')        
-A            REP40RCI    20A         COLHDG('Rec City')           
-A            REP41RSTC    3A         COLHDG('Rec State Code')     
-A            REP42RCNT    3A         COLHDG('Rec Country Code')   
-A            REP43RZIP    10A        COLHDG('Rec Zip Code')       
-A            REP44RPHN    15A        COLHDG('Rec Phone')
+     A                                      UNIQUE
+     A          R IBTSACTA
+     A            INOCONFIR     11          TEXT('NO.CONFIRMACION')
+     A                                      COLHDG(-
+     A                                      'NUMERO' -
+     A                                      'CONFIRMACION')
+     A            IDATRECI       8A         TEXT('FECHA.RECIBIDA')
+     A                                      COLHDG(-
+     A                                      'FECHA' -
+     A                                      'RECIBIDA')
+     A            IHORRECI       9A         TEXT('HORA RECIBIDA')
+     A                                      COLHDG(-
+     A                                      'HORA' -
+     A                                      'RECIBIDA')
+     A            IDATCONF       8A         TEXT('FECHA.CONFIRMO')
+     A                                      COLHDG(-
+     A                                      'FECHA' -
+     A                                      'CONFIRMO')
+     A            IHORCONF       9A         TEXT('HORA CONFIRMO')
+     A                                      COLHDG(-
+     A                                      'HORA' -
+     A                                      'CONFIRMO')
+     A            IDATVAL        8A         TEXT('FECHA.VALIDO')
+     A                                      COLHDG(-
+     A                                      'FECHA' -
+     A                                      'VALIDO')
+     A            IHORVAL        9A         TEXT('HORA VALIDO')
+     A                                      COLHDG(-
+     A                                      'HORA' -
+     A                                      'VALIDO')
+     A            IDATPAGO       8A         TEXT('FECHA.PAGO')
+     A                                      COLHDG(-
+     A                                      'FECHA' -
+     A                                      'PAGO')
+     A            IHORPAGO       9A         TEXT('HORA PAGO')
+     A                                      COLHDG(-
+     A                                      'HORA' -
+     A                                      'PAGO')
+     A            IDATACRE       8A         TEXT('FECHA.ACREDITO')
+     A                                      COLHDG(-
+     A                                      'FECHA' -
+     A                                      'ACREDITO')
+     A            IHORACRE       9A         TEXT('HORA ACREDITO')
+     A                                      COLHDG(-
+     A                                      'HORA' -
+     A                                      'ACREDITO')
+     A            IDATRECH       8A         TEXT('FECHA.RECHAZO')
+     A                                      COLHDG(-
+     A                                      'FECHA' -
+     A                                      'RECHAZO')
+     A            IHORRECH       9A         TEXT('HORA RECHAZO')
+     A                                      COLHDG(-
+     A                                      'HORA' -
+     A                                      'RECHAZO')
+     A            ITIPPAGO       3          TEXT('TIPO.PAGO')
+     A                                      COLHDG(-
+     A                                      'TIPO' -
+     A                                      'PAGO')
+     C* ==========NUEVOS CAMPOS======================
+     A            ISERVICD       3          TEXT('SERVICIOCD')
+     A                                      COLHDG(-
+     A                                      'SERVICIO')
+     A            IDESPAIS       3          TEXT('PAIS_DESTINO')
+     A                                      COLHDG(-
+     A                                      'PAIS' -
+     A                                      'DESTINO')
+     A            IDESMONE       3          TEXT('MONEDA_DESTINO')
+     A                                      COLHDG(-
+     A                                      'MANEDA' -
+     A                                      'DESTINO')
+     A            ISAGENCD      10          TEXT('S_AGENTE')
+     A                                      COLHDG(-
+     A                                      'S_AGENTE' -
+     A                                      'CD')
+     A            ISPAISCD       3          TEXT('S_PAISCD')
+     A                                      COLHDG(-
+     A                                      'S_PAIS' -
+     A                                      'CD')
+     A            ISTATECD       3          TEXT('S_ESTADO')
+     A                                      COLHDG(-
+     A                                      'S_ESTADO' -
+     A                                      'CD')
+     A            IRAGENCD      10          TEXT('R_AGENTE_CD')
+     A                                      COLHDG(-
+     A                                      'R AGENTE' -
+     A                                      'CD')
+     C* ===========================================
+     A            ITICUENTA      3          TEXT('TIPO.CUENTA')
+     A                                      COLHDG(-
+     A                                      'TIPO' -
+     A                                      'CUENTA')
+     A            INOCUENTA     15          TEXT('NO.CUENTA')
+     A                                      COLHDG(-
+     A                                      'NUMERO' -
+     A                                      'CUENTA')
+     A            INUMREFER     20          TEXT('NO.REFERE')
+     A                                      COLHDG(-
+     A                                      'NUMERO' -
+     A                                      'REFERENCIA')
+     A            ISTSREM        3A         TEXT('ESTATUS DE REMESAS')
+     A            ISTSPRO       10A         TEXT('ESTATUS DE PROCESO')
+     A            IERR           4A         TEXT('MENSAJE')
+     A            IERRDSC       70A         TEXT('DESCRI.MENSAJE')
+     A            IDSCRECH      70A         TEXT('DESCRI.RECHAZO')
+     A* DATOS RECIBIDOS DE RESPUESTA QRY
+     A            ACODPAIS       3
+     A            ACODMONED      3
+     A            AMTOENVIA     20
+     A            AMTOCALCU     20
+     A            AFACTCAMB     21
+     A* remitente
+     A            BPRIMNAME     40
+     A            BSECUNAME     40
+     A            BAPELLIDO     40
+     A            BSEGUAPE      40
+     A            BDIRECCIO     65
+     A            BCIUDAD       40
+     A            BESTADO        3
+     A            BPAIS          3
+     A            BCODPOST      10
+     A            BTELEFONO     15
+     A* beneficiario
+     A            CPRIMNAME     40
+     A            CSECUNAME     40
+     A            CAPELLIDO     40
+     A            CSEGUAPE      40
+     A            CDIRECCIO     65
+     A            CCIUDAD       40
+     A            CESTADO        3
+     A            CPAIS          3
+     A            CCODPOST      10
+     A            CTELEFONO     15
+     A*    IDENTIDAD DE LA PERSONA QUE SE LE PAGO
+     A            DTIDENT       20
+     A*    DATOS DE REFERENCIA
+     A            ESALEDT        8
+     A            EMONREFER      3
+     A            ETASAREFE     21
+     A            EMTOREF       20
+     A
+     A          K INOCONFIR
