@@ -1,127 +1,313 @@
-Tengo esta respuesta XML, necesito que crees las clases con los comentarios XML y JSON, como te muestro en el ejemplo de a continuación, todos los campos manejalos como string
+using System;
+using System.Collections.Generic;
+using System.Xml.Serialization;
+using Newtonsoft.Json;
 
-/// <summary>
-/// Número de Confirmación.
-/// </summary>
-[XmlElement("CONFIRMATION_NM")]
-[JsonProperty("confirmationNumber")]
-public string SaleDt { get; set; } = string.Empty;
+[XmlRoot("RESPONSE", Namespace = "http://www.btsincusa.com/gp/")]
+public class DepositsResponse
+{
+    /// <summary>
+    /// Código de operación.
+    /// </summary>
+    [XmlElement("OPCODE")]
+    [JsonProperty("opCode")]
+    public string OpCode { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Mensaje del proceso.
+    /// </summary>
+    [XmlElement("PROCESS_MSG")]
+    [JsonProperty("processMessage")]
+    public string ProcessMsg { get; set; } = string.Empty;
 
-<RESPONSE xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="DEPOSITS_LIST" xmlns="http://www.btsincusa.com/gp/">
-                    <OPCODE>1308</OPCODE>
-                    <PROCESS_MSG>SDEP ACCEPTED ORDER</PROCESS_MSG>
-                    <ERROR_PARAM_FULL_NAME />
-                    <PROCESS_DT>20250707</PROCESS_DT>
-                    <PROCESS_TM>100013</PROCESS_TM>
-                    <DEPOSITS>
-                        <DEPOSIT>
-                            <DATA>
-                                <CONFIRMATION_NM>89901012400</CONFIRMATION_NM>
-                                <SALE_MOVEMENT_ID>17373378</SALE_MOVEMENT_ID>
-                                <SALE_DT>20250703</SALE_DT>
-                                <SALE_TM>205003</SALE_TM>
-                                <SERVICE_CD>MTR</SERVICE_CD>
-                                <PAYMENT_TYPE_CD>ACC</PAYMENT_TYPE_CD>
-                                <ORIG_COUNTRY_CD>USA</ORIG_COUNTRY_CD>
-                                <ORIG_CURRENCY_CD>USD</ORIG_CURRENCY_CD>
-                                <DEST_COUNTRY_CD>HND</DEST_COUNTRY_CD>
-                                <DEST_CURRENCY_CD>HNL</DEST_CURRENCY_CD>
-                                <ORIGIN_AM>5400.00</ORIGIN_AM>
-                                <DESTINATION_AM>140754.24</DESTINATION_AM>
-                                <EXCH_RATE_FX>26.0656000000</EXCH_RATE_FX>
-                                <MARKET_REF_CURRENCY_CD>USD</MARKET_REF_CURRENCY_CD>
-                                <MARKET_REF_CURRENCY_FX>26.0656000000</MARKET_REF_CURRENCY_FX>
-                                <MARKET_REF_CURRENCY_AM>5400.00</MARKET_REF_CURRENCY_AM>
-                                <S_AGENT_CD>BTS</S_AGENT_CD>
-                                <S_COUNTRY_CD>USA</S_COUNTRY_CD>
-                                <S_STATE_CD>TX </S_STATE_CD>
-                                <R_ACCOUNT_TYPE_CD>NOT</R_ACCOUNT_TYPE_CD>
-                                <R_ACCOUNT_NM>5200342008</R_ACCOUNT_NM>
-                                <R_AGENT_CD>HSH</R_AGENT_CD>
-                                <SENDER>
-                                    <FIRST_NAME>MIGUEL</FIRST_NAME>
-                                    <MIDDLE_NAME>ANGEL</MIDDLE_NAME>
-                                    <LAST_NAME>SEPULVEDA</LAST_NAME>
-                                    <MOTHER_M_NAME>HENDERSON</MOTHER_M_NAME>
-                                    <ADDRESS>
-                                        <ADDRESS>820 N WILCOX AVE</ADDRESS>
-                                        <CITY>MONTEBELLO</CITY>
-                                        <STATE_CD>CA </STATE_CD>
-                                        <COUNTRY_CD>USA</COUNTRY_CD>
-                                        <ZIP_CODE>90640</ZIP_CODE>
-                                        <PHONE>13238873090</PHONE>
-                                    </ADDRESS>
-                                </SENDER>
-                                <RECIPIENT>
-                                    <FIRST_NAME>EUGENIA</FIRST_NAME>
-                                    <MIDDLE_NAME>FATIMA</MIDDLE_NAME>
-                                    <LAST_NAME>GALEANO</LAST_NAME>
-                                    <MOTHER_M_NAME>DIAZ</MOTHER_M_NAME>
-                                    <ADDRESS>
-                                        <ADDRESS>DOMICILIO CONOCIDO</ADDRESS>
-                                        <CITY>CIUDAD CONOCIDA</CITY>
-                                        <STATE_CD>ATL</STATE_CD>
-                                        <COUNTRY_CD>HND</COUNTRY_CD>
-                                        <ZIP_CODE>31001</ZIP_CODE>
-                                        <PHONE>+5045244034</PHONE>
-                                    </ADDRESS>
-                                </RECIPIENT>
-                            </DATA>
-                        </DEPOSIT>
-                        <DEPOSIT>
-                            <DATA>
-                                <CONFIRMATION_NM>89901012418</CONFIRMATION_NM>
-                                <SALE_MOVEMENT_ID>17373379</SALE_MOVEMENT_ID>
-                                <SALE_DT>20250703</SALE_DT>
-                                <SALE_TM>205003</SALE_TM>
-                                <SERVICE_CD>MTR</SERVICE_CD>
-                                <PAYMENT_TYPE_CD>ACC</PAYMENT_TYPE_CD>
-                                <ORIG_COUNTRY_CD>USA</ORIG_COUNTRY_CD>
-                                <ORIG_CURRENCY_CD>USD</ORIG_CURRENCY_CD>
-                                <DEST_COUNTRY_CD>HND</DEST_COUNTRY_CD>
-                                <DEST_CURRENCY_CD>HNL</DEST_CURRENCY_CD>
-                                <ORIGIN_AM>3500.00</ORIGIN_AM>
-                                <DESTINATION_AM>91229.60</DESTINATION_AM>
-                                <EXCH_RATE_FX>26.0656000000</EXCH_RATE_FX>
-                                <MARKET_REF_CURRENCY_CD>USD</MARKET_REF_CURRENCY_CD>
-                                <MARKET_REF_CURRENCY_FX>26.0656000000</MARKET_REF_CURRENCY_FX>
-                                <MARKET_REF_CURRENCY_AM>3500.00</MARKET_REF_CURRENCY_AM>
-                                <S_AGENT_CD>BTS</S_AGENT_CD>
-                                <S_COUNTRY_CD>USA</S_COUNTRY_CD>
-                                <S_STATE_CD>TX </S_STATE_CD>
-                                <R_ACCOUNT_TYPE_CD>NOT</R_ACCOUNT_TYPE_CD>
-                                <R_ACCOUNT_NM>3011618679</R_ACCOUNT_NM>
-                                <R_AGENT_CD>HSH</R_AGENT_CD>
-                                <SENDER>
-                                    <FIRST_NAME>MIGUEL</FIRST_NAME>
-                                    <MIDDLE_NAME>ANGEL</MIDDLE_NAME>
-                                    <LAST_NAME>MONDRAGON</LAST_NAME>
-                                    <MOTHER_M_NAME>BUSTILLOS</MOTHER_M_NAME>
-                                    <ADDRESS>
-                                        <ADDRESS>721 CASTROVILLE RD</ADDRESS>
-                                        <CITY>SAN ANTONIO</CITY>
-                                        <STATE_CD>TX </STATE_CD>
-                                        <COUNTRY_CD>USA</COUNTRY_CD>
-                                        <ZIP_CODE>78237</ZIP_CODE>
-                                        <PHONE>+12104320949</PHONE>
-                                    </ADDRESS>
-                                </SENDER>
-                                <RECIPIENT>
-                                    <FIRST_NAME>FABIOLA</FIRST_NAME>
-                                    <MIDDLE_NAME>PATRICIA</MIDDLE_NAME>
-                                    <LAST_NAME>BONILLA</LAST_NAME>
-                                    <MOTHER_M_NAME>HERNANDEZ</MOTHER_M_NAME>
-                                    <ADDRESS>
-                                        <ADDRESS>DOMICILIO CONOCIDO</ADDRESS>
-                                        <CITY>CIUDAD CONOCIDA</CITY>
-                                        <STATE_CD>ATL</STATE_CD>
-                                        <COUNTRY_CD>HND</COUNTRY_CD>
-                                        <ZIP_CODE>31001</ZIP_CODE>
-                                        <PHONE>+5044161416</PHONE>
-                                    </ADDRESS>
-                                </RECIPIENT>
-                            </DATA>
-                        </DEPOSIT>
-                    </DEPOSITS>
-                </RESPONSE>
+    /// <summary>
+    /// Nombre completo del parámetro con error.
+    /// </summary>
+    [XmlElement("ERROR_PARAM_FULL_NAME")]
+    [JsonProperty("errorParamFullName")]
+    public string ErrorParamFullName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Fecha de procesamiento.
+    /// </summary>
+    [XmlElement("PROCESS_DT")]
+    [JsonProperty("processDate")]
+    public string ProcessDate { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Hora de procesamiento.
+    /// </summary>
+    [XmlElement("PROCESS_TM")]
+    [JsonProperty("processTime")]
+    public string ProcessTime { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Lista de depósitos.
+    /// </summary>
+    [XmlArray("DEPOSITS")]
+    [XmlArrayItem("DEPOSIT")]
+    [JsonProperty("deposits")]
+    public List<Deposit> Deposits { get; set; } = new();
+}
+
+public class Deposit
+{
+    /// <summary>
+    /// Datos del depósito.
+    /// </summary>
+    [XmlElement("DATA")]
+    [JsonProperty("data")]
+    public DepositData Data { get; set; } = new();
+}
+public class DepositData
+{
+    /// <summary>
+    /// Número de Confirmación.
+    /// </summary>
+    [XmlElement("CONFIRMATION_NM")]
+    [JsonProperty("confirmationNumber")]
+    public string ConfirmationNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// ID del movimiento de venta.
+    /// </summary>
+    [XmlElement("SALE_MOVEMENT_ID")]
+    [JsonProperty("saleMovementId")]
+    public string SaleMovementId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Fecha de la venta.
+    /// </summary>
+    [XmlElement("SALE_DT")]
+    [JsonProperty("saleDate")]
+    public string SaleDate { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Hora de la venta.
+    /// </summary>
+    [XmlElement("SALE_TM")]
+    [JsonProperty("saleTime")]
+    public string SaleTime { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Código del servicio.
+    /// </summary>
+    [XmlElement("SERVICE_CD")]
+    [JsonProperty("serviceCode")]
+    public string ServiceCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Tipo de pago.
+    /// </summary>
+    [XmlElement("PAYMENT_TYPE_CD")]
+    [JsonProperty("paymentTypeCode")]
+    public string PaymentTypeCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// País de origen.
+    /// </summary>
+    [XmlElement("ORIG_COUNTRY_CD")]
+    [JsonProperty("originCountryCode")]
+    public string OriginCountryCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Moneda de origen.
+    /// </summary>
+    [XmlElement("ORIG_CURRENCY_CD")]
+    [JsonProperty("originCurrencyCode")]
+    public string OriginCurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// País de destino.
+    /// </summary>
+    [XmlElement("DEST_COUNTRY_CD")]
+    [JsonProperty("destinationCountryCode")]
+    public string DestinationCountryCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Moneda de destino.
+    /// </summary>
+    [XmlElement("DEST_CURRENCY_CD")]
+    [JsonProperty("destinationCurrencyCode")]
+    public string DestinationCurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Monto de origen.
+    /// </summary>
+    [XmlElement("ORIGIN_AM")]
+    [JsonProperty("originAmount")]
+    public string OriginAmount { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Monto de destino.
+    /// </summary>
+    [XmlElement("DESTINATION_AM")]
+    [JsonProperty("destinationAmount")]
+    public string DestinationAmount { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Tasa de cambio.
+    /// </summary>
+    [XmlElement("EXCH_RATE_FX")]
+    [JsonProperty("exchangeRateFx")]
+    public string ExchangeRateFx { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Moneda de referencia del mercado.
+    /// </summary>
+    [XmlElement("MARKET_REF_CURRENCY_CD")]
+    [JsonProperty("marketRefCurrencyCode")]
+    public string MarketRefCurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Tasa de cambio del mercado de referencia.
+    /// </summary>
+    [XmlElement("MARKET_REF_CURRENCY_FX")]
+    [JsonProperty("marketRefCurrencyFx")]
+    public string MarketRefCurrencyFx { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Monto en moneda de referencia del mercado.
+    /// </summary>
+    [XmlElement("MARKET_REF_CURRENCY_AM")]
+    [JsonProperty("marketRefCurrencyAmount")]
+    public string MarketRefCurrencyAmount { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Código del agente origen.
+    /// </summary>
+    [XmlElement("S_AGENT_CD")]
+    [JsonProperty("senderAgentCode")]
+    public string SenderAgentCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// País del agente origen.
+    /// </summary>
+    [XmlElement("S_COUNTRY_CD")]
+    [JsonProperty("senderCountryCode")]
+    public string SenderCountryCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Estado del agente origen.
+    /// </summary>
+    [XmlElement("S_STATE_CD")]
+    [JsonProperty("senderStateCode")]
+    public string SenderStateCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Tipo de cuenta del receptor.
+    /// </summary>
+    [XmlElement("R_ACCOUNT_TYPE_CD")]
+    [JsonProperty("recipientAccountTypeCode")]
+    public string RecipientAccountTypeCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Número de cuenta del receptor.
+    /// </summary>
+    [XmlElement("R_ACCOUNT_NM")]
+    [JsonProperty("recipientAccountNumber")]
+    public string RecipientAccountNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Código del agente receptor.
+    /// </summary>
+    [XmlElement("R_AGENT_CD")]
+    [JsonProperty("recipientAgentCode")]
+    public string RecipientAgentCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Información del remitente.
+    /// </summary>
+    [XmlElement("SENDER")]
+    [JsonProperty("sender")]
+    public Person Sender { get; set; } = new();
+
+    /// <summary>
+    /// Información del receptor.
+    /// </summary>
+    [XmlElement("RECIPIENT")]
+    [JsonProperty("recipient")]
+    public Person Recipient { get; set; } = new();
+}
+
+public class Person
+{
+    /// <summary>
+    /// Primer nombre.
+    /// </summary>
+    [XmlElement("FIRST_NAME")]
+    [JsonProperty("firstName")]
+    public string FirstName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Segundo nombre.
+    /// </summary>
+    [XmlElement("MIDDLE_NAME")]
+    [JsonProperty("middleName")]
+    public string MiddleName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Apellido paterno.
+    /// </summary>
+    [XmlElement("LAST_NAME")]
+    [JsonProperty("lastName")]
+    public string LastName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Apellido materno.
+    /// </summary>
+    [XmlElement("MOTHER_M_NAME")]
+    [JsonProperty("motherMaidenName")]
+    public string MotherMaidenName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Dirección.
+    /// </summary>
+    [XmlElement("ADDRESS")]
+    [JsonProperty("address")]
+    public Address Address { get; set; } = new();
+}
+public class Address
+{
+    /// <summary>
+    /// Dirección exacta.
+    /// </summary>
+    [XmlElement("ADDRESS")]
+    [JsonProperty("addressLine")]
+    public string AddressLine { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Ciudad.
+    /// </summary>
+    [XmlElement("CITY")]
+    [JsonProperty("city")]
+    public string City { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Estado.
+    /// </summary>
+    [XmlElement("STATE_CD")]
+    [JsonProperty("stateCode")]
+    public string StateCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// País.
+    /// </summary>
+    [XmlElement("COUNTRY_CD")]
+    [JsonProperty("countryCode")]
+    public string CountryCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Código postal.
+    /// </summary>
+    [XmlElement("ZIP_CODE")]
+    [JsonProperty("zipCode")]
+    public string ZipCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Teléfono.
+    /// </summary>
+    [XmlElement("PHONE")]
+    [JsonProperty("phone")]
+    public string Phone { get; set; } = string.Empty;
+}
