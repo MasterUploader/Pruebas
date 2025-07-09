@@ -1,148 +1,86 @@
-namespace QueryBuilder
+foreach (var deposit in response.Deposits)
 {
-    /// <summary>
-    /// Tipos de datos SQL compatibles.
-    /// </summary>
-    public enum SqlDataType
+    if (deposit?.Data == null) continue;
+
+    string statusProceso = response.OpCode == "1308" ? "RECIBIDA" : "RECH-DENEG";
+    var d = deposit.Data;
+
+    // Construir modelo desde la respuesta
+    var model = new BtsaCtaModel
     {
-        CHAR,
-        VARCHAR,
-        INTEGER,
-        DECIMAL
-    }
-}
+        INOCONFIR = d.ConfirmationNumber,
+        IDATRECI = DateTime.Now.ToString("yyyyMMdd"),
+        IHORRECI = DateTime.Now.ToString("HHmmssfff"),
+        IDATCONF = " ",
+        IHORCONF = " ",
+        IDATVAL = " ",
+        IHORVAL = " ",
+        IDATPAGO = " ",
+        IHORPAGO = " ",
+        IDATACRE = " ",
+        IHORACRE = " ",
+        IDATRECH = " ",
+        IHORRECH = " ",
+        ITIPPAGO = d.PaymentTypeCode,
+        ISERVICD = d.ServiceCode,
+        IDESPAIS = d.DestinationCountryCode,
+        IDESMONE = d.DestinationCurrencyCode,
+        ISAGENCD = d.SenderAgentCode,
+        ISPAISCD = d.SenderCountryCode,
+        ISTATECD = d.SenderStateCode,
+        IRAGENCD = d.RecipientAgentCode,
+        ITICUENTA = d.RecipientAccountTypeCode,
+        INOCUENTA = d.RecipientAccountNumber,
+        INUMREFER = " ",
+        ISTSREM = " ",
+        ISTSPRO = statusProceso,
+        IERR = response.OpCode ?? " ",
+        IERRDSC = response.ProcessMsg ?? " ",
+        IDSCRECH = " ",
+        ACODPAIS = d.OriginCountryCode,
+        ACODMONED = d.OriginCurrencyCode,
+        AMTOENVIA = d.OriginAmount,
+        AMTOCALCU = d.DestinationAmount,
+        AFACTCAMB = d.ExchangeRateFx,
+        BPRIMNAME = d.Sender.FirstName,
+        BSECUNAME = d.Sender.MiddleName,
+        BAPELLIDO = d.Sender.LastName,
+        BSEGUAPE = d.Sender.MotherMaidenName,
+        BDIRECCIO = d.Sender.Address.AddressLine,
+        BCIUDAD = d.Sender.Address.City,
+        BESTADO = d.Sender.Address.StateCode,
+        BPAIS = d.Sender.Address.CountryCode,
+        BCODPOST = d.Sender.Address.ZipCode,
+        BTELEFONO = d.Sender.Address.Phone,
+        CPRIMNAME = d.Recipient.FirstName,
+        CSECUNAME = d.Recipient.MiddleName,
+        CAPELLIDO = d.Recipient.LastName,
+        CSEGUAPE = d.Recipient.MotherMaidenName,
+        CDIRECCIO = d.Recipient.Address.AddressLine,
+        CCIUDAD = d.Recipient.Address.City,
+        CESTADO = d.Recipient.Address.StateCode,
+        CPAIS = d.Recipient.Address.CountryCode,
+        CCODPOST = d.Recipient.Address.ZipCode,
+        CTELEFONO = d.Recipient.Address.Phone,
+        DTIDENT = " ",
+        ESALEDT = d.SaleDate,
+        EMONREFER = d.MarketRefCurrencyCode,
+        ETASAREFE = d.MarketRefCurrencyFx,
+        EMTOREF = d.MarketRefCurrencyAmount
+    };
 
-using System;
+    // Generar la consulta INSERT desde QueryBuilder
+    var insertSql = _sqlQueryService.BuildInsertQuery<BtsaCtaModel>(model);
 
-namespace QueryBuilder.Attributes
-{
-    /// <summary>
-    /// Atributo que define los metadatos SQL de una propiedad del modelo.
-    /// </summary>
-    [AttributeUsage(AttributeTargets.Property)]
-    public class SqlColumnDefinitionAttribute : Attribute
-    {
-        /// <summary>Nombre de la columna SQL.</summary>
-        public string ColumnName { get; }
+    // Crear y ejecutar el comando con RestUtilities.Connections
+    using var command = _databaseConnection.GetDbCommand(_httpContextAccessor.HttpContext!);
+    command.CommandText = insertSql;
+    command.CommandType = CommandType.Text;
 
-        /// <summary>Tipo de dato SQL.</summary>
-        public SqlDataType DataType { get; }
+    // Agregar parámetros automáticamente desde el modelo
+    FieldsQuery param = new();
+    param.AddParametersFromModel(command, model);
 
-        /// <summary>Longitud del campo (para CHAR/VARCHAR).</summary>
-        public int Length { get; }
-
-        /// <summary>Precisión (para DECIMAL).</summary>
-        public int Precision { get; }
-
-        /// <summary>Escala (para DECIMAL).</summary>
-        public int Scale { get; }
-
-        /// <summary>
-        /// Constructor para CHAR/VARCHAR/INTEGER.
-        /// </summary>
-        public SqlColumnDefinitionAttribute(string columnName, SqlDataType dataType, int length)
-        {
-            ColumnName = columnName;
-            DataType = dataType;
-            Length = length;
-            Precision = 0;
-            Scale = 0;
-        }
-
-        /// <summary>
-        /// Constructor para DECIMAL con precisión y escala.
-        /// </summary>
-        public SqlColumnDefinitionAttribute(string columnName, SqlDataType dataType, int length, int precision, int scale)
-        {
-            ColumnName = columnName;
-            DataType = dataType;
-            Length = length;
-            Precision = precision;
-            Scale = scale;
-        }
-    }
-}
-
-
-using System;
-
-namespace QueryBuilder.Validators
-{
-    /// <summary>
-    /// Valida si los valores cumplen con las restricciones definidas en SqlColumnDefinitionAttribute.
-    /// </summary>
-    public static class SqlTypeValidator
-    {
-        public static bool IsValid(object value, SqlDataType type, int maxLength, int precision = 0, int scale = 0)
-        {
-            if (value == null) return false;
-
-            switch (type)
-            {
-                case SqlDataType.CHAR:
-                case SqlDataType.VARCHAR:
-                    return value.ToString()?.Length <= maxLength;
-
-                case SqlDataType.INTEGER:
-                    return int.TryParse(value.ToString(), out _);
-
-                case SqlDataType.DECIMAL:
-                    if (decimal.TryParse(value.ToString(), out var dec))
-                    {
-                        var str = dec.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                        var totalDigits = str.Replace(".", "").Replace(",", "").Length;
-                        var decimalPart = str.Contains('.') ? str.Split('.')[1].Length : 0;
-
-                        return totalDigits <= precision && decimalPart <= scale;
-                    }
-                    return false;
-
-                default:
-                    return true;
-            }
-        }
-    }
-}
-
-using System;
-using System.Collections.Generic;
-using System.Reflection;
-using QueryBuilder.Attributes;
-using QueryBuilder.Validators;
-
-namespace QueryBuilder.Utils
-{
-    /// <summary>
-    /// Valida modelos que utilizan SqlColumnDefinitionAttribute antes de generar SQL.
-    /// </summary>
-    public static class QueryModelValidator
-    {
-        /// <summary>
-        /// Evalúa si un modelo es válido para generar un query SQL.
-        /// </summary>
-        /// <param name="model">Instancia del modelo a validar.</param>
-        /// <returns>Lista de errores encontrados. Vacía si es válido.</returns>
-        public static List<string> ValidateModel(object model)
-        {
-            var errors = new List<string>();
-            if (model == null) return errors;
-
-            var props = model.GetType().GetProperties();
-
-            foreach (var prop in props)
-            {
-                var attr = prop.GetCustomAttribute<SqlColumnDefinitionAttribute>();
-                if (attr != null)
-                {
-                    var value = prop.GetValue(model);
-                    if (value != null && !SqlTypeValidator.IsValid(value, attr.DataType, attr.Length, attr.Precision, attr.Scale))
-                    {
-                        errors.Add($"Campo '{prop.Name}' no cumple con las restricciones definidas: Tipo={attr.DataType}, Longitud={attr.Length}, Precisión={attr.Precision}, Escala={attr.Scale}");
-                    }
-                }
-            }
-
-            return errors;
-        }
-    }
+    // Ejecutar INSERT
+    await command.ExecuteNonQueryAsync();
 }
