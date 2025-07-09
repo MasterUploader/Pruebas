@@ -1,94 +1,72 @@
-Seria de convertir este codigo para que use la libreria:
+using QueryBuilder.Attributes;
 
-
-foreach (var deposit in response.Deposits)
+public class BtsaCtaModel
 {
-    if (deposit?.Data == null) continue;
+    [SqlColumnDefinition("CHAR", Length = 20)] public string INOCONFIR { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 8)]  public string IDATRECI { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 9)]  public string IHORRECI { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 8)]  public string IDATCONF { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 9)]  public string IHORCONF { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 8)]  public string IDATVAL { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 9)]  public string IHORVAL { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 8)]  public string IDATPAGO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 9)]  public string IHORPAGO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 8)]  public string IDATACRE { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 9)]  public string IHORACRE { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 8)]  public string IDATRECH { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 9)]  public string IHORRECH { get; set; }
 
-    // Estatus de proceso basado en opcode
-    string statusProceso = response.OpCode == "1308" ? "RECIBIDA" : "RECH-DENEG";
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ITIPPAGO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ISERVICD { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string IDESPAIS { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string IDESMONE { get; set; }
 
-    var d = deposit.Data;
-    FieldsQuery param = new();
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ISAGENCD { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ISPAISCD { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ISTATECD { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string IRAGENCD { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ITICUENTA { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string INOCUENTA { get; set; }
 
-    string insertSql = @"
-    INSERT INTO BCAH96DTA.BTSACTA (
-        INOCONFIR, IDATRECI, IHORRECI, IDATCONF, IHORCONF, IDATVAL, IHORVAL, IDATPAGO, IHORPAGO,
-        IDATACRE, IHORACRE, IDATRECH, IHORRECH, ITIPPAGO, ISERVICD, IDESPAIS, IDESMONE, ISAGENCD,
-        ISPAISCD, ISTATECD, IRAGENCD, ITICUENTA, INOCUENTA, INUMREFER, ISTSREM, ISTSPRO, IERR,
-        IERRDSC, IDSCRECH, ACODPAIS, ACODMONED, AMTOENVIA, AMTOCALCU, AFACTCAMB,
-        BPRIMNAME, BSECUNAME, BAPELLIDO, BSEGUAPE, BDIRECCIO, BCIUDAD, BESTADO, BPAIS,
-        BCODPOST, BTELEFONO, CPRIMNAME, CSECUNAME, CAPELLIDO, CSEGUAPE, CDIRECCIO,
-        CCIUDAD, CESTADO, CPAIS, CCODPOST, CTELEFONO, DTIDENT, ESALEDT, EMONREFER,
-        ETASAREFE, EMTOREF
-    ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-    )";
+    [SqlColumnDefinition("CHAR", Length = 20)] public string INUMREFER { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ISTSREM { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ISTSPRO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string IERR { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 100)] public string IERRDSC { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 100)] public string IDSCRECH { get; set; }
 
-    using var command = _databaseConnection.GetDbCommand(_httpContextAccessor.HttpContext!);
-    command.CommandText = insertSql;
-    command.CommandType = CommandType.Text;
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ACODPAIS { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string ACODMONED { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string AMTOENVIA { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string AMTOCALCU { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string AFACTCAMB { get; set; }
 
-    // 🔹 Valores conocidos del XML
-    param.AddOleDbParameter(command, "INOCONFIR", OleDbType.Char, d.ConfirmationNumber);
-    param.AddOleDbParameter(command, "IDATRECI", OleDbType.Char, DateTime.Now.ToString("yyyyMMdd"));
-    param.AddOleDbParameter(command, "IHORRECI", OleDbType.Char, DateTime.Now.ToString("HHmmssfff"));
-    param.AddOleDbParameter(command, "IDATCONF", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IHORCONF", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IDATVAL", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IHORVAL", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IDATPAGO", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IHORPAGO", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IDATACRE", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IHORACRE", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IDATRECH", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "IHORRECH", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "ITIPPAGO", OleDbType.Char, d.PaymentTypeCode);
-    param.AddOleDbParameter(command, "ISERVICD", OleDbType.Char, d.ServiceCode);
-    param.AddOleDbParameter(command, "IDESPAIS", OleDbType.Char, d.DestinationCountryCode);
-    param.AddOleDbParameter(command, "IDESMONE", OleDbType.Char, d.DestinationCurrencyCode);
-    param.AddOleDbParameter(command, "ISAGENCD", OleDbType.Char, d.SenderAgentCode);
-    param.AddOleDbParameter(command, "ISPAISCD", OleDbType.Char, d.SenderCountryCode);
-    param.AddOleDbParameter(command, "ISTATECD", OleDbType.Char, d.SenderStateCode);
-    param.AddOleDbParameter(command, "IRAGENCD", OleDbType.Char, d.RecipientAgentCode);
-    param.AddOleDbParameter(command, "ITICUENTA", OleDbType.Char, d.RecipientAccountTypeCode);
-    param.AddOleDbParameter(command, "INOCUENTA", OleDbType.Char, d.RecipientAccountNumber);
-    param.AddOleDbParameter(command, "INUMREFER", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "ISTSREM", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "ISTSPRO", OleDbType.Char, statusProceso);
-    param.AddOleDbParameter(command, "IERR", OleDbType.Char, response.OpCode ?? " ");
-    param.AddOleDbParameter(command, "IERRDSC", OleDbType.Char, response.ProcessMsg ?? " ");
-    param.AddOleDbParameter(command, "IDSCRECH", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "ACODPAIS", OleDbType.Char, d.OriginCountryCode);
-    param.AddOleDbParameter(command, "ACODMONED", OleDbType.Char, d.OriginCurrencyCode);
-    param.AddOleDbParameter(command, "AMTOENVIA", OleDbType.Char, d.OriginAmount);
-    param.AddOleDbParameter(command, "AMTOCALCU", OleDbType.Char, d.DestinationAmount);
-    param.AddOleDbParameter(command, "AFACTCAMB", OleDbType.Char, d.ExchangeRateFx);
-    param.AddOleDbParameter(command, "BPRIMNAME", OleDbType.Char, d.Sender.FirstName);
-    param.AddOleDbParameter(command, "BSECUNAME", OleDbType.Char, d.Sender.MiddleName);
-    param.AddOleDbParameter(command, "BAPELLIDO", OleDbType.Char, d.Sender.LastName);
-    param.AddOleDbParameter(command, "BSEGUAPE", OleDbType.Char, d.Sender.MotherMaidenName);
-    param.AddOleDbParameter(command, "BDIRECCIO", OleDbType.Char, d.Sender.Address.AddressLine);
-    param.AddOleDbParameter(command, "BCIUDAD", OleDbType.Char, d.Sender.Address.City);
-    param.AddOleDbParameter(command, "BESTADO", OleDbType.Char, d.Sender.Address.StateCode);
-    param.AddOleDbParameter(command, "BPAIS", OleDbType.Char, d.Sender.Address.CountryCode);
-    param.AddOleDbParameter(command, "BCODPOST", OleDbType.Char, d.Sender.Address.ZipCode);
-    param.AddOleDbParameter(command, "BTELEFONO", OleDbType.Char, d.Sender.Address.Phone);
-    param.AddOleDbParameter(command, "CPRIMNAME", OleDbType.Char, d.Recipient.FirstName);
-    param.AddOleDbParameter(command, "CSECUNAME", OleDbType.Char, d.Recipient.MiddleName);
-    param.AddOleDbParameter(command, "CAPELLIDO", OleDbType.Char, d.Recipient.LastName);
-    param.AddOleDbParameter(command, "CSEGUAPE", OleDbType.Char, d.Recipient.MotherMaidenName);
-    param.AddOleDbParameter(command, "CDIRECCIO", OleDbType.Char, d.Recipient.Address.AddressLine);
-    param.AddOleDbParameter(command, "CCIUDAD", OleDbType.Char, d.Recipient.Address.City);
-    param.AddOleDbParameter(command, "CESTADO", OleDbType.Char, d.Recipient.Address.StateCode);
-    param.AddOleDbParameter(command, "CPAIS", OleDbType.Char, d.Recipient.Address.CountryCode);
-    param.AddOleDbParameter(command, "CCODPOST", OleDbType.Char, d.Recipient.Address.ZipCode);
-    param.AddOleDbParameter(command, "CTELEFONO", OleDbType.Char, d.Recipient.Address.Phone);
-    param.AddOleDbParameter(command, "DTIDENT", OleDbType.Char, " ");
-    param.AddOleDbParameter(command, "ESALEDT", OleDbType.Char, d.SaleDate);
-    param.AddOleDbParameter(command, "EMONREFER", OleDbType.Char, d.MarketRefCurrencyCode);
-    param.AddOleDbParameter(command, "ETASAREFE", OleDbType.Char, d.MarketRefCurrencyFx);
-    param.AddOleDbParameter(command, "EMTOREF", OleDbType.Char, d.MarketRefCurrencyAmount);
+    [SqlColumnDefinition("CHAR", Length = 50)] public string BPRIMNAME { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 50)] public string BSECUNAME { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 50)] public string BAPELLIDO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 50)] public string BSEGUAPE { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 100)] public string BDIRECCIO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 50)] public string BCIUDAD { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string BESTADO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string BPAIS { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string BCODPOST { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string BTELEFONO { get; set; }
 
-    await command.ExecuteNonQueryAsync();
+    [SqlColumnDefinition("CHAR", Length = 50)] public string CPRIMNAME { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 50)] public string CSECUNAME { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 50)] public string CAPELLIDO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 50)] public string CSEGUAPE { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 100)] public string CDIRECCIO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 50)] public string CCIUDAD { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string CESTADO { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string CPAIS { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 10)] public string CCODPOST { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string CTELEFONO { get; set; }
+
+    [SqlColumnDefinition("CHAR", Length = 20)] public string DTIDENT { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 8)]  public string ESALEDT { get; set; }
+
+    [SqlColumnDefinition("CHAR", Length = 10)] public string EMONREFER { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string ETASAREFE { get; set; }
+    [SqlColumnDefinition("CHAR", Length = 20)] public string EMTOREF { get; set; }
 }
