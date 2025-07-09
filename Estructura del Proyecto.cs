@@ -1,86 +1,75 @@
-foreach (var deposit in response.Deposits)
+using System.Data.OleDb;
+using System.Reflection;
+using QueryBuilder.Attributes;
+using QueryBuilder.Enums;
+
+namespace RestUtilities.Connections.Helpers;
+
+/// <summary>
+/// Ayudante para agregar parámetros a comandos OleDb basados en modelos con metadatos SQL.
+/// </summary>
+public class FieldsQuery
 {
-    if (deposit?.Data == null) continue;
-
-    string statusProceso = response.OpCode == "1308" ? "RECIBIDA" : "RECH-DENEG";
-    var d = deposit.Data;
-
-    // Construir modelo desde la respuesta
-    var model = new BtsaCtaModel
+    /// <summary>
+    /// Agrega los parámetros a un comando a partir de un modelo que define sus columnas con el atributo <see cref="SqlColumnDefinitionAttribute"/>.
+    /// </summary>
+    /// <typeparam name="TModel">Tipo del modelo con metadatos de columnas.</typeparam>
+    /// <param name="command">Comando OleDb donde se agregarán los parámetros.</param>
+    /// <param name="model">Instancia del modelo con los datos.</param>
+    public void AddParametersFromModel<TModel>(OleDbCommand command, TModel model)
     {
-        INOCONFIR = d.ConfirmationNumber,
-        IDATRECI = DateTime.Now.ToString("yyyyMMdd"),
-        IHORRECI = DateTime.Now.ToString("HHmmssfff"),
-        IDATCONF = " ",
-        IHORCONF = " ",
-        IDATVAL = " ",
-        IHORVAL = " ",
-        IDATPAGO = " ",
-        IHORPAGO = " ",
-        IDATACRE = " ",
-        IHORACRE = " ",
-        IDATRECH = " ",
-        IHORRECH = " ",
-        ITIPPAGO = d.PaymentTypeCode,
-        ISERVICD = d.ServiceCode,
-        IDESPAIS = d.DestinationCountryCode,
-        IDESMONE = d.DestinationCurrencyCode,
-        ISAGENCD = d.SenderAgentCode,
-        ISPAISCD = d.SenderCountryCode,
-        ISTATECD = d.SenderStateCode,
-        IRAGENCD = d.RecipientAgentCode,
-        ITICUENTA = d.RecipientAccountTypeCode,
-        INOCUENTA = d.RecipientAccountNumber,
-        INUMREFER = " ",
-        ISTSREM = " ",
-        ISTSPRO = statusProceso,
-        IERR = response.OpCode ?? " ",
-        IERRDSC = response.ProcessMsg ?? " ",
-        IDSCRECH = " ",
-        ACODPAIS = d.OriginCountryCode,
-        ACODMONED = d.OriginCurrencyCode,
-        AMTOENVIA = d.OriginAmount,
-        AMTOCALCU = d.DestinationAmount,
-        AFACTCAMB = d.ExchangeRateFx,
-        BPRIMNAME = d.Sender.FirstName,
-        BSECUNAME = d.Sender.MiddleName,
-        BAPELLIDO = d.Sender.LastName,
-        BSEGUAPE = d.Sender.MotherMaidenName,
-        BDIRECCIO = d.Sender.Address.AddressLine,
-        BCIUDAD = d.Sender.Address.City,
-        BESTADO = d.Sender.Address.StateCode,
-        BPAIS = d.Sender.Address.CountryCode,
-        BCODPOST = d.Sender.Address.ZipCode,
-        BTELEFONO = d.Sender.Address.Phone,
-        CPRIMNAME = d.Recipient.FirstName,
-        CSECUNAME = d.Recipient.MiddleName,
-        CAPELLIDO = d.Recipient.LastName,
-        CSEGUAPE = d.Recipient.MotherMaidenName,
-        CDIRECCIO = d.Recipient.Address.AddressLine,
-        CCIUDAD = d.Recipient.Address.City,
-        CESTADO = d.Recipient.Address.StateCode,
-        CPAIS = d.Recipient.Address.CountryCode,
-        CCODPOST = d.Recipient.Address.ZipCode,
-        CTELEFONO = d.Recipient.Address.Phone,
-        DTIDENT = " ",
-        ESALEDT = d.SaleDate,
-        EMONREFER = d.MarketRefCurrencyCode,
-        ETASAREFE = d.MarketRefCurrencyFx,
-        EMTOREF = d.MarketRefCurrencyAmount
-    };
+        var properties = typeof(TModel).GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
-    // Generar la consulta INSERT desde QueryBuilder
-    var insertSql = _sqlQueryService.BuildInsertQuery<BtsaCtaModel>(model);
+        foreach (var prop in properties)
+        {
+            var attr = prop.GetCustomAttribute<SqlColumnDefinitionAttribute>();
+            if (attr == null) continue;
 
-    // Crear y ejecutar el comando con RestUtilities.Connections
-    using var command = _databaseConnection.GetDbCommand(_httpContextAccessor.HttpContext!);
-    command.CommandText = insertSql;
-    command.CommandType = CommandType.Text;
+            string columnName = attr.ColumnName;
+            SqlDataType expectedType = attr.DataType;
+            int maxLength = attr.Length;
 
-    // Agregar parámetros automáticamente desde el modelo
-    FieldsQuery param = new();
-    param.AddParametersFromModel(command, model);
+            object? value = prop.GetValue(model);
 
-    // Ejecutar INSERT
-    await command.ExecuteNonQueryAsync();
+            // Validación de longitud si es tipo carácter
+            if (expectedType == SqlDataType.Char && value is string sValue)
+            {
+                if (sValue.Length > maxLength)
+                    throw new ArgumentException($"El valor para la columna {columnName} excede la longitud máxima ({maxLength}).");
+
+                // Asegura que el valor esté dentro del tamaño permitido
+                value = sValue.PadRight(maxLength);
+            }
+
+            // Conversión según tipo SQL esperado
+            OleDbType dbType = ConvertToOleDbType(expectedType);
+            OleDbParameter parameter = new($"@{columnName}", dbType)
+            {
+                Value = value ?? DBNull.Value
+            };
+
+            command.Parameters.Add(parameter);
+        }
+    }
+
+    /// <summary>
+    /// Convierte un tipo de dato SQL personalizado a <see cref="OleDbType"/>.
+    /// </summary>
+    private OleDbType ConvertToOleDbType(SqlDataType sqlType)
+    {
+        return sqlType switch
+        {
+            SqlDataType.Char => OleDbType.Char,
+            SqlDataType.VarChar => OleDbType.VarChar,
+            SqlDataType.Numeric => OleDbType.Numeric,
+            SqlDataType.Decimal => OleDbType.Decimal,
+            SqlDataType.Integer => OleDbType.Integer,
+            SqlDataType.SmallInt => OleDbType.SmallInt,
+            SqlDataType.Date => OleDbType.Date,
+            SqlDataType.Time => OleDbType.DBTime,
+            SqlDataType.Timestamp => OleDbType.DBTimeStamp,
+            SqlDataType.Double => OleDbType.Double,
+            _ => throw new NotSupportedException($"Tipo SQL no soportado: {sqlType}")
+        };
+    }
 }
