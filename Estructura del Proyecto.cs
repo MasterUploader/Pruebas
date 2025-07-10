@@ -1,64 +1,112 @@
-using QueryBuilder.Models;
 using QueryBuilder.Enums;
+using QueryBuilder.Interfaces;
+using QueryBuilder.Models;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Constructor de consultas SQL del tipo UPDATE.
-/// Permite construir sentencias UPDATE con asignación de columnas y condiciones WHERE.
+/// Constructor de consultas SQL del tipo SELECT.
+/// Permite construir dinámicamente sentencias SELECT con soporte para filtros, ordenamientos, paginación y joins.
 /// </summary>
-public class UpdateQueryBuilder
+public class SelectQueryBuilder : IQueryBuilder
 {
-    /// <summary>Nombre de la tabla a actualizar.</summary>
-    public string Table { get; set; } = string.Empty;
-
-    /// <summary>Columnas a actualizar con sus valores nuevos.</summary>
-    public Dictionary<string, string> SetColumns { get; set; } = new();
-
-    /// <summary>Condiciones para la cláusula WHERE.</summary>
-    public List<string> WhereConditions { get; set; } = new();
+    private string _table = string.Empty;
+    private readonly List<string> _columns = new();
+    private readonly List<string> _whereConditions = new();
+    private readonly List<string> _orderBy = new();
+    private readonly List<JoinBuilder> _joins = new();
+    private int? _offset;
+    private int? _fetch;
 
     /// <summary>
-    /// Construye la sentencia SQL UPDATE.
+    /// Establece la tabla desde la cual se seleccionarán los datos.
     /// </summary>
-    /// <returns>Consulta SQL generada.</returns>
-    public string Build()
+    /// <param name="tableName">Nombre de la tabla base.</param>
+    public IQueryBuilder From(string tableName)
     {
-        var sb = new StringBuilder();
-        sb.Append($"UPDATE {Table} SET ");
-
-        var setParts = new List<string>();
-        foreach (var kvp in SetColumns)
-            setParts.Add($"{kvp.Key} = {kvp.Value}");
-
-        sb.Append(string.Join(", ", setParts));
-
-        if (WhereConditions.Count > 0)
-            sb.Append(" WHERE ").Append(string.Join(" AND ", WhereConditions));
-
-        return sb.ToString();
+        _table = tableName;
+        return this;
     }
 
     /// <summary>
-    /// Genera una instancia de QueryTranslationContext con los datos del UPDATE configurado.
+    /// Especifica las columnas que serán seleccionadas en la consulta.
     /// </summary>
-    /// <returns>Contexto de traducción para consulta UPDATE.</returns>
+    /// <param name="columns">Lista de nombres de columnas.</param>
+    public IQueryBuilder Select(params string[] columns)
+    {
+        _columns.AddRange(columns);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición a la cláusula WHERE.
+    /// </summary>
+    /// <param name="condition">Condición en formato SQL.</param>
+    public IQueryBuilder Where(string condition)
+    {
+        _whereConditions.Add(condition);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula ORDER BY para una columna específica.
+    /// </summary>
+    /// <param name="column">Nombre de la columna.</param>
+    /// <param name="direction">Dirección de ordenamiento (ASC o DESC).</param>
+    public IQueryBuilder OrderBy(string column, SqlSortDirection direction)
+    {
+        _orderBy.Add($"{column} {(direction == SqlSortDirection.Ascending ? "ASC" : "DESC")}");
+        return this;
+    }
+
+    /// <summary>
+    /// Establece el número de registros a omitir (OFFSET).
+    /// </summary>
+    /// <param name="offset">Cantidad de registros a omitir.</param>
+    public IQueryBuilder Offset(int offset)
+    {
+        _offset = offset;
+        return this;
+    }
+
+    /// <summary>
+    /// Establece el número de registros a obtener después del OFFSET.
+    /// </summary>
+    /// <param name="size">Cantidad de registros a obtener.</param>
+    public IQueryBuilder FetchNext(int size)
+    {
+        _fetch = size;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula JOIN al SELECT.
+    /// </summary>
+    /// <param name="join">Objeto JoinBuilder que contiene tipo y condición del JOIN.</param>
+    public IQueryBuilder Join(JoinBuilder join)
+    {
+        _joins.Add(join);
+        return this;
+    }
+
+    /// <summary>
+    /// Construye y retorna un QueryTranslationContext con los datos actuales del builder.
+    /// </summary>
     public QueryTranslationContext BuildContext()
     {
-        var updateValues = new Dictionary<string, object>();
-        foreach (var kvp in SetColumns)
-        {
-            updateValues[kvp.Key] = kvp.Value;
-        }
-
         return new QueryTranslationContext
         {
-            TableName = Table,
-            UpdateValues = updateValues,
-            WhereClause = WhereConditions.Count > 0 ? string.Join(" AND ", WhereConditions) : null,
-            Operation = QueryOperation.Update
+            TableName = _table,
+            SelectColumns = _columns,
+            WhereClause = _whereConditions.Count > 0 ? string.Join(" AND ", _whereConditions) : null,
+            OrderByClause = _orderBy.Count > 0 ? string.Join(", ", _orderBy) : null,
+            Offset = _offset,
+            Limit = _fetch,
+            Operation = QueryOperation.Select,
+            JoinClause = _joins.Count > 0 ? string.Join(" ", _joins.Select(j => j.Build())) : null
         };
     }
 }
