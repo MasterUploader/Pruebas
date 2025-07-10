@@ -1,46 +1,44 @@
+Así es la clase As400QueryTranslator, y este es el error que me sale, por favor adapta As400SqlEngine, para que use As400QueryTranslator.
+
 using QueryBuilder.Interfaces;
 using QueryBuilder.Models;
-using System;
-using System.Collections.Generic;
-using System.Linq.Expressions;
+using System.Text;
 
-namespace QueryBuilder.Engines
+namespace QueryBuilder.Translators;
+
+/// <summary>
+/// Traductor de consultas específico para AS400 (DB2).
+/// </summary>
+public class As400QueryTranslator : IQueryTranslator
 {
-    /// <summary>
-    /// Motor de generación SQL específico para AS400.
-    /// </summary>
-    public class As400SqlEngine : ISqlEngine
+    /// <inheritdoc />
+    public string Translate(QueryTranslationContext context)
     {
-        private readonly As400QueryTranslator _translator;
+        var sb = new StringBuilder();
 
-        public As400SqlEngine(As400QueryTranslator translator)
+        // Ejemplo: Traducción básica
+        sb.Append("SELECT ");
+        sb.Append(string.Join(", ", context.SelectColumns));
+        sb.Append(" FROM ");
+        sb.Append(context.TableName);
+
+        if (!string.IsNullOrWhiteSpace(context.WhereClause))
         {
-            _translator = translator;
+            sb.Append(" WHERE ");
+            sb.Append(context.WhereClause);
         }
 
-        public string GenerateSelect<TModel>(Expression<Func<TModel, bool>>? filter = null)
+        if (!string.IsNullOrWhiteSpace(context.OrderByClause))
         {
-            return _translator.TranslateSelect(filter);
+            sb.Append(" ORDER BY ");
+            sb.Append(context.OrderByClause);
         }
 
-        public string GenerateInsert<TModel>(TModel model)
+        if (context.Offset.HasValue && context.Limit.HasValue)
         {
-            return _translator.TranslateInsert(model);
+            sb.Append($" OFFSET {context.Offset.Value} ROWS FETCH NEXT {context.Limit.Value} ROWS ONLY");
         }
 
-        public string GenerateUpdate<TModel>(TModel model, Expression<Func<TModel, bool>> filter)
-        {
-            return _translator.TranslateUpdate(model, filter);
-        }
-
-        public string GenerateMetadataQuery(string tableName)
-        {
-            return $"SELECT * FROM {tableName} FETCH FIRST 1 ROWS ONLY"; // o usa _translator si aplica
-        }
-
-        public IEnumerable<SqlParameterMetadata> GetParameterMetadata<TModel>(TModel model)
-        {
-            return _translator.ExtractParameterMetadata(model);
-        }
+        return sb.ToString();
     }
 }
