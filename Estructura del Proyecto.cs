@@ -1,44 +1,48 @@
-Así es la clase As400QueryTranslator, y este es el error que me sale, por favor adapta As400SqlEngine, para que use As400QueryTranslator.
-
 using QueryBuilder.Interfaces;
 using QueryBuilder.Models;
-using System.Text;
+using System;
+using System.Linq.Expressions;
 
-namespace QueryBuilder.Translators;
+namespace QueryBuilder.Engines;
 
 /// <summary>
-/// Traductor de consultas específico para AS400 (DB2).
+/// Motor SQL específico para AS400 (DB2), basado en un traductor genérico.
 /// </summary>
-public class As400QueryTranslator : IQueryTranslator
+public class As400SqlEngine : ISqlEngine
 {
-    /// <inheritdoc />
-    public string Translate(QueryTranslationContext context)
+    private readonly IQueryTranslator _translator;
+
+    public As400SqlEngine(IQueryTranslator translator)
     {
-        var sb = new StringBuilder();
+        _translator = translator;
+    }
 
-        // Ejemplo: Traducción básica
-        sb.Append("SELECT ");
-        sb.Append(string.Join(", ", context.SelectColumns));
-        sb.Append(" FROM ");
-        sb.Append(context.TableName);
+    public string GenerateSelectQuery<TModel>(Expression<Func<TModel, bool>>? filter = null)
+    {
+        var context = QueryTranslationContextBuilder.BuildSelectContext(filter);
+        return _translator.Translate(context);
+    }
 
-        if (!string.IsNullOrWhiteSpace(context.WhereClause))
-        {
-            sb.Append(" WHERE ");
-            sb.Append(context.WhereClause);
-        }
+    public string GenerateInsertQuery<TModel>(TModel model)
+    {
+        var context = QueryTranslationContextBuilder.BuildInsertContext(model);
+        return _translator.Translate(context);
+    }
 
-        if (!string.IsNullOrWhiteSpace(context.OrderByClause))
-        {
-            sb.Append(" ORDER BY ");
-            sb.Append(context.OrderByClause);
-        }
+    public string GenerateUpdateQuery<TModel>(TModel model, Expression<Func<TModel, bool>> filter)
+    {
+        var context = QueryTranslationContextBuilder.BuildUpdateContext(model, filter);
+        return _translator.Translate(context);
+    }
 
-        if (context.Offset.HasValue && context.Limit.HasValue)
-        {
-            sb.Append($" OFFSET {context.Offset.Value} ROWS FETCH NEXT {context.Limit.Value} ROWS ONLY");
-        }
+    public string GenerateMetadataQuery(string tableName)
+    {
+        var context = QueryTranslationContextBuilder.BuildMetadataContext(tableName);
+        return _translator.Translate(context);
+    }
 
-        return sb.ToString();
+    public SqlParameterMetadata[] ExtractParameterMetadata<TModel>(TModel model)
+    {
+        return QueryTranslationContextBuilder.ExtractParameterMetadata(model);
     }
 }
