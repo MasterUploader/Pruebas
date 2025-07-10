@@ -1,423 +1,276 @@
-using System.Collections.Generic;
-
-namespace QueryBuilder.Models;
-
-/// <summary>
-/// Extiende el contexto de traducción para admitir operaciones INSERT, UPDATE y METADATA.
-/// </summary>
-public class ExtendedQueryTranslationContext : QueryTranslationContext
-{
-    /// <summary>
-    /// Columnas a insertar (INSERT INTO ...).
-    /// </summary>
-    public List<string> InsertColumns { get; set; } = [];
-
-    /// <summary>
-    /// Valores de los parámetros para el INSERT.
-    /// </summary>
-    public List<string> InsertValues { get; set; } = [];
-
-    /// <summary>
-    /// Columnas que serán actualizadas (UPDATE ... SET ...).
-    /// </summary>
-    public List<string> UpdateColumns { get; set; } = [];
-
-    /// <summary>
-    /// Valores de los parámetros para el UPDATE.
-    /// </summary>
-    public List<string> UpdateValues { get; set; } = [];
-
-    /// <summary>
-    /// Indica si se desea obtener únicamente metadata de la tabla.
-    /// </summary>
-    public bool MetadataOnly { get; set; }
-}
-
-
-using QueryBuilder.Attributes;
-using System;
-using System.Linq;
-using System.Reflection;
-
-namespace QueryBuilder.Utils;
-
-/// <summary>
-/// Ayudante para obtener metadatos desde atributos en clases de modelo.
-/// </summary>
-public static class SqlMetadataHelper
-{
-    /// <summary>
-    /// Obtiene el nombre completo de la tabla a partir del atributo SqlTableAttribute.
-    /// </summary>
-    public static string GetFullTableName<T>()
-    {
-        var attr = typeof(T).GetCustomAttribute<SqlTableAttribute>();
-
-        if (attr == null)
-            throw new InvalidOperationException($"El modelo {typeof(T).Name} no contiene el atributo [SqlTable].");
-
-        return !string.IsNullOrWhiteSpace(attr.Schema)
-            ? $"{attr.Schema}.{attr.TableName}"
-            : attr.TableName;
-    }
-
-    /// <summary>
-    /// Obtiene las propiedades decoradas con [SqlColumnDefinition] del modelo.
-    /// </summary>
-    public static PropertyInfo[] GetColumnProperties<T>()
-    {
-        return typeof(T)
-            .GetProperties()
-            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
-            .ToArray();
-    }
-}
-
-
+using QueryBuilder.Enums;
 using QueryBuilder.Interfaces;
 using QueryBuilder.Models;
-using QueryBuilder.Utils;
-using System.Linq;
+using System.Collections.Generic;
 using System.Text;
 
-namespace QueryBuilder.Translators;
+namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Traductor de consultas específico para AS400 (DB2).
-/// Soporta SELECT, INSERT y UPDATE utilizando el contexto de traducción.
+/// Constructor de consultas SQL del tipo SELECT.
+/// Permite construir dinámicamente sentencias SELECT con soporte para filtros, ordenamientos, paginación, joins, etc.
 /// </summary>
-public class As400QueryTranslator : IQueryTranslator
+public class SelectQueryBuilder : IQueryBuilder
 {
-    /// <inheritdoc />
-    public string Translate(QueryTranslationContext context)
+    private string _table = string.Empty;
+    private readonly List<string> _columns = new();
+    private readonly List<string> _whereConditions = new();
+    private readonly List<string> _orderBy = new();
+    private int? _offset;
+    private int? _fetch;
+
+    /// <summary>
+    /// Establece la tabla desde la cual se seleccionarán los datos.
+    /// </summary>
+    public IQueryBuilder From(string tableName)
     {
-        return context.Operation switch
+        _table = tableName;
+        return this;
+    }
+
+    /// <summary>
+    /// Especifica las columnas que serán seleccionadas en la consulta.
+    /// </summary>
+    public IQueryBuilder Select(params string[] columns)
+    {
+        _columns.AddRange(columns);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición a la cláusula WHERE.
+    /// </summary>
+    public IQueryBuilder Where(string condition)
+    {
+        _whereConditions.Add(condition);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula ORDER BY para una columna específica.
+    /// </summary>
+    public IQueryBuilder OrderBy(string column, SqlSortDirection direction)
+    {
+        _orderBy.Add($"{column} {(direction == SqlSortDirection.Ascending ? "ASC" : "DESC")}");
+        return this;
+    }
+
+    /// <summary>
+    /// Establece el número de registros a omitir (OFFSET).
+    /// </summary>
+    public IQueryBuilder Offset(int offset)
+    {
+        _offset = offset;
+        return this;
+    }
+
+    /// <summary>
+    /// Establece el número de registros a obtener después del OFFSET.
+    /// </summary>
+    public IQueryBuilder FetchNext(int size)
+    {
+        _fetch = size;
+        return this;
+    }
+
+    /// <summary>
+    /// Construye y retorna un QueryTranslationContext con los datos actuales del builder.
+    /// </summary>
+    public QueryTranslationContext BuildContext()
+    {
+        return new QueryTranslationContext
         {
-            QueryOperation.Select => BuildSelect(context),
-            QueryOperation.Insert => BuildInsert(context),
-            QueryOperation.Update => BuildUpdate(context),
-            _ => throw new NotSupportedException($"Operación SQL no soportada: {context.Operation}")
+            TableName = _table,
+            SelectColumns = _columns,
+            WhereClause = _whereConditions.Count > 0 ? string.Join(" AND ", _whereConditions) : null,
+            OrderByClause = _orderBy.Count > 0 ? string.Join(", ", _orderBy) : null,
+            Offset = _offset,
+            Limit = _fetch,
+            Operation = QueryOperation.Select
         };
     }
-
-    private string BuildSelect(QueryTranslationContext context)
-    {
-        var sb = new StringBuilder();
-        sb.Append("SELECT ");
-        sb.Append(string.Join(", ", context.SelectColumns));
-        sb.Append(" FROM ");
-        sb.Append(context.TableName);
-
-        if (!string.IsNullOrWhiteSpace(context.WhereClause))
-        {
-            sb.Append(" WHERE ");
-            sb.Append(context.WhereClause);
-        }
-
-        if (!string.IsNullOrWhiteSpace(context.OrderByClause))
-        {
-            sb.Append(" ORDER BY ");
-            sb.Append(context.OrderByClause);
-        }
-
-        if (context.Offset.HasValue && context.Limit.HasValue)
-        {
-            sb.Append($" OFFSET {context.Offset.Value} ROWS FETCH NEXT {context.Limit.Value} ROWS ONLY");
-        }
-
-        return sb.ToString();
-    }
-
-    private string BuildInsert(QueryTranslationContext context)
-    {
-        var columns = context.InsertValues!.Keys.ToList();
-        var columnList = string.Join(", ", columns);
-        var paramList = string.Join(", ", columns.Select(_ => "?"));
-
-        return $"INSERT INTO {context.TableName} ({columnList}) VALUES ({paramList})";
-    }
-
-    private string BuildUpdate(QueryTranslationContext context)
-    {
-        var columns = context.UpdateValues!.Keys.ToList();
-        var setList = string.Join(", ", columns.Select(c => $"{c} = ?"));
-
-        var sb = new StringBuilder();
-        sb.Append($"UPDATE {context.TableName} SET ");
-        sb.Append(setList);
-
-        if (!string.IsNullOrWhiteSpace(context.WhereClause))
-        {
-            sb.Append(" WHERE ");
-            sb.Append(context.WhereClause);
-        }
-
-        return sb.ToString();
-    }
-}
-using System.Collections.Generic;
-
-namespace QueryBuilder.Models;
-
-/// <summary>
-/// Representa el contexto que contiene los elementos necesarios para construir una consulta SQL.
-/// </summary>
-public class QueryTranslationContext
-{
-    /// <summary>
-    /// Nombre de la tabla sobre la que se ejecutará la consulta.
-    /// </summary>
-    public string TableName { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Lista de columnas a seleccionar.
-    /// </summary>
-    public List<string> SelectColumns { get; set; } = [];
-
-    /// <summary>
-    /// Cláusula WHERE generada dinámicamente.
-    /// </summary>
-    public string? WhereClause { get; set; }
-
-    /// <summary>
-    /// Cláusula ORDER BY.
-    /// </summary>
-    public string? OrderByClause { get; set; }
-
-    /// <summary>
-    /// Número de filas a omitir (para paginación).
-    /// </summary>
-    public int? Offset { get; set; }
-
-    /// <summary>
-    /// Número de filas a recuperar después del OFFSET.
-    /// </summary>
-    public int? Limit { get; set; }
-
-    /// <summary>
-    /// Indica el tipo de operación SQL (SELECT, INSERT, UPDATE).
-    /// </summary>
-    public QueryOperation Operation { get; set; } = QueryOperation.Select;
-
-    /// <summary>
-    /// Diccionario de valores utilizados en una sentencia INSERT.
-    /// </summary>
-    public Dictionary<string, object>? InsertValues { get; set; }
-
-    /// <summary>
-    /// Diccionario de valores utilizados en una sentencia UPDATE.
-    /// </summary>
-    public Dictionary<string, object>? UpdateValues { get; set; }
 }
 
-
-namespace QueryBuilder.Models;
-
-/// <summary>
-/// Enum que define el tipo de operación SQL a ejecutar.
-/// </summary>
-public enum QueryOperation
-{
-    Select,
-    Insert,
-    Update
-}
-
-using QueryBuilder.Interfaces;
-using QueryBuilder.Metadata;
 using QueryBuilder.Models;
-using System;
+using QueryBuilder.Enums;
 using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
+using System.Text;
 
-namespace QueryBuilder.Engines;
+namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Motor SQL especializado para generar consultas compatibles con AS400.
+/// Constructor de consultas SQL del tipo INSERT.
+/// Permite construir dinámicamente sentencias INSERT INTO con columnas y valores parametrizados.
 /// </summary>
-public class As400SqlEngine : ISqlEngine
+public class InsertQueryBuilder
 {
-    private readonly IQueryTranslator _translator;
+    /// <summary>Nombre de la tabla destino.</summary>
+    public string Table { get; set; } = string.Empty;
+
+    /// <summary>Lista de columnas a insertar.</summary>
+    public List<string> Columns { get; set; } = new();
+
+    /// <summary>Lista de valores asociados a las columnas.</summary>
+    public List<string> Values { get; set; } = new();
 
     /// <summary>
-    /// Inicializa una nueva instancia del motor con el traductor AS400 especificado.
+    /// Construye la consulta SQL INSERT basada en los valores proporcionados.
     /// </summary>
-    /// <param name="translator">Traductor que convierte el contexto en una sentencia SQL específica.</param>
-    public As400SqlEngine(IQueryTranslator translator)
+    /// <returns>Consulta SQL generada.</returns>
+    public string Build()
     {
-        _translator = translator;
+        var sb = new StringBuilder();
+        sb.Append($"INSERT INTO {Table} ({string.Join(", ", Columns)}) ");
+        sb.Append($"VALUES ({string.Join(", ", Values)})");
+        return sb.ToString();
     }
 
-    /// <inheritdoc />
-    public string GenerateSelectQuery<TModel>(Expression<Func<TModel, bool>>? filter = null)
+    /// <summary>
+    /// Genera una instancia de QueryTranslationContext con los datos del INSERT configurado.
+    /// </summary>
+    /// <returns>Contexto de traducción para consulta INSERT.</returns>
+    public QueryTranslationContext BuildContext()
     {
-        var tableName = SqlMetadataHelper.GetFullTableName<TModel>();
-        var columnNames = SqlMetadataHelper.GetSqlColumns<TModel>();
-
-        var context = new QueryTranslationContext
+        var insertValues = new Dictionary<string, object>();
+        for (int i = 0; i < Columns.Count; i++)
         {
-            TableName = tableName,
-            SelectColumns = columnNames,
-            Operation = QueryOperation.Select,
-            WhereClause = filter != null ? SqlExpressionParser.Parse(filter) : null
-        };
+            var value = Values[i];
+            insertValues[Columns[i]] = value;
+        }
 
-        return _translator.Translate(context);
-    }
-
-    /// <inheritdoc />
-    public string GenerateInsertQuery<TModel>(TModel insertValues)
-    {
-        var tableName = SqlMetadataHelper.GetFullTableName<TModel>();
-        var columnValues = SqlMetadataHelper.GetColumnValuePairs(insertValues);
-
-        var context = new QueryTranslationContext
+        return new QueryTranslationContext
         {
-            TableName = tableName,
-            InsertValues = columnValues,
+            TableName = Table,
+            InsertValues = insertValues,
             Operation = QueryOperation.Insert
         };
+    }
+}
 
-        return _translator.Translate(context);
+
+
+using QueryBuilder.Models;
+using QueryBuilder.Enums;
+using System.Collections.Generic;
+using System.Text;
+
+namespace QueryBuilder.Builders;
+
+/// <summary>
+/// Constructor de consultas SQL del tipo DELETE.
+/// Permite construir sentencias DELETE con condiciones WHERE.
+/// </summary>
+public class DeleteQueryBuilder
+{
+    /// <summary>Nombre de la tabla desde la que se eliminarán los registros.</summary>
+    public string Table { get; set; } = string.Empty;
+
+    /// <summary>Condiciones WHERE que limitan la eliminación.</summary>
+    public List<string> WhereConditions { get; set; } = new();
+
+    /// <summary>
+    /// Construye la sentencia SQL DELETE.
+    /// </summary>
+    /// <returns>Consulta SQL generada.</returns>
+    public string Build()
+    {
+        var sb = new StringBuilder();
+        sb.Append($"DELETE FROM {Table}");
+
+        if (WhereConditions.Count > 0)
+            sb.Append(" WHERE ").Append(string.Join(" AND ", WhereConditions));
+
+        return sb.ToString();
     }
 
-    /// <inheritdoc />
-    public string GenerateUpdateQuery<TModel>(TModel updateValues, Expression<Func<TModel, bool>> filter)
+    /// <summary>
+    /// Genera una instancia de QueryTranslationContext con los datos del DELETE configurado.
+    /// </summary>
+    /// <returns>Contexto de traducción para consulta DELETE.</returns>
+    public QueryTranslationContext BuildContext()
     {
-        var tableName = SqlMetadataHelper.GetFullTableName<TModel>();
-        var columnValues = SqlMetadataHelper.GetColumnValuePairs(updateValues);
-        var whereClause = SqlExpressionParser.Parse(filter);
-
-        var context = new QueryTranslationContext
+        return new QueryTranslationContext
         {
-            TableName = tableName,
-            UpdateValues = columnValues,
-            WhereClause = whereClause,
-            Operation = QueryOperation.Update
+            TableName = Table,
+            WhereClause = WhereConditions.Count > 0 ? string.Join(" AND ", WhereConditions) : null,
+            Operation = QueryOperation.Delete
+        };
+    }
+}
+using QueryBuilder.Enums;
+using System.Text;
+
+namespace QueryBuilder.Builders;
+
+/// <summary>
+/// Constructor para sentencias JOIN SQL.
+/// Permite agregar JOINs con sus respectivos tipos y condiciones ON.
+/// </summary>
+public class JoinBuilder
+{
+    /// <summary>Tabla secundaria que se desea unir.</summary>
+    public string JoinTable { get; set; } = string.Empty;
+
+    /// <summary>Condición que relaciona ambas tablas.</summary>
+    public string JoinCondition { get; set; } = string.Empty;
+
+    /// <summary>Tipo de JOIN (INNER, LEFT, RIGHT, FULL, SELF).</summary>
+    public SqlJoinType JoinType { get; set; } = SqlJoinType.Inner;
+
+    /// <summary>
+    /// Construye el fragmento de SQL JOIN correspondiente.
+    /// </summary>
+    /// <returns>Fragmento SQL del JOIN.</returns>
+    public string Build()
+    {
+        var joinTypeStr = JoinType switch
+        {
+            SqlJoinType.Left => "LEFT JOIN",
+            SqlJoinType.Right => "RIGHT JOIN",
+            SqlJoinType.Full => "FULL JOIN",
+            SqlJoinType.Self => "JOIN", // SELF JOIN requiere alias externos
+            _ => "INNER JOIN"
         };
 
-        return _translator.Translate(context);
+        return $"{joinTypeStr} {JoinTable} ON {JoinCondition}";
     }
 }
 
-using QueryBuilder.Attributes;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
+using QueryBuilder.Enums;
+using System.Text;
 
-namespace QueryBuilder.Metadata;
+namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Utilidad para extraer metadatos de modelos decorados con atributos personalizados.
+/// Constructor para sentencias JOIN SQL.
+/// Permite agregar JOINs con sus respectivos tipos y condiciones ON.
 /// </summary>
-public static class SqlMetadataHelper
+public class JoinBuilder
 {
-    /// <summary>
-    /// Obtiene el nombre completo de la tabla (esquema.tabla) a partir del modelo.
-    /// </summary>
-    /// <typeparam name="T">Tipo del modelo.</typeparam>
-    /// <returns>Nombre completo de la tabla.</returns>
-    public static string GetFullTableName<T>()
-    {
-        var type = typeof(T);
-        var tableAttr = type.GetCustomAttribute<SqlTableAttribute>();
-        if (tableAttr == null)
-            throw new InvalidOperationException($"El modelo '{type.Name}' no tiene el atributo SqlTableAttribute.");
+    /// <summary>Tabla secundaria que se desea unir.</summary>
+    public string JoinTable { get; set; } = string.Empty;
 
-        return $"{tableAttr.Schema}.{tableAttr.TableName}";
-    }
+    /// <summary>Condición que relaciona ambas tablas.</summary>
+    public string JoinCondition { get; set; } = string.Empty;
+
+    /// <summary>Tipo de JOIN (INNER, LEFT, RIGHT, FULL, SELF).</summary>
+    public SqlJoinType JoinType { get; set; } = SqlJoinType.Inner;
 
     /// <summary>
-    /// Obtiene la lista de nombres de columnas SQL del modelo decoradas con SqlColumnDefinitionAttribute.
+    /// Construye el fragmento de SQL JOIN correspondiente.
     /// </summary>
-    /// <typeparam name="T">Tipo del modelo.</typeparam>
-    /// <returns>Lista de nombres de columnas.</returns>
-    public static List<string> GetSqlColumns<T>()
+    /// <returns>Fragmento SQL del JOIN.</returns>
+    public string Build()
     {
-        return typeof(T)
-            .GetProperties()
-            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
-            .Select(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!.ColumnName)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Obtiene los pares columna-valor desde una instancia de modelo con atributos SqlColumnDefinitionAttribute.
-    /// </summary>
-    /// <param name="model">Instancia del modelo.</param>
-    /// <returns>Diccionario de columnas con sus respectivos valores.</returns>
-    public static Dictionary<string, object?> GetColumnValuePairs(object model)
-    {
-        var type = model.GetType();
-        var props = type.GetProperties()
-            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null);
-
-        var result = new Dictionary<string, object?>();
-
-        foreach (var prop in props)
+        var joinTypeStr = JoinType switch
         {
-            var columnAttr = prop.GetCustomAttribute<SqlColumnDefinitionAttribute>()!;
-            var value = prop.GetValue(model);
-            result[columnAttr.ColumnName] = value;
-        }
+            SqlJoinType.Left => "LEFT JOIN",
+            SqlJoinType.Right => "RIGHT JOIN",
+            SqlJoinType.Full => "FULL JOIN",
+            SqlJoinType.Self => "JOIN", // SELF JOIN requiere alias externos
+            _ => "INNER JOIN"
+        };
 
-        return result;
+        return $"{joinTypeStr} {JoinTable} ON {JoinCondition}";
     }
 }
-
-using System;
-
-namespace QueryBuilder.Attributes;
-
-/// <summary>
-/// Atributo para definir el nombre, tipo y longitud de una columna SQL asociada a una propiedad de un modelo.
-/// </summary>
-[AttributeUsage(AttributeTargets.Property)]
-public class SqlColumnDefinitionAttribute : Attribute
-{
-    /// <summary>
-    /// Nombre de la columna en la base de datos.
-    /// </summary>
-    public string ColumnName { get; }
-
-    /// <summary>
-    /// Tipo de dato SQL.
-    /// </summary>
-    public SqlDataType DataType { get; }
-
-    /// <summary>
-    /// Longitud máxima del campo (opcional, útil para cadenas).
-    /// </summary>
-    public int Length { get; }
-
-    /// <summary>
-    /// Inicializa una nueva instancia del atributo.
-    /// </summary>
-    /// <param name="columnName">Nombre de la columna en la base de datos.</param>
-    /// <param name="dataType">Tipo de dato SQL.</param>
-    /// <param name="length">Longitud del campo.</param>
-    public SqlColumnDefinitionAttribute(string columnName, SqlDataType dataType, int length)
-    {
-        ColumnName = columnName;
-        DataType = dataType;
-        Length = length;
-    }
-}
-namespace QueryBuilder.Attributes;
-
-/// <summary>
-/// Representa los tipos de datos SQL utilizados en atributos de metadatos.
-/// </summary>
-public enum SqlDataType
-{
-    Char,
-    Varchar,
-    Int,
-    Decimal,
-    Date,
-    Time,
-    Timestamp
-}
-
