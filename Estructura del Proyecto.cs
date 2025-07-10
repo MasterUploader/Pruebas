@@ -1,48 +1,86 @@
-using QueryBuilder.Interfaces;
+using QueryBuilder.Attributes;
+using QueryBuilder.Enums;
 using QueryBuilder.Models;
+using QueryBuilder.Utils;
 using System;
+using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 
-namespace QueryBuilder.Engines;
+namespace QueryBuilder.Utils;
 
 /// <summary>
-/// Motor SQL específico para AS400 (DB2), basado en un traductor genérico.
+/// Clase utilitaria que construye objetos <see cref="QueryTranslationContext"/> a partir de expresiones o modelos.
 /// </summary>
-public class As400SqlEngine : ISqlEngine
+public static class QueryTranslationContextBuilder
 {
-    private readonly IQueryTranslator _translator;
-
-    public As400SqlEngine(IQueryTranslator translator)
+    public static QueryTranslationContext BuildSelectContext<TModel>(Expression<Func<TModel, bool>>? filter = null)
     {
-        _translator = translator;
+        var props = typeof(TModel).GetProperties()
+            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
+            .ToList();
+
+        return new QueryTranslationContext
+        {
+            TableName = SqlMetadataHelper.GetFullTableName<TModel>(),
+            SelectColumns = props.Select(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!.ColumnName).ToList(),
+            WhereClause = filter != null ? ExpressionParser.Parse(filter) : null
+        };
     }
 
-    public string GenerateSelectQuery<TModel>(Expression<Func<TModel, bool>>? filter = null)
+    public static QueryTranslationContext BuildInsertContext<TModel>(TModel model)
     {
-        var context = QueryTranslationContextBuilder.BuildSelectContext(filter);
-        return _translator.Translate(context);
+        var props = typeof(TModel).GetProperties()
+            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
+            .ToList();
+
+        return new QueryTranslationContext
+        {
+            TableName = SqlMetadataHelper.GetFullTableName<TModel>(),
+            InsertColumns = props.Select(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!.ColumnName).ToList(),
+            ParameterValues = props.Select(p => p.GetValue(model)).ToList()
+        };
     }
 
-    public string GenerateInsertQuery<TModel>(TModel model)
+    public static QueryTranslationContext BuildUpdateContext<TModel>(TModel model, Expression<Func<TModel, bool>> filter)
     {
-        var context = QueryTranslationContextBuilder.BuildInsertContext(model);
-        return _translator.Translate(context);
+        var props = typeof(TModel).GetProperties()
+            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
+            .ToList();
+
+        return new QueryTranslationContext
+        {
+            TableName = SqlMetadataHelper.GetFullTableName<TModel>(),
+            UpdateColumns = props.Select(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!.ColumnName).ToList(),
+            ParameterValues = props.Select(p => p.GetValue(model)).ToList(),
+            WhereClause = ExpressionParser.Parse(filter)
+        };
     }
 
-    public string GenerateUpdateQuery<TModel>(TModel model, Expression<Func<TModel, bool>> filter)
+    public static QueryTranslationContext BuildMetadataContext(string tableName)
     {
-        var context = QueryTranslationContextBuilder.BuildUpdateContext(model, filter);
-        return _translator.Translate(context);
+        return new QueryTranslationContext
+        {
+            TableName = tableName,
+            MetadataOnly = true
+        };
     }
 
-    public string GenerateMetadataQuery(string tableName)
+    public static SqlParameterMetadata[] ExtractParameterMetadata<TModel>(TModel model)
     {
-        var context = QueryTranslationContextBuilder.BuildMetadataContext(tableName);
-        return _translator.Translate(context);
-    }
-
-    public SqlParameterMetadata[] ExtractParameterMetadata<TModel>(TModel model)
-    {
-        return QueryTranslationContextBuilder.ExtractParameterMetadata(model);
+        return typeof(TModel).GetProperties()
+            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
+            .Select(p =>
+            {
+                var attr = p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!;
+                return new SqlParameterMetadata
+                {
+                    Name = attr.ColumnName,
+                    DataType = attr.DataType,
+                    Length = attr.Length,
+                    Value = p.GetValue(model)
+                };
+            })
+            .ToArray();
     }
 }
