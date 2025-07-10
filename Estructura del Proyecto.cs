@@ -1,67 +1,46 @@
 using QueryBuilder.Interfaces;
+using QueryBuilder.Models;
 using System;
+using System.Collections.Generic;
 using System.Linq.Expressions;
 
-namespace QueryBuilder.Services;
-
-/// <summary>
-/// Servicio que facilita la construcción de consultas SQL (SELECT, INSERT, UPDATE)
-/// a partir de modelos genéricos usando un motor de generación inyectado.
-/// </summary>
-public class SqlQueryService
+namespace QueryBuilder.Engines
 {
-    private readonly IQueryBuilderService _queryBuilder;
-
     /// <summary>
-    /// Constructor que recibe una instancia de <see cref="IQueryBuilderService"/>.
+    /// Motor de generación SQL específico para AS400.
     /// </summary>
-    /// <param name="queryBuilder">Instancia del generador de consultas SQL.</param>
-    public SqlQueryService(IQueryBuilderService queryBuilder)
+    public class As400SqlEngine : ISqlEngine
     {
-        _queryBuilder = queryBuilder;
-    }
+        private readonly As400QueryTranslator _translator;
 
-    /// <summary>
-    /// Construye una consulta SQL de tipo SELECT basada en un modelo y una expresión de filtro.
-    /// </summary>
-    /// <typeparam name="TModel">Tipo del modelo definido por el usuario que representa la tabla SQL.</typeparam>
-    /// <param name="filter">Expresión lambda que representa los criterios WHERE de la consulta.</param>
-    /// <returns>Cadena con la consulta SQL SELECT generada (SELECT * FROM tabla)</returns>
-    public string BuildSelectQuery<TModel>(Expression<Func<TModel, bool>>? filter = null)
-    {
-        return _queryBuilder.BuildSelectQuery(filter);
-    }
+        public As400SqlEngine(As400QueryTranslator translator)
+        {
+            _translator = translator;
+        }
 
-    /// <summary>
-    /// Construye una consulta SQL de tipo INSERT basada en los valores proporcionados.
-    /// </summary>
-    /// <typeparam name="TModel">Tipo del modelo definido por el usuario que representa la tabla SQL.</typeparam>
-    /// <param name="insertValues">Objeto que contiene los valores a insertar en la tabla.</param>
-    /// <returns>Cadena con la consulta SQL INSERT generada.</returns>
-    public string BuildInsertQuery<TModel>(TModel insertValues)
-    {
-        return _queryBuilder.BuildInsertQuery(insertValues);
-    }
+        public string GenerateSelect<TModel>(Expression<Func<TModel, bool>>? filter = null)
+        {
+            return _translator.TranslateSelect(filter);
+        }
 
-    /// <summary>
-    /// Construye una consulta SQL de tipo UPDATE basada en los valores a actualizar y el filtro de selección.
-    /// </summary>
-    /// <typeparam name="TModel">Tipo del modelo definido por el usuario que representa la tabla SQL.</typeparam>
-    /// <param name="updateValues">Objeto con las propiedades y nuevos valores que serán actualizados.</param>
-    /// <param name="filter">Expresión lambda que representa los criterios WHERE de la actualización.</param>
-    /// <returns>Cadena con la consulta SQL UPDATE generada.</returns>
-    public string BuildUpdateQuery<TModel>(TModel updateValues, Expression<Func<TModel, bool>> filter)
-    {
-        return _queryBuilder.BuildUpdateQuery(updateValues, filter);
-    }
+        public string GenerateInsert<TModel>(TModel model)
+        {
+            return _translator.TranslateInsert(model);
+        }
 
-    /// <summary>
-    /// Genera una consulta SQL que obtiene los metadatos de la tabla especificada.
-    /// </summary>
-    /// <param name="tableName">Nombre de la tabla.</param>
-    /// <returns>Cadena con la consulta SQL que obtiene la metadata.</returns>
-    public string BuildMetadataQuery(string tableName)
-    {
-        return _queryBuilder.BuildMetadataQuery(tableName);
+        public string GenerateUpdate<TModel>(TModel model, Expression<Func<TModel, bool>> filter)
+        {
+            return _translator.TranslateUpdate(model, filter);
+        }
+
+        public string GenerateMetadataQuery(string tableName)
+        {
+            return $"SELECT * FROM {tableName} FETCH FIRST 1 ROWS ONLY"; // o usa _translator si aplica
+        }
+
+        public IEnumerable<SqlParameterMetadata> GetParameterMetadata<TModel>(TModel model)
+        {
+            return _translator.ExtractParameterMetadata(model);
+        }
     }
 }
