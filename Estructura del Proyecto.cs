@@ -1,20 +1,56 @@
-/// <summary>
-/// Genera una consulta SQL para obtener información de las columnas de una tabla en AS400.
-/// Utiliza la vista QSYS2.SYSCOLUMNS.
-/// </summary>
-/// <param name="tableName">Nombre completo de la tabla (puede incluir biblioteca).</param>
-/// <returns>Consulta SQL para recuperar metadatos de columnas.</returns>
-public string GenerateMetadataQuery(string tableName)
-{
-    // Separar biblioteca y tabla si viene como LIBRERIA.TABLA
-    var parts = tableName.Split('.');
-    string schema = parts.Length == 2 ? parts[0] : "*LIBL";
-    string table = parts.Length == 2 ? parts[1] : parts[0];
+using QueryBuilder.Attributes;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 
-    return $@"
-        SELECT COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE
-        FROM QSYS2.SYSCOLUMNS
-        WHERE TABLE_SCHEMA = '{schema}'
-          AND TABLE_NAME = '{table}'
-        ORDER BY ORDINAL_POSITION";
+namespace QueryBuilder.Helpers;
+
+public static class SqlMetadataHelper
+{
+    /// <summary>
+    /// Obtiene el nombre completo de la tabla para el tipo de modelo especificado,
+    /// utilizando el atributo [SqlTable] o el nombre de la clase si no está definido.
+    /// </summary>
+    public static string GetFullTableName<T>()
+    {
+        var type = typeof(T);
+        var tableAttr = type.GetCustomAttribute<SqlTableAttribute>();
+        return tableAttr != null
+            ? $"{tableAttr.Schema}.{tableAttr.TableName}"
+            : type.Name;
+    }
+
+    /// <summary>
+    /// Obtiene los nombres de columnas SQL que corresponden al modelo,
+    /// excluyendo las propiedades marcadas con [SqlIgnore].
+    /// </summary>
+    /// <typeparam name="T">Tipo del modelo.</typeparam>
+    /// <returns>Lista de nombres de columnas SQL.</returns>
+    public static List<string> GetSqlColumns<T>()
+    {
+        var type = typeof(T);
+        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var columns = new List<string>();
+
+        foreach (var prop in properties)
+        {
+            // Ignorar si tiene [SqlIgnore]
+            if (prop.GetCustomAttribute<SqlIgnoreAttribute>() != null)
+                continue;
+
+            // Usar el nombre definido en [SqlColumnName] si existe
+            var nameAttr = prop.GetCustomAttribute<SqlColumnNameAttribute>();
+            if (nameAttr != null)
+            {
+                columns.Add(nameAttr.Name);
+                continue;
+            }
+
+            // Usar el nombre de la propiedad como nombre de columna por defecto
+            columns.Add(prop.Name);
+        }
+
+        return columns;
+    }
 }
