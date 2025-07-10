@@ -1,11 +1,20 @@
 /// <summary>
-/// Construye la consulta SQL como una cadena cruda (si la interfaz lo requiere).
-/// En este caso, delegamos a BuildContext para centralizar la lógica.
+/// Genera una consulta SQL para obtener información de las columnas de una tabla en AS400.
+/// Utiliza la vista QSYS2.SYSCOLUMNS.
 /// </summary>
-/// <returns>Consulta SQL en texto plano (opcional o vacía si no se usa directamente).</returns>
-public string Build()
+/// <param name="tableName">Nombre completo de la tabla (puede incluir biblioteca).</param>
+/// <returns>Consulta SQL para recuperar metadatos de columnas.</returns>
+public string GenerateMetadataQuery(string tableName)
 {
-    // Este método puede ser implementado como string.Empty si no se usa directamente,
-    // o puedes delegar a un traductor SQL si lo tienes.
-    return string.Empty; // O lanzar excepción si no debe usarse directamente.
+    // Separar biblioteca y tabla si viene como LIBRERIA.TABLA
+    var parts = tableName.Split('.');
+    string schema = parts.Length == 2 ? parts[0] : "*LIBL";
+    string table = parts.Length == 2 ? parts[1] : parts[0];
+
+    return $@"
+        SELECT COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE
+        FROM QSYS2.SYSCOLUMNS
+        WHERE TABLE_SCHEMA = '{schema}'
+          AND TABLE_NAME = '{table}'
+        ORDER BY ORDINAL_POSITION";
 }
