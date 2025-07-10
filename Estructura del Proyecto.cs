@@ -1,72 +1,41 @@
+Ya tengo una clase QueryTranslationContext, la cual tiene 13 referencias, no puedo realizar un cambio sin alterar el codigo, revisa por favor, te muestro donde son las referencias.
+
+using System.Collections.Generic;
+
 namespace QueryBuilder.Models;
 
 /// <summary>
-/// Representa el contexto de traducción de una consulta SQL, utilizado por los traductores como AS400QueryTranslator.
+/// Representa el contexto que contiene los elementos necesarios para construir una consulta SQL.
 /// </summary>
 public class QueryTranslationContext
 {
+    /// <summary>
+    /// Nombre de la tabla sobre la que se ejecutará la consulta.
+    /// </summary>
     public string TableName { get; set; } = string.Empty;
-    public List<string> SelectColumns { get; set; } = new();
+
+    /// <summary>
+    /// Lista de columnas a seleccionar.
+    /// </summary>
+    public List<string> SelectColumns { get; set; } = [];
+
+    /// <summary>
+    /// Cláusula WHERE generada dinámicamente.
+    /// </summary>
     public string? WhereClause { get; set; }
+
+    /// <summary>
+    /// Cláusula ORDER BY.
+    /// </summary>
     public string? OrderByClause { get; set; }
 
-    // Para INSERT
-    public List<string> InsertColumns { get; set; } = new();
-    public List<object?> ParameterValues { get; set; } = new();
-
-    // Para UPDATE
-    public List<string> UpdateColumns { get; set; } = new();
-
-    // Paginación
+    /// <summary>
+    /// Número de filas a omitir (para paginación).
+    /// </summary>
     public int? Offset { get; set; }
+
+    /// <summary>
+    /// Número de filas a recuperar después del OFFSET.
+    /// </summary>
     public int? Limit { get; set; }
-
-    // Solo para extracción de metadatos
-    public bool MetadataOnly { get; set; } = false;
 }
-
-
-using QueryBuilder.Enums;
-
-namespace QueryBuilder.Models;
-
-/// <summary>
-/// Representa metadatos de un parámetro SQL (nombre, tipo, longitud, valor actual).
-/// </summary>
-public class SqlParameterMetadata
-{
-    public string Name { get; set; } = string.Empty;
-    public SqlDataType DataType { get; set; }
-    public int? Length { get; set; }
-    public object? Value { get; set; }
-}
-
-
-using QueryBuilder.Attributes;
-using System;
-using System.Linq;
-
-namespace QueryBuilder.Utils;
-
-/// <summary>
-/// Utilidad para obtener el nombre completo de una tabla a partir del modelo.
-/// </summary>
-public static class SqlMetadataHelper
-{
-    public static string GetFullTableName<T>()
-    {
-        var type = typeof(T);
-        var tableAttr = type.GetCustomAttributes(typeof(SqlTableAttribute), true)
-                            .FirstOrDefault() as SqlTableAttribute;
-
-        if (tableAttr == null)
-        {
-            throw new InvalidOperationException($"Missing [SqlTable] attribute on {type.Name}");
-        }
-
-        return !string.IsNullOrEmpty(tableAttr.Schema)
-            ? $"{tableAttr.Schema}.{tableAttr.TableName}"
-            : tableAttr.TableName;
-    }
-}
-
