@@ -1,86 +1,72 @@
-using QueryBuilder.Attributes;
+namespace QueryBuilder.Models;
+
+/// <summary>
+/// Representa el contexto de traducción de una consulta SQL, utilizado por los traductores como AS400QueryTranslator.
+/// </summary>
+public class QueryTranslationContext
+{
+    public string TableName { get; set; } = string.Empty;
+    public List<string> SelectColumns { get; set; } = new();
+    public string? WhereClause { get; set; }
+    public string? OrderByClause { get; set; }
+
+    // Para INSERT
+    public List<string> InsertColumns { get; set; } = new();
+    public List<object?> ParameterValues { get; set; } = new();
+
+    // Para UPDATE
+    public List<string> UpdateColumns { get; set; } = new();
+
+    // Paginación
+    public int? Offset { get; set; }
+    public int? Limit { get; set; }
+
+    // Solo para extracción de metadatos
+    public bool MetadataOnly { get; set; } = false;
+}
+
+
 using QueryBuilder.Enums;
-using QueryBuilder.Models;
-using QueryBuilder.Utils;
+
+namespace QueryBuilder.Models;
+
+/// <summary>
+/// Representa metadatos de un parámetro SQL (nombre, tipo, longitud, valor actual).
+/// </summary>
+public class SqlParameterMetadata
+{
+    public string Name { get; set; } = string.Empty;
+    public SqlDataType DataType { get; set; }
+    public int? Length { get; set; }
+    public object? Value { get; set; }
+}
+
+
+using QueryBuilder.Attributes;
 using System;
 using System.Linq;
-using System.Linq.Expressions;
-using System.Reflection;
 
 namespace QueryBuilder.Utils;
 
 /// <summary>
-/// Clase utilitaria que construye objetos <see cref="QueryTranslationContext"/> a partir de expresiones o modelos.
+/// Utilidad para obtener el nombre completo de una tabla a partir del modelo.
 /// </summary>
-public static class QueryTranslationContextBuilder
+public static class SqlMetadataHelper
 {
-    public static QueryTranslationContext BuildSelectContext<TModel>(Expression<Func<TModel, bool>>? filter = null)
+    public static string GetFullTableName<T>()
     {
-        var props = typeof(TModel).GetProperties()
-            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
-            .ToList();
+        var type = typeof(T);
+        var tableAttr = type.GetCustomAttributes(typeof(SqlTableAttribute), true)
+                            .FirstOrDefault() as SqlTableAttribute;
 
-        return new QueryTranslationContext
+        if (tableAttr == null)
         {
-            TableName = SqlMetadataHelper.GetFullTableName<TModel>(),
-            SelectColumns = props.Select(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!.ColumnName).ToList(),
-            WhereClause = filter != null ? ExpressionParser.Parse(filter) : null
-        };
-    }
+            throw new InvalidOperationException($"Missing [SqlTable] attribute on {type.Name}");
+        }
 
-    public static QueryTranslationContext BuildInsertContext<TModel>(TModel model)
-    {
-        var props = typeof(TModel).GetProperties()
-            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
-            .ToList();
-
-        return new QueryTranslationContext
-        {
-            TableName = SqlMetadataHelper.GetFullTableName<TModel>(),
-            InsertColumns = props.Select(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!.ColumnName).ToList(),
-            ParameterValues = props.Select(p => p.GetValue(model)).ToList()
-        };
-    }
-
-    public static QueryTranslationContext BuildUpdateContext<TModel>(TModel model, Expression<Func<TModel, bool>> filter)
-    {
-        var props = typeof(TModel).GetProperties()
-            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
-            .ToList();
-
-        return new QueryTranslationContext
-        {
-            TableName = SqlMetadataHelper.GetFullTableName<TModel>(),
-            UpdateColumns = props.Select(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!.ColumnName).ToList(),
-            ParameterValues = props.Select(p => p.GetValue(model)).ToList(),
-            WhereClause = ExpressionParser.Parse(filter)
-        };
-    }
-
-    public static QueryTranslationContext BuildMetadataContext(string tableName)
-    {
-        return new QueryTranslationContext
-        {
-            TableName = tableName,
-            MetadataOnly = true
-        };
-    }
-
-    public static SqlParameterMetadata[] ExtractParameterMetadata<TModel>(TModel model)
-    {
-        return typeof(TModel).GetProperties()
-            .Where(p => p.GetCustomAttribute<SqlColumnDefinitionAttribute>() != null)
-            .Select(p =>
-            {
-                var attr = p.GetCustomAttribute<SqlColumnDefinitionAttribute>()!;
-                return new SqlParameterMetadata
-                {
-                    Name = attr.ColumnName,
-                    DataType = attr.DataType,
-                    Length = attr.Length,
-                    Value = p.GetValue(model)
-                };
-            })
-            .ToArray();
+        return !string.IsNullOrEmpty(tableAttr.Schema)
+            ? $"{tableAttr.Schema}.{tableAttr.TableName}"
+            : tableAttr.TableName;
     }
 }
+
