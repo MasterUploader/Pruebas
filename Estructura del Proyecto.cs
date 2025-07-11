@@ -1,92 +1,58 @@
-using System;
-using System.Linq.Expressions;
+"LoggingOptions": {
+  "GenerateTxt": true,
+  "GenerateCsv": true
+    }
 
-namespace QueryBuilder.Helpers;
 
-/// <summary>
-/// Utilidad para convertir expresiones lambda en condiciones SQL simples.
-/// Esta versión soporta expresiones binarias básicas (ej. x => x.Id == 5).
-/// </summary>
-public static class SqlExpressionParser
+namespace RestUtilities.Logging.Models
 {
     /// <summary>
-    /// Convierte una expresión lambda booleana en una cláusula SQL WHERE.
+    /// Configuración de opciones para el sistema de logging.
     /// </summary>
-    /// <typeparam name="T">Tipo de modelo.</typeparam>
-    /// <param name="expression">Expresión booleana.</param>
-    /// <returns>Cadena SQL con la condición WHERE equivalente.</returns>
-    public static string Parse<T>(Expression<Func<T, bool>> expression)
+    public class LoggingOptions
     {
-        return new SimpleSqlVisitor().VisitExpression(expression.Body);
-    }
+        /// <summary>
+        /// Indica si se debe generar el archivo de log en formato .txt.
+        /// </summary>
+        public bool GenerateTxt { get; set; }
 
-    private class SimpleSqlVisitor : ExpressionVisitor
-    {
-        public string VisitExpression(Expression exp)
-        {
-            return exp switch
-            {
-                BinaryExpression bin => VisitBinary(bin),
-                MemberExpression member => member.Member.Name,
-                ConstantExpression constant => FormatConstant(constant.Value),
-                _ => throw new NotSupportedException($"Expresión no soportada: {exp.GetType().Name}")
-            };
-        }
-
-        private string VisitBinary(BinaryExpression node)
-        {
-            var left = VisitExpression(node.Left);
-            var right = VisitExpression(node.Right);
-            var op = node.NodeType switch
-            {
-                ExpressionType.Equal => "=",
-                ExpressionType.NotEqual => "<>",
-                ExpressionType.GreaterThan => ">",
-                ExpressionType.LessThan => "<",
-                ExpressionType.GreaterThanOrEqual => ">=",
-                ExpressionType.LessThanOrEqual => "<=",
-                _ => throw new NotSupportedException($"Operador no soportado: {node.NodeType}")
-            };
-
-            return $"{left} {op} {right}";
-        }
-
-        private string FormatConstant(object? value)
-        {
-            return value switch
-            {
-                null => "NULL",
-                string s => $"'{s}'",
-                DateTime dt => $"'{dt:yyyy-MM-dd HH:mm:ss}'",
-                bool b => b ? "1" : "0",
-                _ => value.ToString()
-            };
-        }
+        /// <summary>
+        /// Indica si se debe generar el archivo de log en formato .csv.
+        /// </summary>
+        public bool GenerateCsv { get; set; }
     }
 }
 
-/// <summary>
-/// Obtiene un diccionario con los pares columna/valor para el modelo especificado.
-/// </summary>
-public static Dictionary<string, object> GetColumnValuePairs<T>(T instance)
+using Microsoft.Extensions.Options;
+using RestUtilities.Logging.Helpers;
+using RestUtilities.Logging.Models;
+
+public class LoggingService : ILoggingService
 {
-    var result = new Dictionary<string, object>();
-    var props = typeof(T).GetProperties();
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly LoggingOptions _loggingOptions;
 
-    foreach (var prop in props)
+    public LoggingService(
+        IHttpContextAccessor httpContextAccessor,
+        IOptions<LoggingOptions> loggingOptions)
     {
-        if (prop.GetCustomAttribute<SqlIgnoreAttribute>() != null)
-            continue;
-
-        var nameAttr = prop.GetCustomAttribute<SqlColumnNameAttribute>();
-        var columnName = nameAttr?.Name ?? prop.Name;
-        var value = prop.GetValue(instance);
-        result[columnName] = value ?? DBNull.Value;
+        _httpContextAccessor = httpContextAccessor;
+        _loggingOptions = loggingOptions.Value;
     }
 
-    return result;
+    public void WriteLog(string traceId, string endpoint, string logContent)
+    {
+        var logFormatted = LogFormatter.FormatLog(traceId, endpoint, logContent);
+
+        if (_loggingOptions.GenerateTxt)
+        {
+            LogHelper.SaveLogAsTxt(traceId, logFormatted);
+        }
+
+        if (_loggingOptions.GenerateCsv)
+        {
+            LogHelper.WriteCsvLog(traceId, endpoint, logFormatted);
+        }
+    }
 }
-
-
-
 
