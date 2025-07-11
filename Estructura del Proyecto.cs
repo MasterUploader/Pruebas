@@ -1,58 +1,50 @@
-"LoggingOptions": {
-  "GenerateTxt": true,
-  "GenerateCsv": true
-    }
-
-
-namespace RestUtilities.Logging.Models
+/// <summary>
+/// Obtiene el archivo de log de la petición actual, garantizando que toda la información
+/// se guarde en el mismo archivo. Si no existe aún, se genera uno nuevo dentro de una carpeta
+/// con el nombre del controlador.
+/// </summary>
+public string GetCurrentLogFile()
 {
-    /// <summary>
-    /// Configuración de opciones para el sistema de logging.
-    /// </summary>
-    public class LoggingOptions
+    try
     {
-        /// <summary>
-        /// Indica si se debe generar el archivo de log en formato .txt.
-        /// </summary>
-        public bool GenerateTxt { get; set; }
+        var context = _httpContextAccessor.HttpContext;
 
-        /// <summary>
-        /// Indica si se debe generar el archivo de log en formato .csv.
-        /// </summary>
-        public bool GenerateCsv { get; set; }
-    }
-}
-
-using Microsoft.Extensions.Options;
-using RestUtilities.Logging.Helpers;
-using RestUtilities.Logging.Models;
-
-public class LoggingService : ILoggingService
-{
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly LoggingOptions _loggingOptions;
-
-    public LoggingService(
-        IHttpContextAccessor httpContextAccessor,
-        IOptions<LoggingOptions> loggingOptions)
-    {
-        _httpContextAccessor = httpContextAccessor;
-        _loggingOptions = loggingOptions.Value;
-    }
-
-    public void WriteLog(string traceId, string endpoint, string logContent)
-    {
-        var logFormatted = LogFormatter.FormatLog(traceId, endpoint, logContent);
-
-        if (_loggingOptions.GenerateTxt)
+        // Si ya existe un archivo de log en esta petición, reutilizarlo
+        if (context is not null &&
+            context.Items.ContainsKey("LogFileName") &&
+            context.Items["LogFileName"] is string logFileName)
         {
-            LogHelper.SaveLogAsTxt(traceId, logFormatted);
+            return logFileName;
         }
 
-        if (_loggingOptions.GenerateCsv)
+        // Generar un nuevo nombre de archivo solo si no se ha creado antes
+        if (context is not null && context.Items.ContainsKey("ExecutionId"))
         {
-            LogHelper.WriteCsvLog(traceId, endpoint, logFormatted);
+            string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
+            string endpoint = context.Request.Path.ToString().Replace("/", "_").Trim('_');
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+
+            // Obtener el nombre del controlador a partir del endpoint actual
+            var endpointMetadata = context.GetEndpoint();
+            var controllerName = endpointMetadata?.Metadata
+                .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
+                .FirstOrDefault()?.ControllerName ?? "UnknownController";
+
+            // Crear subcarpeta del controlador si no existe
+            var controllerDirectory = Path.Combine(_logDirectory, controllerName);
+            Directory.CreateDirectory(controllerDirectory);
+
+            // Generar nombre de archivo incluyendo subcarpeta del controlador
+            string newLogFileName = Path.Combine(controllerDirectory, $"{executionId}_{endpoint}_{timestamp}.txt");
+
+            context.Items["LogFileName"] = newLogFileName;
+            return newLogFileName;
         }
     }
-}
+    catch (Exception ex)
+    {
+        LogInternalError(ex); // Método interno para registrar errores del sistema de logging
+    }
 
+    return string.Empty;
+}
