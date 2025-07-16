@@ -1,42 +1,44 @@
-CREATE TABLE CASHRESP (
-  ID_RESP          CHAR(36),        -- ID global de la respuesta
-  TIMESTAMP        CHAR(25),        -- Fecha/hora de la respuesta
-  TRACE_ID         CHAR(50),        -- Identificador único de la llamada
-  STATUS           DEC(5, 0),       -- Código HTTP
-  MESSAGE          VARCHAR(200),    -- Resultado: "SUCCESS", "ERROR", etc.
-  ERROR_MSG        VARCHAR(200),    -- ErrorMessage (si aplica)
-  COUNTRY_ID       CHAR(3),         -- Código ISO del país
+A          R CASHRESPR
+     A                                      UNIQUE
+     A            IDRESP        36A         TEXT('ID de la respuesta JSON')
+     A            TIMESTAMP     25A         TEXT('Fecha/hora ISO 8601')
+     A            TRACEID       50A         TEXT('Identificador de trazabilidad')
+     A            STATUS         5S 0       TEXT('Código HTTP')
+     A            MESSAGE      200A         TEXT('Mensaje del sistema')
+     A            ERRORMSG     200A         TEXT('Mensaje de error')
 
-  -- BALANCES
-  SEQ_BALANCE      SMALLINT,        -- N° de balance dentro del arreglo
-  BALANCE_TYPE     CHAR(20),        -- Total, CashIn, CashOut
-  DATE_BALANCE     CHAR(25),        -- Fecha/hora del balance
-  DEVICE_CODE_BAL  CHAR(30),        -- Código del dispositivo (balance)
+     A            COUNTRYID      3A         TEXT('Código ISO del país')
 
-  -- TRANSACTIONS
-  SEQ_TRANSACTION  SMALLINT,        -- N° de transacción dentro del arreglo
-  TRANSACTION_ID   CHAR(50),
-  TRANS_DATE       CHAR(25),
-  RECEIPT_NUMBER   CHAR(20),
-  TRAN_TYPE        CHAR(20),        -- CASHIN, CASHOUT, etc.
-  TRANS_SUBTYPE    CHAR(20),        -- DISPENSE, EXCHANGE, etc.
-  CASHIER_ID       CHAR(20),
-  CASHIER_NAME     CHAR(50),
-  DEVICE_CODE_TRAN CHAR(30),        -- Código del dispositivo (transacción)
+     A            SEQBAL         3S 0       TEXT('N° balance en el arreglo')
+     A            BALTYPE       20A         TEXT('Tipo: Total, CashIn, CashOut')
+     A            DATEBAL       25A         TEXT('Fecha/hora del balance')
+     A            DEVCODEBAL    30A         TEXT('Código del dispositivo - balance')
 
-  -- CURRENCY (balance o transacción)
-  SEQ_CURRENCY     SMALLINT,        -- N° dentro del array de Currency[]
-  CURRENCY_CODE    CHAR(3),
-  CURRENCY_AMOUNT  DEC(15, 2),
+     A            SEQTRAN        3S 0       TEXT('N° transacción en el arreglo')
+     A            TRANID        50A         TEXT('ID de la transacción')
+     A            TRANSDATE     25A         TEXT('Fecha de transacción')
+     A            RECEIPTNUM    20A         TEXT('Número de recibo')
+     A            TRANTYPE      20A         TEXT('Tipo de transacción')
+     A            TRANSSUBT     20A         TEXT('Subtipo transacción')
+     A            CASHIERID     20A         TEXT('ID del cajero')
+     A            CASHIERNAME   50A         TEXT('Nombre del cajero')
+     A            DEVCODETRAN   30A         TEXT('Código del dispositivo - transacción')
 
-  -- DENOMINATIONS
-  SEQ_DENOM        SMALLINT,        -- N° dentro del array de Denomination[]
-  DENOM_VALUE      DEC(9, 0),
-  DENOM_QUANTITY   DEC(9, 0),
-  DENOM_AMOUNT     DEC(15, 2),
-  DENOM_TYPE       CHAR(10),        -- NOTE, COIN
+     A            SEQCURR        3S 0       TEXT('N° moneda en el arreglo')
+     A            CURRCODE       3A         TEXT('Código de moneda')
+     A            CURRAMOUNT    15S 2       TEXT('Monto en moneda')
 
-  -- FLAGS
-  IS_BALANCE       CHAR(1),         -- 'Y' o 'N'
-  IS_TRANSACTION   CHAR(1)          -- 'Y' o 'N'
-);
+     A            SEQDEN         3S 0       TEXT('N° denominación en el arreglo')
+     A            DENVALUE       9S 0       TEXT('Valor de denominación')
+     A            DENQTY         9S 0       TEXT('Cantidad')
+     A            DENAMOUNT     15S 2       TEXT('Importe total')
+     A            DENTYPE       10A         TEXT('Tipo: NOTE o COIN')
+
+     A            ISBALANCE      1A         TEXT('Y/N: Registro es balance')
+     A            ISTRANSACTION  1A         TEXT('Y/N: Registro es transacción')
+
+     A          K IDRESP
+     A          K SEQBAL
+     A          K SEQTRAN
+     A          K SEQCURR
+     A          K SEQDEN
