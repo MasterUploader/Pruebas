@@ -1,12 +1,20 @@
-consultarSaldoResponse = await _consultarSaldoRepository.ConsultarSaldoAsync(request);
+ConsultarSaldoResponse consultarSaldoResponse = null;
+int intentos = 0;
+int maxIntentos = 2; // puedes ajustar este número si quieres más reintentos
 
-if (consultarSaldoResponse?.Factura == null)
+do
 {
-    // Reintento una sola vez
-    consultarSaldoResponse = await _consultarSaldoRepository.ConsultarSaldoAsync(request);
-}
+    consultarSaldoResponse = GuardarConsultaSaldoConsultarSaldoResponse(request.Header, request.Body, codigo90); // Tu método actual
 
-// Si después del reintento sigue viniendo null, retorna error
+    intentos++;
+
+    if (consultarSaldoResponse?.Factura == null)
+    {
+        Console.WriteLine($"Factura nula en intento {intentos}, reintentando...");
+    }
+
+} while (consultarSaldoResponse?.Factura == null && intentos < maxIntentos);
+
 if (consultarSaldoResponse?.Factura == null)
 {
     return new ResponseModelConsulta
@@ -14,8 +22,9 @@ if (consultarSaldoResponse?.Factura == null)
         Header = request.Header,
         Body = consultarSaldoResponse,
         Codigo = "400",
-        Mensaje = "Factura no encontrada después del reintento de consulta"
+        Mensaje = "Factura no encontrada después de varios intentos"
     };
 }
 
+// Si todo bien, se asigna el resultado
 Data = consultarSaldoResponse;
