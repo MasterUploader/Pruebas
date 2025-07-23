@@ -1,21 +1,35 @@
-using QueryBuilder.Builders;
-using QueryBuilder.Helpers;
-using System;
-using System.Linq.Expressions;
+var query = QueryBuilder.Core.QueryBuilder
+    .From("USUADMIN", "BCAH96DTA")
+    .Select(("USUARIO", "User"), ("TIPUSU", "Type"))
+    .Distinct()
+    .Build();
 
-namespace QueryBuilder.Expressions;
 
-/// <summary>
-/// Traductor para expresiones lambda en cláusulas HAVING.
-/// </summary>
-public static class LambdaHavingTranslator
-{
-    /// <summary>
-    /// Traduce la expresión y la agrega como HAVING.
-    /// </summary>
-    public static void Translate<T>(SelectQueryBuilder builder, Expression<Func<T, bool>> expression)
-    {
-        string condition = ExpressionToSqlConverter.Convert(expression);
-        builder.HavingClause = condition;
-    }
-}
+var query = QueryBuilder.Core.QueryBuilder
+    .From("LOGS", "APPDTA")
+    .Select(("TIPO", "TipoEvento"), ("COUNT(*)", "Cantidad"))
+    .GroupBy("TIPO")
+    .Build();
+
+var query = QueryBuilder.Core.QueryBuilder
+    .From("VENTAS", "COMDTA")
+    .Select(("VENDEDOR", "Empleado"), ("SUM(TOTAL)", "TotalVentas"))
+    .GroupBy("VENDEDOR")
+    .Having<dynamic>(v => v.TotalVentas > 10000)
+    .Build();
+
+var query = QueryBuilder.Core.QueryBuilder
+    .From("CLIENTES", "VENTASDTA")
+    .Select("NOMBRE", "FECHAREGISTRO")
+    .OrderBy(("FECHAREGISTRO", SortDirection.Desc), ("NOMBRE", SortDirection.Asc))
+    .Build();
+
+var query = QueryBuilder.Core.QueryBuilder
+    .From("PEDIDOS", "VENTASDTA")
+    .Select(("C.CLIENTEID", "ClienteId"), ("COUNT(P.ID)", "TotalPedidos"))
+    .As("P")
+    .Join("CLIENTES", "VENTASDTA", "C", "P.CLIENTEID", "C.ID")
+    .GroupBy("C.CLIENTEID")
+    .Having<dynamic>(x => x.TotalPedidos >= 5)
+    .OrderBy(("TotalPedidos", SortDirection.Desc))
+    .Build();
