@@ -1,25 +1,32 @@
 /// <summary>
-/// Ordena por una sola columna.
+/// Dirección de ordenamiento para una columna en ORDER BY.
+/// </summary>
+public enum SortDirection
+{
+    Asc,
+    Desc
+}
+
+/// <summary>
+/// Ordena por una sola columna especificando la dirección.
 /// </summary>
 /// <param name="column">Nombre de la columna.</param>
-/// <param name="descending">Indica si se ordena en forma descendente.</param>
-public SelectQueryBuilder OrderBy(string column, bool descending = false)
+/// <param name="direction">Dirección del ordenamiento (Asc o Desc).</param>
+public SelectQueryBuilder OrderBy(string column, SortDirection direction = SortDirection.Asc)
 {
-    var direction = descending ? "DESC" : "ASC";
-    _orderBy.Add($"{column} {direction}");
+    _orderBy.Add($"{column} {direction.ToString().ToUpper()}");
     return this;
 }
 
 /// <summary>
-/// Ordena por múltiples columnas especificando si cada una es descendente.
+/// Ordena por múltiples columnas especificando la dirección de cada una.
 /// </summary>
-/// <param name="columns">Lista de columnas y su dirección (true = DESC).</param>
-public SelectQueryBuilder OrderBy(params (string Column, bool Descending)[] columns)
+/// <param name="columns">Lista de columnas con su dirección de orden.</param>
+public SelectQueryBuilder OrderBy(params (string Column, SortDirection Direction)[] columns)
 {
-    foreach (var (column, descending) in columns)
+    foreach (var (column, direction) in columns)
     {
-        var direction = descending ? "DESC" : "ASC";
-        _orderBy.Add($"{column} {direction}");
+        _orderBy.Add($"{column} {direction.ToString().ToUpper()}");
     }
     return this;
 }
