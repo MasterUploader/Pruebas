@@ -1,73 +1,32 @@
-Así tengo actualmente la clase AS400ConnectionProvider, valida porque uso LoggingService, aunque aun no este funcional.
-
 using Connections.Interfaces;
-using Logging.Abstractions;
-using Logging.Decorators;
+using Connections.Providers.Database;
 using Microsoft.AspNetCore.Http;
+using QueryBuilder.Models;
 using System.Data.Common;
-using System.Data.OleDb;
 
-namespace Connections.Providers.Database;
+namespace Connections.Extensions;
 
 /// <summary>
-/// Proveedor de conexión a base de datos AS400 utilizando OleDb.
-/// Esta implementación está optimizada para ejecución directa de comandos SQL y logging estructurado.
+/// Métodos de extensión para facilitar el uso de <see cref="IDatabaseConnection"/> con consultas generadas por QueryBuilder.
 /// </summary>
-public partial class AS400ConnectionProvider : IDatabaseConnection, IDisposable
+public static class DatabaseConnectionExtensions
 {
-    private readonly OleDbConnection _oleDbConnection;
-    private readonly ILoggingService _loggingService;
-
     /// <summary>
-    /// Inicializa una nueva instancia de <see cref="AS400ConnectionProvider"/>.
+    /// Genera un <see cref="DbCommand"/> a partir de un <see cref="QueryResult"/> generado por QueryBuilder,
+    /// asignando automáticamente el SQL y sus parámetros si el proveedor es compatible.
     /// </summary>
-    /// <param name="connectionString">Cadena de conexión a AS400 en formato OleDb.</param>
-    /// <param name="loggingService">Servicio de logging estructurado.</param>
-    public AS400ConnectionProvider(string connectionString, ILoggingService loggingService)
+    /// <param name="connection">Instancia de <see cref="IDatabaseConnection"/>.</param>
+    /// <param name="queryResult">Consulta SQL generada por QueryBuilder con parámetros.</param>
+    /// <param name="context">Contexto HTTP actual, utilizado para trazabilidad y logging.</param>
+    /// <returns>Comando listo para ejecutar.</returns>
+    /// <exception cref="NotSupportedException">Se lanza si el tipo de conexión no soporta asignación automática desde QueryBuilder.</exception>
+    public static DbCommand GetDbCommandFromQuery(this IDatabaseConnection connection, QueryResult queryResult, HttpContext context)
     {
-        _oleDbConnection = new OleDbConnection(connectionString);
-        _loggingService = loggingService;
-    }
+        if (connection is AS400ConnectionProvider as400)
+        {
+            return as400.GetDbCommand(queryResult, context);
+        }
 
-    /// <summary>
-    /// Abre la conexión si no está ya abierta.
-    /// </summary>
-    public void Open()
-    {
-        if (_oleDbConnection.State != System.Data.ConnectionState.Open)
-            _oleDbConnection.Open();
-    }
-
-    /// <summary>
-    /// Cierra la conexión si está abierta.
-    /// </summary>
-    public void Close()
-    {
-        if (_oleDbConnection.State != System.Data.ConnectionState.Closed)
-            _oleDbConnection.Close();
-    }
-
-    /// <summary>
-    /// Indica si la conexión está actualmente abierta.
-    /// </summary>
-    public bool IsConnected => _oleDbConnection?.State == System.Data.ConnectionState.Open;
-
-    /// <summary>
-    /// Obtiene un <see cref="DbCommand"/> decorado con soporte de logging estructurado.
-    /// </summary>
-    /// <param name="context">Contexto HTTP opcional para trazabilidad adicional.</param>
-    /// <returns>Comando decorado con logging.</returns>
-    public DbCommand GetDbCommand(HttpContext? context = null)
-    {
-        var command = _oleDbConnection.CreateCommand();
-        return new LoggingDbCommandWrapper(command, _loggingService); // ← El decorador correcto
-    }
-
-    /// <summary>
-    /// Libera los recursos de la conexión.
-    /// </summary>
-    public void Dispose()
-    {
-        _oleDbConnection?.Dispose();
+        throw new NotSupportedException("Este proveedor de conexión no soporta asignación automática desde QueryBuilder.");
     }
 }
