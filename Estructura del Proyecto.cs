@@ -1,3 +1,5 @@
+Así tengo actualmente la clase AS400ConnectionProvider, valida porque uso LoggingService, aunque aun no este funcional.
+
 using Connections.Interfaces;
 using Logging.Abstractions;
 using Logging.Decorators;
