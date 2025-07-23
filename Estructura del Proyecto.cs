@@ -1,20 +1,20 @@
-Con este codigo
-var query = QueryBuilder.Core.QueryBuilder
-    .From("USUADMIN", "BCAH96DTA")
-    .Select("TIPUSU", "ESTADO", "PASS")
-    .Where<USUADMIN>(x => (x.TIPUSU == "A" || x.TIPUSU == "B") && x.ESTADO != null)
-    .Build();
+private static string ParseExpression(Expression expr)
+{
+    return expr switch
+    {
+        BinaryExpression binary => ParseBinary(binary),
+        MethodCallExpression method => ParseMethodCall(method),
+        UnaryExpression unary => ParseUnary(unary),
+        MemberExpression member =>
+        {
+            if (member.Expression is ParameterExpression)
+                return member.Member.Name;
 
-Da este error:
+            var value = GetValue(member);
+            return FormatConstant(value);
+        },
+        ConstantExpression constant => FormatConstant(constant.Value),
+        _ => throw new NotSupportedException($"Expresión no soportada: {expr.NodeType}")
+    };
+}
 
-System.InvalidOperationException: 'variable 'x' of type 'CAUAdministracion.Models.USUADMIN' referenced from scope '', but it is not defined'
-
-    Y con este codigo
-
-    var query = QueryBuilder.Core.QueryBuilder
-    .From("USUADMIN", "BCAH96DTA")
-    .Select("TIPUSU", "ESTADO", "PASS")
-    .Where<USUADMIN>(c => c.USUARIO == username)
-    .Build();
-
-Genera así SELECT TIPUSU, ESTADO, PASS FROM BCAH96DTA.USUADMIN, en el cual hace falta el where, no se esta generando correctamente, hay que revisar lo que genera el where dentro de la libreria
