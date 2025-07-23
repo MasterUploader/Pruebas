@@ -11,9 +11,11 @@ public static class QueryBuilder
     /// Inicia la construcción de una consulta SELECT.
     /// </summary>
     /// <param name="tableName">Nombre de la tabla.</param>
-    public static SelectQueryBuilder From(string tableName)
+    /// <param name="library">Nombre opcional de la biblioteca (solo para AS400).</param>
+    /// <returns>Instancia de SelectQueryBuilder.</returns>
+    public static SelectQueryBuilder From(string tableName, string? library = null)
     {
-        return new SelectQueryBuilder(tableName);
+        return new SelectQueryBuilder(tableName, library);
     }
 }
 
@@ -25,22 +27,31 @@ using System.Text;
 namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Constructor para consultas SELECT dinámicas.
+/// Constructor especializado para generar consultas SELECT dinámicamente.
 /// </summary>
 public class SelectQueryBuilder
 {
-    private readonly string _tableName;
+    private readonly string _fullTableName;
     private readonly List<string> _columns = new();
     private string? _whereClause;
 
-    public SelectQueryBuilder(string tableName)
+    /// <summary>
+    /// Inicializa un nuevo generador SELECT para una tabla dada.
+    /// </summary>
+    /// <param name="tableName">Nombre de la tabla.</param>
+    /// <param name="library">Nombre opcional de la biblioteca (como CYBERDTA para AS400).</param>
+    public SelectQueryBuilder(string tableName, string? library = null)
     {
-        _tableName = tableName;
+        _fullTableName = string.IsNullOrWhiteSpace(library)
+            ? tableName
+            : $"{library}.{tableName}";
     }
 
     /// <summary>
-    /// Establece las columnas a seleccionar.
+    /// Define las columnas a seleccionar.
     /// </summary>
+    /// <param name="columns">Listado de columnas a incluir en el SELECT.</param>
+    /// <returns>Instancia de SelectQueryBuilder para encadenamiento.</returns>
     public SelectQueryBuilder Select(params string[] columns)
     {
         _columns.AddRange(columns);
@@ -48,8 +59,11 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Establece la cláusula WHERE mediante expresión lambda.
+    /// Agrega una cláusula WHERE a partir de una expresión lambda.
     /// </summary>
+    /// <typeparam name="T">Tipo del objeto que representa las columnas.</typeparam>
+    /// <param name="expression">Expresión condicional.</param>
+    /// <returns>Instancia de SelectQueryBuilder para encadenamiento.</returns>
     public SelectQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
     {
         _whereClause = LambdaWhereTranslator.Translate(expression);
@@ -57,14 +71,15 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Construye y retorna el SQL resultante.
+    /// Construye y retorna la consulta SQL final como un QueryResult.
     /// </summary>
+    /// <returns>Instancia de QueryResult con el SQL generado.</returns>
     public QueryResult Build()
     {
         var sb = new StringBuilder();
         sb.Append("SELECT ");
-        sb.Append(_columns.Any() ? string.Join(", ", _columns) : "*");
-        sb.Append(" FROM ").Append(_tableName);
+        sb.Append(_columns.Count > 0 ? string.Join(", ", _columns) : "*");
+        sb.Append(" FROM ").Append(_fullTableName);
 
         if (!string.IsNullOrWhiteSpace(_whereClause))
         {
@@ -77,86 +92,3 @@ public class SelectQueryBuilder
         };
     }
 }
-
-using System.Linq.Expressions;
-
-namespace QueryBuilder.Expressions;
-
-/// <summary>
-/// Traduce expresiones lambda a cláusulas WHERE SQL simples.
-/// </summary>
-public static class LambdaWhereTranslator
-{
-    public static string Translate(Expression expression)
-    {
-        return new SimpleLambdaParser().Parse(expression);
-    }
-
-    private class SimpleLambdaParser : ExpressionVisitor
-    {
-        private Stack<string> _stack = new();
-
-        public string Parse(Expression expression)
-        {
-            Visit(expression);
-            return _stack.Count > 0 ? _stack.Pop() : string.Empty;
-        }
-
-        protected override Expression VisitBinary(BinaryExpression node)
-        {
-            Visit(node.Left);
-            string left = _stack.Pop();
-
-            Visit(node.Right);
-            string right = _stack.Pop();
-
-            string op = node.NodeType switch
-            {
-                ExpressionType.Equal => "=",
-                ExpressionType.NotEqual => "<>",
-                ExpressionType.GreaterThan => ">",
-                ExpressionType.GreaterThanOrEqual => ">=",
-                ExpressionType.LessThan => "<",
-                ExpressionType.LessThanOrEqual => "<=",
-                ExpressionType.AndAlso => "AND",
-                ExpressionType.OrElse => "OR",
-                _ => throw new NotSupportedException($"Operador no soportado: {node.NodeType}")
-            };
-
-            _stack.Push($"({left} {op} {right})");
-            return node;
-        }
-
-        protected override Expression VisitMember(MemberExpression node)
-        {
-            _stack.Push(node.Member.Name);
-            return node;
-        }
-
-        protected override Expression VisitConstant(ConstantExpression node)
-        {
-            var value = node.Type == typeof(string) ? $"'{node.Value}'" : node.Value?.ToString() ?? "NULL";
-            _stack.Push(value);
-            return node;
-        }
-    }
-}
-
-namespace QueryBuilder.Models;
-
-/// <summary>
-/// Representa el resultado de una consulta generada.
-/// </summary>
-public class QueryResult
-{
-    /// <summary>
-    /// SQL generado.
-    /// </summary>
-    public string Sql { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Parámetros (para futuras versiones).
-    /// </summary>
-    public Dictionary<string, object?> Parameters { get; set; } = new();
-}
-
