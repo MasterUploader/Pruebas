@@ -8,39 +8,35 @@ using System.Text;
 namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Generador de sentencias INSERT compatibles con AS400 y otros motores.
-/// Permite insertar datos con VALUES, SELECT, IGNORE, condiciones NOT EXISTS y actualización en conflicto.
+/// Generador de sentencias UPDATE compatible con AS400 y otros motores.
+/// Permite definir columnas a actualizar, condiciones WHERE, expresiones CASE y subconsultas.
 /// </summary>
-public class InsertQueryBuilder
+public class UpdateQueryBuilder
 {
     private readonly string _tableName;
     private readonly string? _library;
-    private readonly List<string> _columns = [];
-    private readonly List<List<object?>> _rows = [];
-    private readonly List<List<object>> _values = [];
-    private SelectQueryBuilder? _selectSource;
-    private string? _comment;
+    private readonly Dictionary<string, object?> _setValues = new();
+    private readonly Dictionary<string, string> _setRawExpressions = new();
+    private readonly List<(string Column, string CaseExpression)> _setCaseExpressions = [];
     private string? _whereClause;
-    private bool _insertIgnore = false;
-    private readonly Dictionary<string, object?> _onDuplicateUpdate = [];
+    private string? _comment;
 
     /// <summary>
-    /// Inicializa una nueva instancia del constructor de sentencias INSERT.
+    /// Inicializa una nueva instancia de <see cref="UpdateQueryBuilder"/>.
     /// </summary>
-    /// <param name="tableName">Nombre de la tabla.</param>
+    /// <param name="tableName">Nombre de la tabla a actualizar.</param>
     /// <param name="library">Nombre de la librería o esquema (opcional).</param>
-    public InsertQueryBuilder(string tableName, string? library = null)
+    public UpdateQueryBuilder(string tableName, string? library = null)
     {
         _tableName = tableName;
         _library = library;
     }
 
     /// <summary>
-    /// Agrega un comentario SQL al inicio del INSERT para trazabilidad o debugging.
+    /// Agrega un comentario SQL al inicio de la consulta UPDATE.
     /// </summary>
     /// <param name="comment">Texto del comentario.</param>
-    /// <returns>Instancia modificada de <see cref="InsertQueryBuilder"/>.</returns>
-    public InsertQueryBuilder WithComment(string comment)
+    public UpdateQueryBuilder WithComment(string comment)
     {
         if (!string.IsNullOrWhiteSpace(comment))
             _comment = $"-- {comment}";
@@ -48,162 +44,119 @@ public class InsertQueryBuilder
     }
 
     /// <summary>
-    /// Indica que se debe usar INSERT IGNORE para omitir errores de duplicado (si lo permite el motor).
+    /// Establece el valor para una columna.
     /// </summary>
-    public InsertQueryBuilder InsertIgnore()
+    /// <param name="column">Nombre de la columna.</param>
+    /// <param name="value">Valor a asignar.</param>
+    public UpdateQueryBuilder Set(string column, object? value)
     {
-        _insertIgnore = true;
+        _setValues[column] = value;
         return this;
     }
 
     /// <summary>
-    /// Define columnas que deben actualizarse si hay conflicto de clave duplicada.
+    /// Establece un valor sin formato para una columna (por ejemplo: GETDATE()).
+    /// </summary>
+    /// <param name="column">Nombre de la columna.</param>
+    /// <param name="rawSql">Expresión SQL cruda.</param>
+    public UpdateQueryBuilder SetRaw(string column, string rawSql)
+    {
+        _setRawExpressions[column] = rawSql;
+        return this;
+    }
+
+    /// <summary>
+    /// Establece una expresión CASE WHEN como valor de una columna.
     /// </summary>
     /// <param name="column">Columna a actualizar.</param>
-    /// <param name="value">Nuevo valor para la columna.</param>
-    public InsertQueryBuilder OnDuplicateKeyUpdate(string column, object? value)
+    /// <param name="caseExpression">Expresión CASE generada con <see cref="CaseWhenBuilder"/>.</param>
+    public UpdateQueryBuilder SetCase(string column, string caseExpression)
     {
-        _onDuplicateUpdate[column] = value;
+        _setCaseExpressions.Add((column, caseExpression));
         return this;
     }
 
     /// <summary>
-    /// Define múltiples columnas para actualizar en caso de duplicado.
+    /// Agrega una cláusula WHERE.
     /// </summary>
-    /// <param name="updates">Diccionario de columna y valor a asignar.</param>
-    public InsertQueryBuilder OnDuplicateKeyUpdate(Dictionary<string, object?> updates)
+    /// <param name="clause">Condición completa.</param>
+    public UpdateQueryBuilder Where(string clause)
     {
-        foreach (var kvp in updates)
-            _onDuplicateUpdate[kvp.Key] = kvp.Value;
+        if (string.IsNullOrWhiteSpace(_whereClause))
+            _whereClause = clause;
+        else
+            _whereClause += $" AND {clause}";
 
         return this;
     }
 
     /// <summary>
-    /// Define las columnas que se desean insertar.
+    /// Agrega una cláusula WHERE con expresión CASE WHEN.
     /// </summary>
-    /// <param name="columns">Nombres de las columnas.</param>
-    /// <returns>Instancia modificada del builder.</returns>
-    public InsertQueryBuilder IntoColumns(params string[] columns)
+    /// <param name="caseBuilder">Builder de CASE WHEN.</param>
+    /// <param name="comparison">Comparación final (ej: = 1).</param>
+    public UpdateQueryBuilder WhereCase(CaseWhenBuilder caseBuilder, string comparison)
     {
-        _columns.Clear();
-        _columns.AddRange(columns);
-        return this;
+        var condition = $"{caseBuilder.Build()} {comparison}";
+        return Where(condition);
     }
 
     /// <summary>
-    /// Agrega una fila de valores para insertar.
-    /// El orden debe coincidir con el de las columnas definidas en <see cref="IntoColumns"/>.
+    /// Agrega una cláusula WHERE EXISTS con una subconsulta.
     /// </summary>
-    /// <param name="values">Valores a insertar en una fila.</param>
-    /// <returns>Instancia modificada del builder.</returns>
-    public InsertQueryBuilder Values(params object?[] values)
+    /// <param name="subquery">Subconsulta a evaluar.</param>
+    public UpdateQueryBuilder WhereExists(Subquery subquery)
     {
-        if (values.Length != _columns.Count)
-            throw new InvalidOperationException($"Se esperaban {_columns.Count} valores, pero se recibieron {values.Length}.");
-
-        _rows.Add(values.ToList());
-        return this;
+        return Where($"EXISTS ({subquery.Sql})");
     }
 
     /// <summary>
-    /// Agrega una fila de valores sin formato automático, útil para funciones como GETDATE().
+    /// Agrega una cláusula WHERE NOT EXISTS con una subconsulta.
     /// </summary>
-    /// <param name="values">Valores SQL en crudo, como funciones o expresiones directas.</param>
-    /// <returns>Instancia modificada del builder.</returns>
-    public InsertQueryBuilder ValuesRaw(params string[] values)
+    /// <param name="subquery">Subconsulta a evaluar.</param>
+    public UpdateQueryBuilder WhereNotExists(Subquery subquery)
     {
-        _values.Add(values.Cast<object>().ToList());
-        return this;
+        return Where($"NOT EXISTS ({subquery.Sql})");
     }
 
     /// <summary>
-    /// Define una subconsulta SELECT como fuente de datos a insertar.
-    /// Anula el uso de valores directos.
-    /// </summary>
-    /// <param name="select">Instancia de <see cref="SelectQueryBuilder"/> que genera el SELECT.</param>
-    public InsertQueryBuilder FromSelect(SelectQueryBuilder select)
-    {
-        _selectSource = select;
-        _values.Clear(); // Se eliminan valores si se usa FROM SELECT
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula WHERE NOT EXISTS con una subconsulta, aplicable en INSERT ... SELECT.
-    /// </summary>
-    /// <param name="subquery">Subconsulta a evaluar en NOT EXISTS.</param>
-    /// <returns>Instancia modificada de <see cref="InsertQueryBuilder"/>.</returns>
-    public InsertQueryBuilder WhereNotExists(Subquery subquery)
-    {
-        _whereClause = $"NOT EXISTS ({subquery.Sql})";
-        return this;
-    }
-
-    /// <summary>
-    /// Construye y retorna la consulta INSERT generada.
+    /// Construye y retorna el SQL generado.
     /// </summary>
     public QueryResult Build()
     {
-        // Validaciones básicas
         if (string.IsNullOrWhiteSpace(_tableName))
-            throw new InvalidOperationException("Debe especificarse el nombre de la tabla para INSERT.");
+            throw new InvalidOperationException("Debe especificarse el nombre de la tabla para UPDATE.");
 
-        if (_columns.Count == 0)
-            throw new InvalidOperationException("Debe especificar al menos una columna para el INSERT.");
-
-        if (_selectSource != null && _values.Count > 0)
-            throw new InvalidOperationException("No se puede usar 'VALUES' y 'FROM SELECT' al mismo tiempo.");
-
-        if (_selectSource == null && _values.Count == 0)
-            throw new InvalidOperationException("Debe especificar al menos una fila de valores para el INSERT.");
-
-        foreach (var fila in _values)
-        {
-            if (fila.Count != _columns.Count)
-                throw new InvalidOperationException($"El número de valores ({fila.Count}) no coincide con las columnas ({_columns.Count}).");
-        }
+        if (_setValues.Count == 0 && _setRawExpressions.Count == 0 && _setCaseExpressions.Count == 0)
+            throw new InvalidOperationException("Debe definir al menos una columna a actualizar con SET.");
 
         var sb = new StringBuilder();
 
-        // Comentario si se agregó
         if (!string.IsNullOrWhiteSpace(_comment))
             sb.AppendLine(_comment);
 
-        // Cláusula INSERT INTO
-        sb.Append("INSERT ");
-        if (_insertIgnore) sb.Append("IGNORE ");
-        sb.Append("INTO ");
+        sb.Append("UPDATE ");
         if (!string.IsNullOrWhiteSpace(_library))
             sb.Append($"{_library}.");
         sb.Append(_tableName);
-        sb.Append(" (");
-        sb.Append(string.Join(", ", _columns));
-        sb.Append(")");
 
-        // Cuerpo: VALUES o SELECT
-        if (_selectSource != null)
-        {
-            sb.AppendLine();
-            sb.Append(_selectSource.Build().Sql);
-            if (!string.IsNullOrWhiteSpace(_whereClause))
-                sb.Append($" WHERE {_whereClause}");
-        }
-        else
-        {
-            var valuesSql = _values
-                .Select(row => $"({string.Join(", ", row.Select(SqlHelper.FormatValue))})");
-            sb.Append(" VALUES ");
-            sb.Append(string.Join(", ", valuesSql));
-        }
+        sb.Append(" SET ");
 
-        // ON DUPLICATE KEY UPDATE
-        if (_onDuplicateUpdate.Count > 0)
-        {
-            sb.Append(" ON DUPLICATE KEY UPDATE ");
-            sb.Append(string.Join(", ", _onDuplicateUpdate.Select(kv =>
-                $"{kv.Key} = {SqlHelper.FormatValue(kv.Value)}")));
-        }
+        var setParts = new List<string>();
+
+        foreach (var (col, val) in _setValues)
+            setParts.Add($"{col} = {SqlHelper.FormatValue(val)}");
+
+        foreach (var (col, sql) in _setRawExpressions)
+            setParts.Add($"{col} = {sql}");
+
+        foreach (var (col, caseExp) in _setCaseExpressions)
+            setParts.Add($"{col} = {caseExp}");
+
+        sb.Append(string.Join(", ", setParts));
+
+        if (!string.IsNullOrWhiteSpace(_whereClause))
+            sb.Append($" WHERE {_whereClause}");
 
         return new QueryResult
         {
