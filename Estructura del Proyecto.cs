@@ -1,7 +1,6 @@
-var rowsObj = command.ExecuteNonQuery();
-if (rowsObj is not int rows)
-{
-    throw new InvalidOperationException("ExecuteNonQuery no devolvió un valor entero válido.");
-}
-
-return rows > 0;
+Console.WriteLine($"Codcco: {agencia.Codcco}");
+Console.WriteLine($"NomAge: {agencia.NomAge}");
+Console.WriteLine($"Zona: {agencia.Zona}");
+Console.WriteLine($"NomBD: {agencia.NomBD}");
+Console.WriteLine($"NomSer: {agencia.NomSer}");
+Console.WriteLine($"IpSer: {agencia.IpSer}");
