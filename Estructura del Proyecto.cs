@@ -1,35 +1,37 @@
-var query = QueryBuilder.Core.QueryBuilder
-    .From("USUADMIN", "BCAH96DTA")
-    .Select(("USUARIO", "User"), ("TIPUSU", "Type"))
-    .Distinct()
-    .Build();
+namespace QueryBuilder.Helpers;
 
+/// <summary>
+/// Representa funciones SQL agregadas como COUNT, SUM, etc.
+/// </summary>
+public static class SqlFunction
+{
+    /// <summary>
+    /// Devuelve COUNT(columna).
+    /// </summary>
+    public static (string Column, string? Alias) Count(string column, string? alias = null) =>
+        ($"COUNT({column})", alias);
 
-var query = QueryBuilder.Core.QueryBuilder
-    .From("LOGS", "APPDTA")
-    .Select(("TIPO", "TipoEvento"), ("COUNT(*)", "Cantidad"))
-    .GroupBy("TIPO")
-    .Build();
+    /// <summary>
+    /// Devuelve SUM(columna).
+    /// </summary>
+    public static (string Column, string? Alias) Sum(string column, string? alias = null) =>
+        ($"SUM({column})", alias);
 
-var query = QueryBuilder.Core.QueryBuilder
-    .From("VENTAS", "COMDTA")
-    .Select(("VENDEDOR", "Empleado"), ("SUM(TOTAL)", "TotalVentas"))
-    .GroupBy("VENDEDOR")
-    .Having<dynamic>(v => v.TotalVentas > 10000)
-    .Build();
+    /// <summary>
+    /// Devuelve AVG(columna).
+    /// </summary>
+    public static (string Column, string? Alias) Avg(string column, string? alias = null) =>
+        ($"AVG({column})", alias);
 
-var query = QueryBuilder.Core.QueryBuilder
-    .From("CLIENTES", "VENTASDTA")
-    .Select("NOMBRE", "FECHAREGISTRO")
-    .OrderBy(("FECHAREGISTRO", SortDirection.Desc), ("NOMBRE", SortDirection.Asc))
-    .Build();
+    /// <summary>
+    /// Devuelve MIN(columna).
+    /// </summary>
+    public static (string Column, string? Alias) Min(string column, string? alias = null) =>
+        ($"MIN({column})", alias);
 
-var query = QueryBuilder.Core.QueryBuilder
-    .From("PEDIDOS", "VENTASDTA")
-    .Select(("C.CLIENTEID", "ClienteId"), ("COUNT(P.ID)", "TotalPedidos"))
-    .As("P")
-    .Join("CLIENTES", "VENTASDTA", "C", "P.CLIENTEID", "C.ID")
-    .GroupBy("C.CLIENTEID")
-    .Having<dynamic>(x => x.TotalPedidos >= 5)
-    .OrderBy(("TotalPedidos", SortDirection.Desc))
-    .Build();
+    /// <summary>
+    /// Devuelve MAX(columna).
+    /// </summary>
+    public static (string Column, string? Alias) Max(string column, string? alias = null) =>
+        ($"MAX({column})", alias);
+}
