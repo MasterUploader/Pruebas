@@ -9,7 +9,8 @@ namespace QueryBuilder.Builders;
 
 /// <summary>
 /// Generador de sentencias INSERT compatibles con AS400 y otros motores.
-/// Permite insertar en una tabla simple, con valores directos sin parámetros.
+/// Permite insertar en una tabla simple, con valores directos o desde un SELECT.
+/// Soporta múltiples filas, cláusulas WITH y condiciones opcionales.
 /// </summary>
 public class InsertQueryBuilder
 {
@@ -18,9 +19,21 @@ public class InsertQueryBuilder
     private readonly List<string> _columns = [];
     private readonly List<List<object?>> _rows = [];
     private readonly List<List<object>> _values = [];
+    private readonly List<CommonTableExpression> _ctes = [];
     private SelectQueryBuilder? _selectSource;
     private string? _comment;
     private string? _whereClause;
+
+    /// <summary>
+    /// Inicializa una nueva instancia del constructor de sentencias INSERT.
+    /// </summary>
+    /// <param name="tableName">Nombre de la tabla.</param>
+    /// <param name="library">Nombre de la librería o esquema (opcional).</param>
+    public InsertQueryBuilder(string tableName, string? library = null)
+    {
+        _tableName = tableName;
+        _library = library;
+    }
 
     /// <summary>
     /// Agrega un comentario SQL al inicio del INSERT para trazabilidad o debugging.
@@ -35,35 +48,13 @@ public class InsertQueryBuilder
     }
 
     /// <summary>
-    /// Inicializa una nueva instancia del constructor de sentencias INSERT.
+    /// Agrega una o varias expresiones CTE a la consulta.
     /// </summary>
-    /// <param name="tableName">Nombre de la tabla.</param>
-    /// <param name="library">Nombre de la librería o esquema (opcional).</param>
-    public InsertQueryBuilder(string tableName, string? library = null)
+    /// <param name="ctes">CTEs a incluir en la cláusula WITH.</param>
+    /// <returns>Instancia modificada del builder.</returns>
+    public InsertQueryBuilder WithCte(params CommonTableExpression[] ctes)
     {
-        _tableName = tableName;
-        _library = library;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula WHERE NOT EXISTS con una subconsulta, aplicable en INSERT ... SELECT.
-    /// </summary>
-    /// <param name="subquery">Subconsulta a evaluar en NOT EXISTS.</param>
-    /// <returns>Instancia modificada de <see cref="InsertQueryBuilder"/>.</returns>
-    public InsertQueryBuilder WhereNotExists(Subquery subquery)
-    {
-        _whereClause = $"NOT EXISTS ({subquery.Sql})";
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una fila de valores sin formato automático, útil para funciones como GETDATE().
-    /// </summary>
-    /// <param name="values">Valores SQL en crudo, como funciones o expresiones directas.</param>
-    /// <returns>Instancia modificada de <see cref="InsertQueryBuilder"/>.</returns>
-    public InsertQueryBuilder ValuesRaw(params string[] values)
-    {
-        _values.Add(values.Cast<object>().ToList());
+        _ctes.AddRange(ctes);
         return this;
     }
 
@@ -90,11 +81,20 @@ public class InsertQueryBuilder
         if (values.Length != _columns.Count)
             throw new InvalidOperationException($"Se esperaban {_columns.Count} valores, pero se recibieron {values.Length}.");
 
-        _rows.Add(values.ToList());
+        _values.Add(values.Cast<object>().ToList());
         return this;
     }
 
-    
+    /// <summary>
+    /// Agrega una fila de valores sin formato automático, útil para funciones como GETDATE().
+    /// </summary>
+    /// <param name="values">Valores SQL en crudo, como funciones o expresiones directas.</param>
+    /// <returns>Instancia modificada de <see cref="InsertQueryBuilder"/>.</returns>
+    public InsertQueryBuilder ValuesRaw(params string[] values)
+    {
+        _values.Add(values.Cast<object>().ToList());
+        return this;
+    }
 
     /// <summary>
     /// Define una subconsulta SELECT como fuente de datos a insertar.
@@ -109,11 +109,22 @@ public class InsertQueryBuilder
     }
 
     /// <summary>
+    /// Agrega una cláusula WHERE NOT EXISTS con una subconsulta, aplicable en INSERT ... SELECT.
+    /// </summary>
+    /// <param name="subquery">Subconsulta a evaluar en NOT EXISTS.</param>
+    /// <returns>Instancia modificada de <see cref="InsertQueryBuilder"/>.</returns>
+    public InsertQueryBuilder WhereNotExists(Subquery subquery)
+    {
+        _whereClause = $"NOT EXISTS ({subquery.Sql})";
+        return this;
+    }
+
+    /// <summary>
     /// Construye y retorna la consulta INSERT generada.
     /// </summary>
+    /// <returns>Objeto <see cref="QueryResult"/> con la sentencia SQL generada.</returns>
     public QueryResult Build()
     {
-        // Validaciones básicas
         if (string.IsNullOrWhiteSpace(_tableName))
             throw new InvalidOperationException("Debe especificarse el nombre de la tabla para INSERT.");
 
@@ -140,22 +151,27 @@ public class InsertQueryBuilder
         if (!string.IsNullOrWhiteSpace(_comment))
             sb.AppendLine(_comment);
 
-        // Parte inicial del INSERT
+        if (_ctes.Count > 0)
+        {
+            sb.Append("WITH ");
+            sb.AppendLine(string.Join(", ", _ctes.Select(c => $"{c.Name} AS ({c.Query})")));
+        }
+
         sb.Append($"INSERT INTO {_tableName} (");
         sb.Append(string.Join(", ", _columns));
-        sb.Append(")");
-
+        sb.AppendLine(")");
 
         if (_selectSource != null)
         {
-            sb.AppendLine();
             sb.Append(_selectSource.Build().Sql);
+            if (!string.IsNullOrWhiteSpace(_whereClause))
+                sb.AppendLine($" WHERE {_whereClause}");
         }
         else
         {
             var valuesSql = _values
                 .Select(row => $"({string.Join(", ", row.Select(SqlHelper.FormatValue))})");
-            sb.Append(" VALUES ");
+            sb.Append("VALUES ");
             sb.Append(string.Join(", ", valuesSql));
         }
 
