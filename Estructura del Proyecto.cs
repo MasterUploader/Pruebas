@@ -1,29 +1,40 @@
-Me genero este sql, que esta bien porque lo probe desde otro programa
+Hice el cambio de esta forma
 
-UPDATE BCAH96DTA.RSAGE01 SET NOMAGE = 'General',ZONA = '1',MARQUESINA = 'SI',RSTBRANCH = 'SI',NOMBD = 'Prueba',NOMSER = 'Prueba',IPSER = '127.0.1.1' WHERE (CODCCO = 0)
+ /// <summary>
+ /// Actualiza los datos de una agencia existente.
+ /// </summary>
+ public bool ActualizarAgencia(AgenciaModel agencia)
+ {
+     try
+     {
+         _as400.Open();
 
-  Pero tengo un error
-System.NullReferenceException: 'Object reference not set to an instance of an object.'
-  
-  En esta linea
-  return command.ExecuteNonQuery() > 0;
+         //Construimos el Query
+         var query = new UpdateQueryBuilder("RSAGE01", "BCAH96DTA")
+             .Set("NOMAGE", agencia.NomAge)
+             .Set("ZONA", agencia.Zona)
+             .Set("MARQUESINA", agencia.Marquesina)
+             .Set("RSTBRANCH", agencia.RstBranch)
+             .Set("NOMBD", agencia.NomBD)
+             .Set("NOMSER", agencia.NomSer)
+             .Set("IPSER", agencia.IpSer)
+             .Where<RSAGE01>(x => x.CODCCO == agencia.Codcco)
+             .Build();
 
-Este es el codigo
-_as400.Open();
+         using var command = _as400.GetDbCommand(_httpContextAccessor.HttpContext!);
+         command.CommandText = query.Sql;
+       
+         var rows = command.ExecuteNonQuery();
 
-//Construimos el Query
-var query = new UpdateQueryBuilder("RSAGE01", "BCAH96DTA")
-    .Set("NOMAGE", agencia.NomAge)
-    .Set("ZONA", agencia.Zona)
-    .Set("MARQUESINA", agencia.Marquesina)
-    .Set("RSTBRANCH", agencia.RstBranch)
-    .Set("NOMBD", agencia.NomBD)
-    .Set("NOMSER", agencia.NomSer)
-    .Set("IPSER", agencia.IpSer)
-    .Where<RSAGE01>(x => x.CODCCO == agencia.Codcco)
-    .Build();
+         return rows > 0; 
+     }
+     finally
+     {
+         _as400.Close();
+     }
+ }
+En esta linea me dice rows = 1
+var rows = command.ExecuteNonQuery();
 
-using var command = _as400.GetDbCommand(_httpContextAccessor.HttpContext!);
-command.CommandText = query.Sql;
-
-return command.ExecuteNonQuery() > 0;
+Pero al evaluar me da el error
+ return rows > 0; 
