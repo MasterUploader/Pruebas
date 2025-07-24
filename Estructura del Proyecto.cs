@@ -1,30 +1,51 @@
 /// <summary>
-/// Agrega una o varias expresiones CASE WHEN al SELECT.
+/// Agrega una cláusula WHERE basada en una expresión CASE WHEN (como string).
 /// </summary>
-/// <param name="caseColumns">
-/// Tuplas donde el primer valor es la expresión CASE WHEN generada por <see cref="CaseWhenBuilder"/>,
-/// y el segundo valor es el alias de la columna.
-/// </param>
+/// <param name="caseWhenCondition">Expresión CASE WHEN seguida de condición, e.g., "CASE WHEN ... END = 'X'"</param>
 /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-public SelectQueryBuilder SelectCase(params (string ColumnSql, string? Alias)[] caseColumns)
+public SelectQueryBuilder WhereCase(string caseWhenCondition)
 {
-    foreach (var (column, alias) in caseColumns)
-    {
-        _columns.Add((column, alias));
-        if (!string.IsNullOrWhiteSpace(alias))
-            _aliasMap[column] = alias;
-    }
-
+    if (string.IsNullOrWhiteSpace(WhereClause))
+        WhereClause = caseWhenCondition;
+    else
+        WhereClause += $" AND {caseWhenCondition}";
     return this;
 }
 
-var query = QueryBuilder.Core.QueryBuilder
-    .From("USUADMIN", "BCAH96DTA")
-    .Select("USUARIO", "TIPUSU")
-    .SelectCase(
-        CaseWhenBuilder.Build(cb => cb
-            .When<USUADMIN>(x => x.TIPUSU == "A").Then("'Administrador'")
-            .When<USUADMIN>(x => x.TIPUSU == "U").Then("'Usuario'")
-            .Else("'Otro'"), "DESCRIPCION")
-    )
-    .Build();
+/// <summary>
+/// Agrega una cláusula WHERE basada en una expresión CASE WHEN generada desde <see cref="CaseWhenBuilder"/>.
+/// </summary>
+/// <typeparam name="T">Tipo de entidad usado en la expresión.</typeparam>
+/// <param name="caseWhenBuilder">Constructor CASE WHEN.</param>
+/// <param name="condition">Condición a aplicar sobre la expresión CASE WHEN. Ej: " = 'X'"</param>
+/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+public SelectQueryBuilder WhereCase<T>(CaseWhenBuilder<T> caseWhenBuilder, string condition)
+{
+    return WhereCase($"{caseWhenBuilder.Build()} {condition}");
+}
+
+/// <summary>
+/// Agrega una cláusula HAVING basada en una expresión CASE WHEN (como string).
+/// </summary>
+/// <param name="caseWhenCondition">Expresión CASE WHEN seguida de condición.</param>
+/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+public SelectQueryBuilder HavingCase(string caseWhenCondition)
+{
+    if (string.IsNullOrWhiteSpace(HavingClause))
+        HavingClause = caseWhenCondition;
+    else
+        HavingClause += $" AND {caseWhenCondition}";
+    return this;
+}
+
+/// <summary>
+/// Agrega una cláusula HAVING basada en un CASE WHEN generado desde <see cref="CaseWhenBuilder"/>.
+/// </summary>
+/// <typeparam name="T">Tipo de entidad usado en la expresión.</typeparam>
+/// <param name="caseWhenBuilder">Constructor CASE WHEN.</param>
+/// <param name="condition">Condición a aplicar sobre la expresión CASE WHEN.</param>
+/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+public SelectQueryBuilder HavingCase<T>(CaseWhenBuilder<T> caseWhenBuilder, string condition)
+{
+    return HavingCase($"{caseWhenBuilder.Build()} {condition}");
+}
