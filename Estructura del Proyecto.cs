@@ -1,48 +1,54 @@
+namespace QueryBuilder.Models;
+
 /// <summary>
-/// Agrega una cláusula HAVING EXISTS con una subconsulta.
+/// Representa una expresión de tabla común (CTE) para consultas SQL.
 /// </summary>
-/// <param name="subquery">Subconsulta que se evaluará con EXISTS.</param>
-/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-public SelectQueryBuilder HavingExists(Subquery subquery)
+public class CommonTableExpression
 {
-    if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
-        return this;
+    /// <summary>
+    /// Nombre de la CTE.
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
 
-    var clause = $"EXISTS ({subquery.Sql})";
+    /// <summary>
+    /// Sentencia SQL de la subconsulta que define la CTE.
+    /// </summary>
+    public string Sql { get; set; } = string.Empty;
 
-    if (string.IsNullOrWhiteSpace(HavingClause))
-        HavingClause = clause;
-    else
-        HavingClause += $" AND {clause}";
+    /// <summary>
+    /// Devuelve la representación SQL de la CTE.
+    /// </summary>
+    public override string ToString()
+    {
+        return $"{Name} AS ({Sql})";
+    }
+}
+
+private readonly List<CommonTableExpression> _ctes = new();
+
+
+
+/// <summary>
+/// Agrega una o más expresiones CTE a la consulta.
+/// </summary>
+/// <param name="ctes">CTEs a incluir en la cláusula WITH.</param>
+/// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
+public SelectQueryBuilder With(params CommonTableExpression[] ctes)
+{
+    if (ctes != null && ctes.Length > 0)
+        _ctes.AddRange(ctes);
 
     return this;
 }
 
-/// <summary>
-/// Agrega una cláusula HAVING NOT EXISTS con una subconsulta.
-/// </summary>
-/// <param name="subquery">Subconsulta que se evaluará con NOT EXISTS.</param>
-/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-public SelectQueryBuilder HavingNotExists(Subquery subquery)
+var cte = new CommonTableExpression
 {
-    if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
-        return this;
-
-    var clause = $"NOT EXISTS ({subquery.Sql})";
-
-    if (string.IsNullOrWhiteSpace(HavingClause))
-        HavingClause = clause;
-    else
-        HavingClause += $" AND {clause}";
-
-    return this;
-}
-
-var subquery = new Subquery("SELECT 1 FROM LOGS L WHERE L.USERID = U.USERID");
+    Name = "UsuariosActivos",
+    Sql = "SELECT USUARIO, ESTADO FROM USUADMIN WHERE ESTADO = 'A'"
+};
 
 var query = QueryBuilder.Core.QueryBuilder
-    .From("USUARIOS", "MYLIB")
-    .Select("USERID", "NOMBRE")
-    .GroupBy("USERID", "NOMBRE")
-    .HavingExists(subquery)
+    .From("UsuariosActivos")
+    .With(cte)
+    .Select("USUARIO", "ESTADO")
     .Build();
