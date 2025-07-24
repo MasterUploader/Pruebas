@@ -1,51 +1,85 @@
+namespace QueryBuilder.Models;
+
 /// <summary>
-/// Agrega una cláusula HAVING con una expresión CASE WHEN directamente como string.
-/// Ejemplo: "CASE WHEN SUM(CANTIDAD) > 10 THEN 1 ELSE 0 END = 1"
+/// Representa una subconsulta SQL utilizada como columna o tabla derivada.
 /// </summary>
-/// <param name="sqlCaseCondition">Expresión CASE completa en SQL.</param>
-public SelectQueryBuilder HavingCase(string sqlCaseCondition)
+public class Subquery
 {
-    if (string.IsNullOrWhiteSpace(sqlCaseCondition))
-        return this;
+    /// <summary>
+    /// SQL generado por un SelectQueryBuilder anidado.
+    /// </summary>
+    public string Sql { get; }
 
-    if (string.IsNullOrWhiteSpace(HavingClause))
-        HavingClause = sqlCaseCondition;
-    else
-        HavingClause += $" AND {sqlCaseCondition}";
+    /// <summary>
+    /// Alias de la subconsulta (si aplica).
+    /// </summary>
+    public string? Alias { get; }
 
-    return this;
+    public Subquery(string sql, string? alias = null)
+    {
+        Sql = sql;
+        Alias = alias;
+    }
+
+    public override string ToString() => Alias is null ? $"({Sql})" : $"({Sql}) {Alias}";
 }
 
 /// <summary>
-/// Agrega una cláusula HAVING con una expresión CASE WHEN generada con <see cref="CaseWhenBuilder"/>.
+/// Agrega una subconsulta como una columna seleccionada.
 /// </summary>
-/// <param name="caseBuilder">Builder de CASE WHEN.</param>
-/// <param name="comparison">Comparación adicional (ej: "= 1").</param>
-public SelectQueryBuilder HavingCase(CaseWhenBuilder caseBuilder, string comparison)
+/// <param name="subquery">Subconsulta construida previamente.</param>
+/// <param name="alias">Alias de la columna resultante.</param>
+public SelectQueryBuilder Select(Subquery subquery, string alias)
 {
-    if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison))
-        return this;
-
-    string expression = $"{caseBuilder.Build()} {comparison}";
-
-    if (string.IsNullOrWhiteSpace(HavingClause))
-        HavingClause = expression;
-    else
-        HavingClause += $" AND {expression}";
-
+    _columns.Add(($"({subquery.Sql})", alias));
     return this;
 }
+private readonly Subquery? _derivedTable;
 
-builder
-    .GroupBy("TIPO")
-    .HavingCase("CASE WHEN COUNT(*) > 3 THEN 1 ELSE 0 END = 1");
+/// <summary>
+/// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/> con una tabla derivada.
+/// </summary>
+/// <param name="derivedTable">Subconsulta que actúa como tabla.</param>
+public SelectQueryBuilder(Subquery derivedTable)
+{
+    _derivedTable = derivedTable;
+}
 
-builder
-    .GroupBy("TIPO")
-    .HavingCase(
-        CaseWhenBuilder
-            .When("SUM(CANTIDAD) > 10")
-            .Then("1")
-            .Else("0"),
-        "= 1"
-    );
+sb.Append(" FROM ");
+if (_derivedTable != null)
+{
+    sb.Append(_derivedTable.ToString());
+}
+else
+{
+    if (!string.IsNullOrWhiteSpace(_library))
+        sb.Append($"{_library}.");
+    sb.Append(_tableName);
+    if (!string.IsNullOrWhiteSpace(_tableAlias))
+        sb.Append($" {_tableAlias}");
+}
+
+var subTotal = new SelectQueryBuilder("DETALLES", "BCAH96DTA")
+    .Select("SUM(MONTO)")
+    .Where<DETALLES>(x => x.USUARIO == "admin")
+    .Build();
+
+var subqueryCol = new Subquery(subTotal.Sql);
+
+var query = new SelectQueryBuilder("USUADMIN", "BCAH96DTA")
+    .Select("USUARIO")
+    .Select(subqueryCol, "TOTAL_MONTO")
+    .Build();
+
+var subquery = new Subquery(
+    new SelectQueryBuilder("VENTAS", "BCAH96DTA")
+        .Select("AGENTE", "SUM(MONTO) AS TOTAL")
+        .GroupBy("AGENTE")
+        .Build().Sql,
+    "V" // Alias de la tabla derivada
+);
+
+var query = new SelectQueryBuilder(subquery)
+    .Select("AGENTE", "TOTAL")
+    .WhereRaw("TOTAL > 10000")
+    .Build();
