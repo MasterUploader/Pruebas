@@ -1,46 +1,6 @@
-namespace QueryBuilder.Helpers;
-
-/// <summary>
-/// Representa funciones SQL agregadas como COUNT, SUM, etc.
-/// </summary>
-public static class SqlFunction
-{
-    /// <summary>
-    /// Devuelve COUNT(columna).
-    /// </summary>
-    public static (string Column, string? Alias) Count(string column, string? alias = null) =>
-        ($"COUNT({column})", alias);
-
-    /// <summary>
-    /// Devuelve SUM(columna).
-    /// </summary>
-    public static (string Column, string? Alias) Sum(string column, string? alias = null) =>
-        ($"SUM({column})", alias);
-
-    /// <summary>
-    /// Devuelve AVG(columna).
-    /// </summary>
-    public static (string Column, string? Alias) Avg(string column, string? alias = null) =>
-        ($"AVG({column})", alias);
-
-    /// <summary>
-    /// Devuelve MIN(columna).
-    /// </summary>
-    public static (string Column, string? Alias) Min(string column, string? alias = null) =>
-        ($"MIN({column})", alias);
-
-    /// <summary>
-    /// Devuelve MAX(columna).
-    /// </summary>
-    public static (string Column, string? Alias) Max(string column, string? alias = null) =>
-        ($"MAX({column})", alias);
-}
-
-
 using QueryBuilder.Enums;
-using QueryBuilder.Expressions;
 using QueryBuilder.Models;
-using QueryBuilder.Helpers;
+using QueryBuilder.Translators;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -51,28 +11,28 @@ namespace QueryBuilder.Builders;
 
 /// <summary>
 /// Generador de consultas SELECT compatible con AS400.
-/// Soporta alias, ORDER BY, FETCH FIRST, GROUP BY y HAVING.
+/// Soporta DISTINCT, alias, JOINs, ORDER BY, GROUP BY y funciones agregadas.
 /// </summary>
 public class SelectQueryBuilder
 {
     internal string? WhereClause { get; set; }
+    internal string? HavingClause { get; set; }
 
     private readonly string _tableName;
     private readonly string? _library;
     private string? _tableAlias;
+    private string _havingClause;
     private readonly List<(string Column, string? Alias)> _columns = [];
-    private string? _whereClause;
     private readonly List<string> _orderBy = [];
-    private int? _limit;
-    private readonly List<JoinClause> _joins = [];
     private readonly List<string> _groupBy = [];
-    private string? _havingClause;
+    private readonly List<JoinClause> _joins = [];
+
+    private int? _limit;
+    private bool _distinct = false;
 
     /// <summary>
     /// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/>.
     /// </summary>
-    /// <param name="tableName">Nombre de la tabla.</param>
-    /// <param name="library">Nombre de la librería en AS400 (opcional).</param>
     public SelectQueryBuilder(string tableName, string? library = null)
     {
         _tableName = tableName;
@@ -80,7 +40,16 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Define un alias para la tabla principal.
+    /// Indica que se desea una consulta SELECT DISTINCT.
+    /// </summary>
+    public SelectQueryBuilder Distinct()
+    {
+        _distinct = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Define un alias para la tabla.
     /// </summary>
     public SelectQueryBuilder As(string alias)
     {
@@ -99,7 +68,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Define columnas con alias mediante tuplas (Columna, Alias).
+    /// Define columnas con alias.
     /// </summary>
     public SelectQueryBuilder Select(params (string Column, string Alias)[] columns)
     {
@@ -109,10 +78,8 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Agrega una condición WHERE a la consulta usando expresiones lambda.
+    /// Agrega una condición WHERE.
     /// </summary>
-    /// <typeparam name="T">Tipo de entidad.</typeparam>
-    /// <param name="expression">Expresión booleana.</param>
     public SelectQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
     {
         LambdaWhereTranslator.Translate(this, expression);
@@ -120,26 +87,25 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Ordena por una sola columna.
+    /// Agrega una condición HAVING.
     /// </summary>
-    public SelectQueryBuilder OrderBy(string column, SortDirection direction = SortDirection.Asc)
+    public SelectQueryBuilder Having<T>(Expression<Func<T, bool>> expression)
     {
-        _orderBy.Add($"{column} {direction.ToString().ToUpper()}");
+        LambdaHavingTranslator.Translate(this, expression);
         return this;
     }
 
     /// <summary>
-    /// Ordena por múltiples columnas con dirección individual.
+    /// Establece las columnas para agrupar (GROUP BY).
     /// </summary>
-    public SelectQueryBuilder OrderBy(params (string Column, SortDirection Direction)[] columns)
+    public SelectQueryBuilder GroupBy(params string[] columns)
     {
-        foreach (var (column, direction) in columns)
-            _orderBy.Add($"{column} {direction.ToString().ToUpper()}");
+        _groupBy.AddRange(columns);
         return this;
     }
 
     /// <summary>
-    /// Establece el número máximo de filas que se devolverán.
+    /// Establece el límite de resultados (FETCH FIRST para AS400).
     /// </summary>
     public SelectQueryBuilder Limit(int rowCount)
     {
@@ -148,15 +114,19 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Agrega una cláusula JOIN a la consulta.
+    /// Ordena por una o varias columnas.
     /// </summary>
-    public SelectQueryBuilder Join(
-        string table,
-        string? library,
-        string alias,
-        string leftColumn,
-        string rightColumn,
-        string joinType = "INNER")
+    public SelectQueryBuilder OrderBy(params (string Column, SortDirection Direction)[] columns)
+    {
+        foreach (var (column, dir) in columns)
+            _orderBy.Add($"{column} {dir.ToString().ToUpper()}");
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega un JOIN a la consulta.
+    /// </summary>
+    public SelectQueryBuilder Join(string table, string? library, string alias, string left, string right, string joinType = "INNER")
     {
         _joins.Add(new JoinClause
         {
@@ -164,62 +134,32 @@ public class SelectQueryBuilder
             TableName = table,
             Library = library,
             Alias = alias,
-            LeftColumn = leftColumn,
-            RightColumn = rightColumn
+            LeftColumn = left,
+            RightColumn = right
         });
-
         return this;
     }
 
     /// <summary>
-    /// Agrega columnas para la cláusula GROUP BY.
-    /// </summary>
-    /// <param name="columns">Columnas a agrupar.</param>
-    public SelectQueryBuilder GroupBy(params string[] columns)
-    {
-        _groupBy.AddRange(columns);
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula HAVING usando una expresión lambda.
-    /// </summary>
-    /// <typeparam name="T">Tipo de entidad.</typeparam>
-    /// <param name="expression">Expresión booleana para HAVING.</param>
-    public SelectQueryBuilder Having<T>(Expression<Func<T, bool>> expression)
-    {
-        if (_groupBy.Count == 0)
-            throw new InvalidOperationException("No se puede usar HAVING sin definir previamente GROUP BY.");
-
-        _havingClause = ExpressionToSqlConverter.Convert(expression);
-        return this;
-    }
-
-    /// <summary>
-    /// Construye y devuelve el SQL generado.
+    /// Construye y retorna el SQL.
     /// </summary>
     public QueryResult Build()
     {
         var sb = new StringBuilder();
-
-        // SELECT
         sb.Append("SELECT ");
+        if (_distinct) sb.Append("DISTINCT ");
 
         if (_columns.Count == 0)
-        {
             sb.Append("*");
-        }
         else
         {
             var columnSql = _columns.Select(c =>
                 string.IsNullOrWhiteSpace(c.Alias)
                     ? c.Column
-                    : $"{c.Column} AS {c.Alias}"
-            );
+                    : $"{c.Column} AS {c.Alias}");
             sb.Append(string.Join(", ", columnSql));
         }
 
-        // FROM
         sb.Append(" FROM ");
         if (!string.IsNullOrWhiteSpace(_library))
             sb.Append($"{_library}.");
@@ -227,42 +167,29 @@ public class SelectQueryBuilder
         if (!string.IsNullOrWhiteSpace(_tableAlias))
             sb.Append($" {_tableAlias}");
 
-        // JOINs
         foreach (var join in _joins)
         {
             sb.Append($" {join.JoinType} JOIN ");
             if (!string.IsNullOrWhiteSpace(join.Library))
                 sb.Append($"{join.Library}.");
-            sb.Append(join.TableName);
-            if (!string.IsNullOrWhiteSpace(join.Alias))
-                sb.Append($" {join.Alias}");
-            sb.Append($" ON {join.LeftColumn} = {join.RightColumn}");
+            sb.Append($"{join.TableName} {join.Alias} ON {join.LeftColumn} = {join.RightColumn}");
         }
 
-        // WHERE
-        if (!string.IsNullOrWhiteSpace(_whereClause))
-            sb.Append(" WHERE ").Append(_whereClause);
+        if (!string.IsNullOrWhiteSpace(WhereClause))
+            sb.Append($" WHERE {WhereClause}");
 
-        // GROUP BY
         if (_groupBy.Count > 0)
             sb.Append(" GROUP BY ").Append(string.Join(", ", _groupBy));
 
-        // HAVING
-        if (!string.IsNullOrWhiteSpace(_havingClause))
-            sb.Append(" HAVING ").Append(_havingClause);
+        if (!string.IsNullOrWhiteSpace(HavingClause))
+            sb.Append($" HAVING {HavingClause}");
 
-        // ORDER BY
         if (_orderBy.Count > 0)
             sb.Append(" ORDER BY ").Append(string.Join(", ", _orderBy));
 
-        // LIMIT (AS400)
         if (_limit.HasValue)
             sb.Append($" FETCH FIRST {_limit.Value} ROWS ONLY");
 
-        return new QueryResult
-        {
-            Sql = sb.ToString()
-        };
+        return new QueryResult { Sql = sb.ToString() };
     }
 }
-
