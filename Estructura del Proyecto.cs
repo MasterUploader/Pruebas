@@ -1,99 +1,110 @@
+using System;
+using System.Collections.Generic;
+using System.Linq.Expressions;
+
 namespace QueryBuilder.Helpers;
 
 /// <summary>
-/// Builder fluido para generar expresiones CASE WHEN en SQL.
+/// Builder para generar expresiones CASE WHEN en SQL.
+/// Soporta condiciones como cadenas o expresiones lambda.
 /// </summary>
 public class CaseWhenBuilder
 {
-    private readonly List<(string When, string Then)> _cases = [];
+    private readonly List<(string ConditionSql, string ResultSql)> _cases = [];
     private string? _elseValue;
 
-    private CaseWhenBuilder() { }
-
     /// <summary>
-    /// Crea una nueva instancia del builder con la primera condición WHEN.
+    /// Agrega una condición WHEN con expresión SQL directa.
     /// </summary>
-    /// <param name="condition">Condición SQL para el WHEN (ej. "TIPO = 'A'").</param>
-    public static CaseWhenBuilder When(string condition)
+    /// <param name="conditionSql">Condición en SQL.</param>
+    public CaseWhenBuilder When(string conditionSql)
     {
-        return new CaseWhenBuilder().AddWhen(condition);
-    }
-
-    /// <summary>
-    /// Agrega una condición WHEN adicional.
-    /// </summary>
-    public CaseWhenBuilder AddWhen(string condition)
-    {
-        _cases.Add((condition, string.Empty));
+        _cases.Add((conditionSql, ""));
         return this;
     }
 
     /// <summary>
-    /// Define el valor del THEN para el último WHEN agregado.
+    /// Agrega una condición WHEN utilizando una expresión lambda booleana.
     /// </summary>
-    public CaseWhenBuilder Then(string value)
+    /// <typeparam name="T">Tipo de entidad.</typeparam>
+    /// <param name="condition">Expresión booleana.</param>
+    public CaseWhenBuilder When<T>(Expression<Func<T, bool>> condition)
+    {
+        var sql = Helpers.ExpressionToSqlConverter.Convert(condition);
+        _cases.Add((sql, ""));
+        return this;
+    }
+
+    /// <summary>
+    /// Asocia un resultado THEN con la última condición WHEN.
+    /// </summary>
+    /// <param name="result">Valor que se devolverá si la condición se cumple.</param>
+    public CaseWhenBuilder Then(string result)
     {
         if (_cases.Count == 0)
-            throw new InvalidOperationException("Debe agregar una condición WHEN antes de THEN.");
+            throw new InvalidOperationException("Debe llamarse a When() antes de Then().");
 
-        _cases[_cases.Count - 1] = (_cases[^1].When, value);
+        var last = _cases[^1];
+        _cases[^1] = (last.ConditionSql, $"'{result}'");
         return this;
     }
 
     /// <summary>
-    /// Define el valor ELSE para el CASE.
+    /// Define un valor ELSE para el CASE.
     /// </summary>
-    public CaseWhenBuilder Else(string value)
+    /// <param name="result">Valor por defecto si ninguna condición se cumple.</param>
+    public CaseWhenBuilder Else(string result)
     {
-        _elseValue = value;
+        _elseValue = $"'{result}'";
         return this;
     }
 
     /// <summary>
-    /// Construye la expresión CASE WHEN completa.
+    /// Construye la expresión SQL CASE WHEN completa.
     /// </summary>
     public string Build()
     {
-        var sb = new StringBuilder("CASE");
-        foreach (var (when, then) in _cases)
+        if (_cases.Count == 0)
+            throw new InvalidOperationException("Debe haber al menos una condición WHEN.");
+
+        var parts = new List<string> { "CASE" };
+        foreach (var (condition, result) in _cases)
         {
-            sb.Append($" WHEN {when} THEN {then}");
+            parts.Add($"WHEN {condition} THEN {result}");
         }
 
-        if (!string.IsNullOrWhiteSpace(_elseValue))
-        {
-            sb.Append($" ELSE {_elseValue}");
-        }
+        if (_elseValue is not null)
+            parts.Add($"ELSE {_elseValue}");
 
-        sb.Append(" END");
-        return sb.ToString();
+        parts.Add("END");
+        return string.Join(" ", parts);
     }
-
-    /// <summary>
-    /// Conversión implícita a string para usar directamente en SelectCase().
-    /// </summary>
-    public static implicit operator string(CaseWhenBuilder builder) => builder.Build();
-}
-
 /// <summary>
-/// Agrega una expresión CASE WHEN como columna seleccionada, con un alias explícito.
+/// Agrega una o varias expresiones CASE WHEN al SELECT, con alias.
 /// </summary>
-/// <param name="caseExpression">Expresión CASE generada con <see cref="CaseWhenBuilder"/>.</param>
-/// <param name="alias">Alias para la columna resultante.</param>
-public SelectQueryBuilder SelectCase(string caseExpression, string alias)
+/// <param name="cases">Tuplas con el builder CASE y su alias.</param>
+public SelectQueryBuilder SelectCase(params (CaseWhenBuilder Case, string Alias)[] cases)
 {
-    _columns.Add((caseExpression, alias));
-    _aliasMap[caseExpression] = alias;
+    foreach (var (builder, alias) in cases)
+    {
+        var expression = builder.Build();
+        _columns.Add((expression, alias));
+    }
     return this;
 }
 
-var query = QueryBuilder.Core.QueryBuilder
-    .From("USUARIOS", "BCAH96DTA")
+
+
+    var query = QueryBuilder.Core.QueryBuilder
+    .From("USUARIOS", "MI_LIBRERIA")
     .Select("ID", "NOMBRE")
     .SelectCase(
-        CaseWhenBuilder
-            .When("TIPO = 'A'").Then("'Administrador'")
-            .When("TIPO = 'U'").Then("'Usuario'")
-            .Else("'Otro'"),
-        "DESCRIPCION")
+        (
+            new CaseWhenBuilder()
+                .When<USUARIO>(x => x.TIPO == "A").Then("Administrador")
+                .When<USUARIO>(x => x.TIPO == "U").Then("Usuario")
+                .Else("Otro"),
+            "TIPO_DESC"
+        )
+    )
     .Build();
