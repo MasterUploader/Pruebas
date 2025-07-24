@@ -1,62 +1,45 @@
-using QueryBuilder.Models;
-using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace QueryBuilder.Builders;
-
 /// <summary>
-/// Constructor de consultas SQL que combina múltiples SELECT mediante UNION o UNION ALL.
+/// Agrega una condición EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
 /// </summary>
-public class UnionQueryBuilder
+/// <param name="subqueryBuilderAction">
+/// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de EXISTS.
+/// </param>
+/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+public SelectQueryBuilder WhereExists(Action<SelectQueryBuilder> subqueryBuilderAction)
 {
-    private readonly List<(QueryResult Query, bool IsUnionAll)> _queries = [];
+    var subqueryBuilder = new SelectQueryBuilder("DUMMY"); // El nombre se sobreescribirá
+    subqueryBuilderAction(subqueryBuilder);
+    var subquerySql = subqueryBuilder.Build().Sql;
 
-    /// <summary>
-    /// Agrega la primera consulta SELECT base para la combinación.
-    /// </summary>
-    /// <param name="query">Consulta SELECT generada con SelectQueryBuilder.</param>
-    /// <param name="unionAll">Si es true, se utilizará UNION ALL; de lo contrario, UNION.</param>
-    public UnionQueryBuilder Add(QueryResult query, bool unionAll = false)
-    {
-        if (query == null || string.IsNullOrWhiteSpace(query.Sql))
-            throw new ArgumentException("La consulta base no puede ser nula ni vacía.");
+    var existsClause = $"EXISTS ({subquerySql})";
 
-        _queries.Add((query, unionAll));
-        return this;
-    }
+    if (string.IsNullOrWhiteSpace(WhereClause))
+        WhereClause = existsClause;
+    else
+        WhereClause += $" AND {existsClause}";
 
-    /// <summary>
-    /// Combina todas las consultas agregadas mediante UNION o UNION ALL.
-    /// </summary>
-    /// <returns>Resultado final con la consulta SQL compuesta.</returns>
-    public QueryResult Build()
-    {
-        if (_queries.Count == 0)
-            throw new InvalidOperationException("Debe agregar al menos una consulta para combinar.");
-
-        var sb = new StringBuilder();
-        for (int i = 0; i < _queries.Count; i++)
-        {
-            if (i > 0)
-                sb.Append(_queries[i].IsUnionAll ? " UNION ALL " : " UNION ");
-
-            sb.Append("(");
-            sb.Append(_queries[i].Query.Sql);
-            sb.Append(")");
-        }
-
-        return new QueryResult { Sql = sb.ToString() };
-    }
+    return this;
 }
 
+/// <summary>
+/// Agrega una condición NOT EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
+/// </summary>
+/// <param name="subqueryBuilderAction">
+/// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de NOT EXISTS.
+/// </param>
+/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+public SelectQueryBuilder WhereNotExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+{
+    var subqueryBuilder = new SelectQueryBuilder("DUMMY");
+    subqueryBuilderAction(subqueryBuilder);
+    var subquerySql = subqueryBuilder.Build().Sql;
 
-var q1 = new SelectQueryBuilder("CLIENTES").Select("ID", "NOMBRE").Build();
-var q2 = new SelectQueryBuilder("USUARIOS").Select("ID", "NOMBRE").Build();
+    var notExistsClause = $"NOT EXISTS ({subquerySql})";
 
-var union = new UnionQueryBuilder()
-    .Add(q1)                 // UNION
-    .Add(q2, unionAll: true) // UNION ALL
-    .Build();
+    if (string.IsNullOrWhiteSpace(WhereClause))
+        WhereClause = notExistsClause;
+    else
+        WhereClause += $" AND {notExistsClause}";
 
-Console.WriteLine(union.Sql);
+    return this;
+}
