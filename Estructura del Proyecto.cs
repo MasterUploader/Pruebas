@@ -1,33 +1,40 @@
 private int? _offset;
-private int? _fetch;
+private int? _fetchNext;
 
 /// <summary>
-/// Define el valor de desplazamiento de filas (OFFSET).
+/// Establece el número de filas a omitir antes de comenzar a devolver filas (OFFSET).
+/// Compatible con paginación en AS400 y otros motores que lo soporten.
 /// </summary>
-/// <param name="offset">Cantidad de filas a omitir.</param>
-/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-public SelectQueryBuilder Offset(int offset)
+/// <param name="rowCount">Número de filas a omitir.</param>
+public SelectQueryBuilder Offset(int rowCount)
 {
-    _offset = offset;
+    _offset = rowCount;
     return this;
 }
 
 /// <summary>
-/// Define la cantidad de filas a recuperar después del OFFSET (FETCH NEXT).
+/// Establece la cantidad de filas a devolver después del OFFSET (FETCH NEXT).
+/// Compatible con paginación en AS400 y otros motores que lo soporten.
 /// </summary>
-/// <param name="rowCount">Cantidad de filas a recuperar.</param>
-/// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+/// <param name="rowCount">Número de filas a devolver.</param>
 public SelectQueryBuilder FetchNext(int rowCount)
 {
-    _fetch = rowCount;
+    _fetchNext = rowCount;
     return this;
 }
 
+/// <summary>
+/// Construye la cláusula de paginación usando OFFSET y FETCH NEXT si están definidos.
+/// </summary>
+/// <returns>Texto SQL correspondiente a la cláusula de paginación.</returns>
 private string GetLimitClause()
 {
-    if (_offset.HasValue && _fetch.HasValue)
-        return $" OFFSET {_offset.Value} ROWS FETCH NEXT {_fetch.Value} ROWS ONLY";
-    if (_fetch.HasValue)
-        return $" FETCH FIRST {_fetch.Value} ROWS ONLY";
+    if (_offset.HasValue && _fetchNext.HasValue)
+        return $" OFFSET {_offset.Value} ROWS FETCH NEXT {_fetchNext.Value} ROWS ONLY";
+
+    if (_fetchNext.HasValue)
+        return $" FETCH FIRST {_fetchNext.Value} ROWS ONLY";
+
     return string.Empty;
 }
+
