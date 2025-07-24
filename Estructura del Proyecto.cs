@@ -1,40 +1,62 @@
-private int? _offset;
-private int? _fetchNext;
+using QueryBuilder.Models;
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Establece el número de filas a omitir antes de comenzar a devolver filas (OFFSET).
-/// Compatible con paginación en AS400 y otros motores que lo soporten.
+/// Constructor de consultas SQL que combina múltiples SELECT mediante UNION o UNION ALL.
 /// </summary>
-/// <param name="rowCount">Número de filas a omitir.</param>
-public SelectQueryBuilder Offset(int rowCount)
+public class UnionQueryBuilder
 {
-    _offset = rowCount;
-    return this;
+    private readonly List<(QueryResult Query, bool IsUnionAll)> _queries = [];
+
+    /// <summary>
+    /// Agrega la primera consulta SELECT base para la combinación.
+    /// </summary>
+    /// <param name="query">Consulta SELECT generada con SelectQueryBuilder.</param>
+    /// <param name="unionAll">Si es true, se utilizará UNION ALL; de lo contrario, UNION.</param>
+    public UnionQueryBuilder Add(QueryResult query, bool unionAll = false)
+    {
+        if (query == null || string.IsNullOrWhiteSpace(query.Sql))
+            throw new ArgumentException("La consulta base no puede ser nula ni vacía.");
+
+        _queries.Add((query, unionAll));
+        return this;
+    }
+
+    /// <summary>
+    /// Combina todas las consultas agregadas mediante UNION o UNION ALL.
+    /// </summary>
+    /// <returns>Resultado final con la consulta SQL compuesta.</returns>
+    public QueryResult Build()
+    {
+        if (_queries.Count == 0)
+            throw new InvalidOperationException("Debe agregar al menos una consulta para combinar.");
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < _queries.Count; i++)
+        {
+            if (i > 0)
+                sb.Append(_queries[i].IsUnionAll ? " UNION ALL " : " UNION ");
+
+            sb.Append("(");
+            sb.Append(_queries[i].Query.Sql);
+            sb.Append(")");
+        }
+
+        return new QueryResult { Sql = sb.ToString() };
+    }
 }
 
-/// <summary>
-/// Establece la cantidad de filas a devolver después del OFFSET (FETCH NEXT).
-/// Compatible con paginación en AS400 y otros motores que lo soporten.
-/// </summary>
-/// <param name="rowCount">Número de filas a devolver.</param>
-public SelectQueryBuilder FetchNext(int rowCount)
-{
-    _fetchNext = rowCount;
-    return this;
-}
 
-/// <summary>
-/// Construye la cláusula de paginación usando OFFSET y FETCH NEXT si están definidos.
-/// </summary>
-/// <returns>Texto SQL correspondiente a la cláusula de paginación.</returns>
-private string GetLimitClause()
-{
-    if (_offset.HasValue && _fetchNext.HasValue)
-        return $" OFFSET {_offset.Value} ROWS FETCH NEXT {_fetchNext.Value} ROWS ONLY";
+var q1 = new SelectQueryBuilder("CLIENTES").Select("ID", "NOMBRE").Build();
+var q2 = new SelectQueryBuilder("USUARIOS").Select("ID", "NOMBRE").Build();
 
-    if (_fetchNext.HasValue)
-        return $" FETCH FIRST {_fetchNext.Value} ROWS ONLY";
+var union = new UnionQueryBuilder()
+    .Add(q1)                 // UNION
+    .Add(q2, unionAll: true) // UNION ALL
+    .Build();
 
-    return string.Empty;
-}
-
+Console.WriteLine(union.Sql);
