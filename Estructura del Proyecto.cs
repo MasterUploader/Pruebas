@@ -11,7 +11,7 @@ namespace QueryBuilder.Builders;
 
 /// <summary>
 /// Generador de consultas SELECT compatible con AS400.
-/// Soporta DISTINCT, alias, JOINs, GROUP BY, HAVING, ORDER BY y funciones agregadas.
+/// Soporta DISTINCT, alias, funciones agregadas, JOINs, GROUP BY, HAVING, ORDER BY y FETCH FIRST.
 /// </summary>
 public class SelectQueryBuilder
 {
@@ -49,7 +49,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Define un alias para la tabla.
+    /// Define un alias para la tabla principal.
     /// </summary>
     public SelectQueryBuilder As(string alias)
     {
@@ -61,7 +61,6 @@ public class SelectQueryBuilder
     /// Define las columnas a seleccionar (sin alias explícito).
     /// Si detecta funciones agregadas, genera alias automáticos como "SUM_CAMPO".
     /// </summary>
-    /// <param name="columns">Nombres de columnas o funciones agregadas.</param>
     public SelectQueryBuilder Select(params string[] columns)
     {
         foreach (var column in columns)
@@ -76,7 +75,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Define columnas con alias.
+    /// Define columnas con alias explícito.
     /// </summary>
     public SelectQueryBuilder Select(params (string Column, string Alias)[] columns)
     {
@@ -89,7 +88,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Agrega una condición WHERE.
+    /// Agrega una condición WHERE tipada.
     /// </summary>
     public SelectQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
     {
@@ -98,7 +97,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Agrega una condición HAVING.
+    /// Agrega una condición HAVING tipada.
     /// </summary>
     public SelectQueryBuilder Having<T>(Expression<Func<T, bool>> expression)
     {
@@ -107,7 +106,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Establece las columnas para agrupar (GROUP BY).
+    /// Establece columnas para agrupamiento (GROUP BY).
     /// </summary>
     public SelectQueryBuilder GroupBy(params string[] columns)
     {
@@ -116,7 +115,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Establece el límite de resultados (FETCH FIRST para AS400).
+    /// Establece el límite de resultados (AS400 usa FETCH FIRST).
     /// </summary>
     public SelectQueryBuilder Limit(int rowCount)
     {
@@ -125,7 +124,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Ordena por una o varias columnas.
+    /// Ordena por una o más columnas.
     /// </summary>
     public SelectQueryBuilder OrderBy(params (string Column, SortDirection Direction)[] columns)
     {
@@ -134,7 +133,7 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Agrega un JOIN a la consulta.
+    /// Agrega un JOIN genérico a la consulta.
     /// </summary>
     public SelectQueryBuilder Join(string table, string? library, string alias, string left, string right, string joinType = "INNER")
     {
@@ -151,7 +150,25 @@ public class SelectQueryBuilder
     }
 
     /// <summary>
-    /// Construye y retorna el SQL.
+    /// Agrega un LEFT JOIN.
+    /// </summary>
+    public SelectQueryBuilder LeftJoin(string table, string? library, string alias, string left, string right)
+        => Join(table, library, alias, left, right, "LEFT");
+
+    /// <summary>
+    /// Agrega un RIGHT JOIN.
+    /// </summary>
+    public SelectQueryBuilder RightJoin(string table, string? library, string alias, string left, string right)
+        => Join(table, library, alias, left, right, "RIGHT");
+
+    /// <summary>
+    /// Agrega un FULL JOIN (si fuera soportado por el motor).
+    /// </summary>
+    public SelectQueryBuilder FullJoin(string table, string? library, string alias, string left, string right)
+        => Join(table, library, alias, left, right, "FULL");
+
+    /// <summary>
+    /// Construye y devuelve el SQL generado.
     /// </summary>
     public QueryResult Build()
     {
@@ -211,17 +228,14 @@ public class SelectQueryBuilder
         }
 
         if (_limit.HasValue)
-            sb.Append(GetLimitClause());
+            sb.Append($" FETCH FIRST {_limit.Value} ROWS ONLY");
 
         return new QueryResult { Sql = sb.ToString() };
     }
 
     /// <summary>
-    /// Genera un alias automático para funciones agregadas como SUM(CAMPO), COUNT(*), etc.
+    /// Intenta generar un alias para funciones agregadas como SUM(CAMPO), COUNT(*), etc.
     /// </summary>
-    /// <param name="column">Expresión de columna a analizar.</param>
-    /// <param name="alias">Alias generado si aplica.</param>
-    /// <returns>True si se generó un alias; false en caso contrario.</returns>
     private static bool TryGenerateAlias(string column, out string alias)
     {
         alias = string.Empty;
@@ -247,10 +261,5 @@ public class SelectQueryBuilder
 
         alias = $"{function}_{argument.Replace("*", "ALL")}";
         return true;
-    }
-
-    private string GetLimitClause()
-    {
-        return _limit.HasValue ? $" FETCH FIRST {_limit.Value} ROWS ONLY" : string.Empty;
     }
 }
