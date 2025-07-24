@@ -41,6 +41,21 @@ public SelectQueryBuilder With(params CommonTableExpression[] ctes)
     return this;
 }
 
+
+public QueryResult Build()
+{
+    var sb = new StringBuilder();
+
+    // Si hay CTEs, agregarlas antes del SELECT
+    if (_ctes.Count > 0)
+    {
+        sb.Append("WITH ");
+        sb.Append(string.Join(", ", _ctes.Select(cte => cte.ToString())));
+        sb.AppendLine();
+    }
+
+    sb.Append("SELECT ");
+    ...
 var cte = new CommonTableExpression
 {
     Name = "UsuariosActivos",
