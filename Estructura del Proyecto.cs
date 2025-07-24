@@ -1,45 +1,48 @@
 /// <summary>
-/// Agrega una condición EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
+/// Agrega una cláusula HAVING EXISTS con una subconsulta.
 /// </summary>
-/// <param name="subqueryBuilderAction">
-/// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de EXISTS.
-/// </param>
+/// <param name="subquery">Subconsulta que se evaluará con EXISTS.</param>
 /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-public SelectQueryBuilder WhereExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+public SelectQueryBuilder HavingExists(Subquery subquery)
 {
-    var subqueryBuilder = new SelectQueryBuilder("DUMMY"); // El nombre se sobreescribirá
-    subqueryBuilderAction(subqueryBuilder);
-    var subquerySql = subqueryBuilder.Build().Sql;
+    if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
+        return this;
 
-    var existsClause = $"EXISTS ({subquerySql})";
+    var clause = $"EXISTS ({subquery.Sql})";
 
-    if (string.IsNullOrWhiteSpace(WhereClause))
-        WhereClause = existsClause;
+    if (string.IsNullOrWhiteSpace(HavingClause))
+        HavingClause = clause;
     else
-        WhereClause += $" AND {existsClause}";
+        HavingClause += $" AND {clause}";
 
     return this;
 }
 
 /// <summary>
-/// Agrega una condición NOT EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
+/// Agrega una cláusula HAVING NOT EXISTS con una subconsulta.
 /// </summary>
-/// <param name="subqueryBuilderAction">
-/// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de NOT EXISTS.
-/// </param>
+/// <param name="subquery">Subconsulta que se evaluará con NOT EXISTS.</param>
 /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-public SelectQueryBuilder WhereNotExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+public SelectQueryBuilder HavingNotExists(Subquery subquery)
 {
-    var subqueryBuilder = new SelectQueryBuilder("DUMMY");
-    subqueryBuilderAction(subqueryBuilder);
-    var subquerySql = subqueryBuilder.Build().Sql;
+    if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
+        return this;
 
-    var notExistsClause = $"NOT EXISTS ({subquerySql})";
+    var clause = $"NOT EXISTS ({subquery.Sql})";
 
-    if (string.IsNullOrWhiteSpace(WhereClause))
-        WhereClause = notExistsClause;
+    if (string.IsNullOrWhiteSpace(HavingClause))
+        HavingClause = clause;
     else
-        WhereClause += $" AND {notExistsClause}";
+        HavingClause += $" AND {clause}";
 
     return this;
 }
+
+var subquery = new Subquery("SELECT 1 FROM LOGS L WHERE L.USERID = U.USERID");
+
+var query = QueryBuilder.Core.QueryBuilder
+    .From("USUARIOS", "MYLIB")
+    .Select("USERID", "NOMBRE")
+    .GroupBy("USERID", "NOMBRE")
+    .HavingExists(subquery)
+    .Build();
