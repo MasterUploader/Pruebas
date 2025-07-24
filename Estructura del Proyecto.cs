@@ -7,53 +7,44 @@ public SelectQueryBuilder Select(params string[] columns)
 {
     foreach (var column in columns)
     {
-        // Detectar funciones agregadas como SUM(), COUNT(), etc.
-        if (IsSqlFunction(column, out var functionName, out var argument))
-        {
-            // Si no hay alias explícito, generar uno automáticamente
-            string alias = $"{functionName}_{argument}".Replace("*", "ALL");
+        if (TryGenerateAlias(column, out var alias))
             _columns.Add((column, alias));
-        }
         else
-        {
             _columns.Add((column, null));
-        }
     }
 
     return this;
 }
 
 /// <summary>
-/// Determina si una columna es una función agregada SQL (como SUM, COUNT, etc.).
-/// Extrae el nombre de la función y su argumento.
+/// Genera un alias automático para funciones agregadas como SUM(CAMPO), COUNT(*), etc.
 /// </summary>
-/// <param name="expression">Expresión a evaluar (ej. "SUM(MONTO)").</param>
-/// <param name="functionName">Salida: nombre de la función (ej. "SUM").</param>
-/// <param name="argument">Salida: argumento dentro de los paréntesis (ej. "MONTO").</param>
-private static bool IsSqlFunction(string expression, out string functionName, out string argument)
+/// <param name="column">Expresión de columna a analizar.</param>
+/// <param name="alias">Alias generado si aplica.</param>
+/// <returns>True si se generó un alias; false en caso contrario.</returns>
+private static bool TryGenerateAlias(string column, out string alias)
 {
-    functionName = string.Empty;
-    argument = string.Empty;
+    alias = string.Empty;
 
-    if (string.IsNullOrWhiteSpace(expression) || !expression.Contains('(') || !expression.Contains(')'))
+    if (string.IsNullOrWhiteSpace(column) || !column.Contains('(') || !column.Contains(')'))
         return false;
 
-    int parenStart = expression.IndexOf('(');
-    int parenEnd = expression.IndexOf(')');
+    int start = column.IndexOf('(');
+    int end = column.IndexOf(')');
 
-    if (parenStart < 1 || parenEnd <= parenStart)
+    if (start < 1 || end <= start)
         return false;
 
-    functionName = expression.Substring(0, parenStart).Trim().ToUpperInvariant();
-    argument = expression.Substring(parenStart + 1, parenEnd - parenStart - 1).Trim();
+    var function = column.Substring(0, start).Trim().ToUpperInvariant();
+    var argument = column.Substring(start + 1, end - start - 1).Trim();
 
-    // Lista de funciones agregadas válidas
-    var knownFunctions = new[] { "SUM", "COUNT", "AVG", "MIN", "MAX" };
-    return knownFunctions.Contains(functionName);
+    var validFunctions = new[] { "SUM", "COUNT", "AVG", "MIN", "MAX" };
+    if (!validFunctions.Contains(function))
+        return false;
+
+    if (string.IsNullOrWhiteSpace(argument))
+        return false;
+
+    alias = $"{function}_{argument.Replace("*", "ALL")}";
+    return true;
 }
-
-
-var query = QueryBuilder.Core.QueryBuilder
-    .From("FACTURAS", "BD001")
-    .Select("SUM(MONTO)", "COUNT(*)")
-    .Build();
