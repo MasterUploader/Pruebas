@@ -1,3 +1,144 @@
+Ahora me da este error Error al guardar: 'IBMDASQL.DataSource.1' failed with no error message available, result code: DB_E_NOCOMMAND(0x80040E0C).
+
+    Así tengo el codigo actualmente
+
+       public bool InsertarAgencia(AgenciaModel agencia)
+   {
+       try
+       {
+           _as400.Open();
+
+       // Generar la sentencia SQL con QueryBuilder
+       var query = new InsertQueryBuilder("RSAGE01", "BCAH96DTA")
+           .Values(
+               ("CODCCO", agencia.Codcco),
+               ("NOMAGE", agencia.NomAge),
+               ("ZONA", agencia.Zona),
+               ("MARQUESINA", agencia.Marquesina),
+               ("RSTBRANCH", agencia.RstBranch),
+               ("NOMBD", agencia.NomBD),
+               ("NOMSER", agencia.NomSer),
+               ("IPSER", agencia.IpSer)
+           )
+           .Build();
+
+       // Crear y ejecutar el comando
+       using var command = _as400.GetDbCommand(null);
+
+       return command.ExecuteNonQuery() > 0;
+       }
+       finally
+       {
+           _as400.Close();
+       }
+   }
+
+
+using Connections.Interfaces;
+using Logging.Abstractions;
+using Logging.Decorators;
+using Microsoft.AspNetCore.Http;
+using QueryBuilder.Models;
+using System.Data.Common;
+using System.Data.OleDb;
+
+namespace Connections.Providers.Database;
+
+/// <summary>
+/// Proveedor de conexión a base de datos AS400 utilizando OleDb.
+/// Esta implementación permite la ejecución de comandos SQL con o sin logging estructurado.
+/// </summary>
+public partial class AS400ConnectionProvider : IDatabaseConnection, IDisposable
+{
+    private readonly OleDbConnection _oleDbConnection;
+    private readonly ILoggingService? _loggingService;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+
+    /// <summary>
+    /// Inicializa una nueva instancia de <see cref="AS400ConnectionProvider"/>.
+    /// </summary>
+    /// <param name="connectionString">Cadena de conexión a AS400 en formato OleDb.</param>
+    /// <param name="loggingService">Servicio de logging estructurado (opcional).</param>
+    /// <param name="httpContextAccessor">Accessor del contexto HTTP (opcional).</param>
+    public AS400ConnectionProvider(
+        string connectionString,
+        ILoggingService? loggingService = null,
+        IHttpContextAccessor? httpContextAccessor = null)
+    {
+        _oleDbConnection = new OleDbConnection(connectionString);
+        _loggingService = loggingService;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    /// <inheritdoc />
+    public void Open()
+    {
+        if (_oleDbConnection.State != System.Data.ConnectionState.Open)
+            _oleDbConnection.Open();
+    }
+
+    /// <inheritdoc />
+    public void Close()
+    {
+        if (_oleDbConnection.State != System.Data.ConnectionState.Closed)
+            _oleDbConnection.Close();
+    }
+
+    /// <inheritdoc />
+    public bool IsConnected => _oleDbConnection?.State == System.Data.ConnectionState.Open;
+
+    /// <inheritdoc />
+    public DbCommand GetDbCommand(HttpContext? context = null)
+    {
+        var command = _oleDbConnection.CreateCommand();
+
+        // Si el servicio de logging está disponible, devolvemos el comando decorado
+        if (_loggingService != null)
+        {
+            return new LoggingDbCommandWrapper(command, _loggingService, _httpContextAccessor);
+        }
+
+        // En caso contrario, devolvemos el comando básico
+        return command;
+    }
+
+    /// <summary>
+    /// Crea un comando configurado con la consulta SQL generada por QueryBuilder y sus parámetros asociados.
+    /// </summary>
+    /// <param name="queryResult">Objeto que contiene el SQL generado y la lista de parámetros.</param>
+    /// <param name="context">Contexto HTTP actual para trazabilidad opcional.</param>
+    /// <returns>DbCommand listo para ejecución.</returns>
+    public DbCommand GetDbCommand(QueryResult queryResult, HttpContext? context)
+    {
+        var command = GetDbCommand(context);
+
+        // Establece el SQL
+        command.CommandText = queryResult.Sql;
+
+        // Limpia cualquier parámetro anterior
+        command.Parameters.Clear();
+
+        // Agrega los parámetros a la posición correspondiente
+        if (queryResult.Parameters is not null && queryResult.Parameters.Count > 0)
+        {
+            foreach (var paramValue in queryResult.Parameters)
+            {
+                var parameter = command.CreateParameter();
+                parameter.Value = paramValue ?? DBNull.Value;
+                command.Parameters.Add(parameter);
+            }
+        }
+
+        return command;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _oleDbConnection?.Dispose();
+    }
+}
+
 using QueryBuilder.Helpers;
 using QueryBuilder.Models;
 using System;
