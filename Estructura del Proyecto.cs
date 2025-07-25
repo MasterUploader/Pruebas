@@ -1,41 +1,81 @@
+using Logging.Abstractions;
+using Logging.Decorators;
+using Microsoft.AspNetCore.Http;
+using System.Data.Common;
+
+namespace RestUtilities.Connections.Providers;
+
 /// <summary>
-/// Consolida y guarda el log estructurado si no ha sido registrado aún.
-/// Se asegura de que no se genere una excepción incluso si la conexión está cerrada o es nula.
+/// Proveedor de conexión para bases de datos AS400.
+/// Devuelve comandos decorados con logging solo si el servicio de logging está disponible.
 /// </summary>
-private void FinalizeAndLog()
+public class AS400ConnectionProvider : IDatabaseConnection
 {
-    lock (_lock)
+    private readonly DbConnection _connection;
+    private readonly ILoggingService? _loggingService;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+
+    /// <summary>
+    /// Inicializa una nueva instancia de <see cref="AS400ConnectionProvider"/>.
+    /// </summary>
+    /// <param name="connection">Conexión de base de datos (AS400).</param>
+    /// <param name="loggingService">Servicio de logging estructurado (opcional).</param>
+    /// <param name="httpContextAccessor">Accessor para el contexto HTTP (opcional).</param>
+    public AS400ConnectionProvider(
+        DbConnection connection,
+        ILoggingService? loggingService = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
-        if (_isFinalized || _executionCount == 0)
-            return;
+        _connection = connection;
+        _loggingService = loggingService;
+        _httpContextAccessor = httpContextAccessor;
+    }
 
-        _stopwatch.Stop();
-        _isFinalized = true;
+    /// <summary>
+    /// Devuelve un comando listo para ejecutar sentencias SQL.
+    /// Si el servicio de logging está disponible, se retorna un decorador con soporte de trazabilidad.
+    /// </summary>
+    /// <param name="context">Contexto HTTP actual, útil para trazabilidad del log.</param>
+    /// <returns>Instancia de <see cref="DbCommand"/> (con o sin decorador).</returns>
+    public DbCommand GetDbCommand(HttpContext context)
+    {
+        var command = _connection.CreateCommand();
 
-        try
+        if (_loggingService != null)
         {
-            var connection = _innerCommand.Connection;
-
-            var log = new SqlLogModel
-            {
-                Sql = _commandText,
-                ExecutionCount = _executionCount,
-                TotalAffectedRows = _totalAffectedRows,
-                StartTime = _startTime,
-                Duration = _stopwatch.Elapsed,
-                DatabaseName = connection?.Database ?? "Desconocida",
-                Ip = connection?.DataSource ?? "Desconocida",
-                Port = 0,
-                TableName = ExtraerNombreTablaDesdeSql(_commandText),
-                Schema = ExtraerEsquemaDesdeSql(_commandText)
-            };
-
-            _loggingService.LogDatabaseSuccess(log, _httpContextAccessor?.HttpContext);
+            return new LoggingDbCommandWrapper(command, _loggingService, _httpContextAccessor);
         }
-        catch (Exception ex)
+
+        return command;
+    }
+
+    /// <summary>
+    /// Abre la conexión si aún no está abierta.
+    /// </summary>
+    public void Open()
+    {
+        if (_connection.State != System.Data.ConnectionState.Open)
         {
-            // Se captura cualquier excepción interna para evitar que se propague fuera del Dispose.
-            _loggingService.LogDatabaseError(_innerCommand, ex, _httpContextAccessor?.HttpContext);
+            _connection.Open();
         }
+    }
+
+    /// <summary>
+    /// Cierra la conexión si está abierta.
+    /// </summary>
+    public void Close()
+    {
+        if (_connection.State != System.Data.ConnectionState.Closed)
+        {
+            _connection.Close();
+        }
+    }
+
+    /// <summary>
+    /// Libera recursos de la conexión.
+    /// </summary>
+    public void Dispose()
+    {
+        _connection.Dispose();
     }
 }
