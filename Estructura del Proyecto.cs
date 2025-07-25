@@ -1,5 +1,3 @@
-Así tengo el codigo, aplica las mejoras, pero no omitas las demas funciones:
-
 using Logging.Abstractions;
 using Logging.Models;
 using Microsoft.AspNetCore.Http;
@@ -12,11 +10,12 @@ namespace Logging.Decorators;
 /// <summary>
 /// Decorador para interceptar y registrar automáticamente logs SQL al ejecutar comandos de base de datos.
 /// Guarda el log acumulado al hacer <see cref="Dispose"/>.
+/// Funciona también si no se proporciona un servicio de logging.
 /// </summary>
 public class LoggingDbCommandWrapper : DbCommand
 {
     private readonly DbCommand _innerCommand;
-    private readonly ILoggingService _loggingService;
+    private readonly ILoggingService? _loggingService;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly Stopwatch _stopwatch = new();
     private readonly object _lock = new();
@@ -31,20 +30,19 @@ public class LoggingDbCommandWrapper : DbCommand
     /// Inicializa una nueva instancia del decorador <see cref="LoggingDbCommandWrapper"/>.
     /// </summary>
     /// <param name="innerCommand">Comando original a decorar.</param>
-    /// <param name="loggingService">Servicio de logging estructurado.</param>
-    /// <param name="httpContextAccessor">Accessor para el contexto HTTP, útil para trazabilidad.</param>
-    public LoggingDbCommandWrapper(DbCommand innerCommand, ILoggingService loggingService, IHttpContextAccessor? httpContextAccessor = null)
+    /// <param name="loggingService">Servicio de logging estructurado (opcional).</param>
+    /// <param name="httpContextAccessor">Accessor del contexto HTTP (opcional).</param>
+    public LoggingDbCommandWrapper(
+        DbCommand innerCommand,
+        ILoggingService? loggingService = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _innerCommand = innerCommand;
         _loggingService = loggingService;
         _httpContextAccessor = httpContextAccessor;
     }
 
-    /// <summary>
-    /// Ejecuta el lector de datos con comportamiento específico y registra la ejecución.
-    /// </summary>
-    /// <param name="behavior">Comportamiento del lector (por ejemplo, CloseConnection).</param>
-    /// <returns>Lector de datos de la consulta ejecutada.</returns>
+    /// <inheritdoc />
     protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
     {
         StartIfNeeded();
@@ -56,7 +54,7 @@ public class LoggingDbCommandWrapper : DbCommand
         }
         catch (Exception ex)
         {
-            _loggingService.LogDatabaseError(_innerCommand, ex, _httpContextAccessor?.HttpContext);
+            _loggingService?.LogDatabaseError(_innerCommand, ex, _httpContextAccessor?.HttpContext);
             throw;
         }
     }
@@ -79,9 +77,7 @@ public class LoggingDbCommandWrapper : DbCommand
         return result;
     }
 
-    /// <summary>
-    /// Guarda automáticamente el log al liberar el comando si hubo ejecuciones.
-    /// </summary>
+    /// <inheritdoc />
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
@@ -91,13 +87,13 @@ public class LoggingDbCommandWrapper : DbCommand
 
     /// <summary>
     /// Consolida y guarda el log estructurado si no ha sido registrado aún.
-    /// Se asegura de que no se genere una excepción incluso si la conexión está cerrada o es nula.
+    /// No lanza excepciones si la conexión es nula o si el logging no está habilitado.
     /// </summary>
     private void FinalizeAndLog()
     {
         lock (_lock)
         {
-            if (_isFinalized || _executionCount == 0)
+            if (_isFinalized || _executionCount == 0 || _loggingService == null)
                 return;
 
             _stopwatch.Stop();
@@ -125,12 +121,14 @@ public class LoggingDbCommandWrapper : DbCommand
             }
             catch (Exception ex)
             {
-                // Se captura cualquier excepción interna para evitar que se propague fuera del Dispose.
                 _loggingService.LogDatabaseError(_innerCommand, ex, _httpContextAccessor?.HttpContext);
             }
         }
     }
 
+    /// <summary>
+    /// Marca el inicio de la ejecución para calcular duración y registrar texto SQL.
+    /// </summary>
     private void StartIfNeeded()
     {
         lock (_lock)
@@ -144,6 +142,10 @@ public class LoggingDbCommandWrapper : DbCommand
         }
     }
 
+    /// <summary>
+    /// Registra estadísticas internas de ejecución para logging.
+    /// </summary>
+    /// <param name="affectedRows">Cantidad de filas afectadas.</param>
     private void RegisterExecution(int affectedRows)
     {
         lock (_lock)
@@ -154,6 +156,9 @@ public class LoggingDbCommandWrapper : DbCommand
         }
     }
 
+    /// <summary>
+    /// Extrae el nombre de la tabla desde una sentencia SQL.
+    /// </summary>
     private static string ExtraerNombreTablaDesdeSql(string sql)
     {
         try
@@ -165,6 +170,9 @@ public class LoggingDbCommandWrapper : DbCommand
         catch { return "Desconocida"; }
     }
 
+    /// <summary>
+    /// Extrae el esquema (library) desde una sentencia SQL.
+    /// </summary>
     private static string ExtraerEsquemaDesdeSql(string sql)
     {
         var tabla = ExtraerNombreTablaDesdeSql(sql);
@@ -176,7 +184,7 @@ public class LoggingDbCommandWrapper : DbCommand
 
     public override string CommandText { get => _innerCommand.CommandText; set => _innerCommand.CommandText = value; }
     public override int CommandTimeout { get => _innerCommand.CommandTimeout; set => _innerCommand.CommandTimeout = value; }
-    public override System.Data.CommandType CommandType { get => _innerCommand.CommandType; set => _innerCommand.CommandType = value; }
+    public override CommandType CommandType { get => _innerCommand.CommandType; set => _innerCommand.CommandType = value; }
     public override bool DesignTimeVisible { get => _innerCommand.DesignTimeVisible; set => _innerCommand.DesignTimeVisible = value; }
     public override UpdateRowSource UpdatedRowSource { get => _innerCommand.UpdatedRowSource; set => _innerCommand.UpdatedRowSource = value; }
     protected override DbConnection DbConnection { get => _innerCommand.Connection!; set => _innerCommand.Connection = value; }
