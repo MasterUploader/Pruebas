@@ -1,3 +1,5 @@
+Así esta el codigo actualmente, que debo cambiar o mejorar
+
 using Connections.Interfaces;
 using Logging.Abstractions;
 using Logging.Decorators;
