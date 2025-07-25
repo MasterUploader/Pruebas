@@ -1,63 +1,59 @@
-Es este el metodo que debemos modificar
-        /// <summary>
-        /// Obtiene el archivo de log de la petición actual, garantizando que toda la información
-        /// se guarde en el mismo archivo. Si no existe aún, se genera uno nuevo dentro de una carpeta
-        /// con el nombre del controlador.
-        /// </summary>
-        public string GetCurrentLogFile()
+/// <summary>
+/// Obtiene el archivo de log de la petición actual, garantizando que toda la información
+/// se guarde en el mismo archivo. Se organiza por API, controlador, endpoint y fecha.
+/// </summary>
+public string GetCurrentLogFile()
+{
+    try
+    {
+        var context = _httpContextAccessor.HttpContext;
+
+        if (context is not null)
         {
-            try
-            {
-                var context = _httpContextAccessor.HttpContext;
+            // Reutiliza si ya se definió
+            if (context.Items.TryGetValue("LogFileName", out var existing) && existing is string existingPath)
+                return existingPath;
 
-                // Si ya existe un archivo de log en esta petición, reutilizarlo
-                if (context is not null &&
-                    context.Items.ContainsKey("LogFileName") &&
-                    context.Items["LogFileName"] is string logFileName)
-                {
-                    return logFileName;
-                }
+            // Extrae información necesaria
+            string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
+            string rawPath = context.Request.Path.Value?.Trim('/') ?? "UnknownEndpoint";
+            string[] pathParts = rawPath.Split('/');
 
-                // Generar un nuevo nombre de archivo solo si no se ha creado antes
-                if (context is not null && context.Items.ContainsKey("ExecutionId"))
-                {
-                    string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
-                    string endpoint = context.Request.Path.ToString().Replace("/", "_").Trim('_');
-                    string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string controller = pathParts.Length > 0 ? pathParts[0] : "UnknownController";
+            string endpoint = pathParts.Length > 1 ? pathParts[1] : "UnknownEndpoint";
+            string fecha = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
 
-                    // Obtener el nombre del controlador a partir del endpoint actual
-                    var endpointMetadata = context.GetEndpoint();
-                    var controllerName = endpointMetadata?.Metadata
-                        .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
-                        .FirstOrDefault()?.ControllerName ?? "UnknownController";
+            // Alternativa más precisa para obtener el nombre del controlador desde los metadatos
+            var endpointMetadata = context.GetEndpoint();
+            string? metadataController = endpointMetadata?.Metadata
+                .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
+                .FirstOrDefault()?.ControllerName;
 
-                    // Crear subcarpeta del controlador si no existe
-                    var controllerDirectory = Path.Combine(_logDirectory, controllerName);
-                    Directory.CreateDirectory(controllerDirectory);
+            if (!string.IsNullOrWhiteSpace(metadataController))
+                controller = metadataController;
 
-                    Console.WriteLine($"[DEBUG] Ruta carpeta controlador: {controllerDirectory}");
+            // Nombre de la API
+            string apiName = AppDomain.CurrentDomain.FriendlyName;
 
-                    if (!Directory.Exists(controllerDirectory))
-                    {
-                        Directory.CreateDirectory(controllerDirectory);
-                        Console.WriteLine("[DEBUG] Carpeta creada");
-                    }
-                    else
-                    {
-                        Console.WriteLine("[DEBUG] Carpeta ya existía");
-                    }
+            // Construcción del path completo
+            var finalDirectory = Path.Combine(_logDirectory, apiName, controller, endpoint, fecha);
+            Directory.CreateDirectory(finalDirectory);
 
-                    // Generar nombre de archivo incluyendo subcarpeta del controlador
-                    string newLogFileName = Path.Combine(controllerDirectory, $"{executionId}_{endpoint}_{timestamp}.txt");
+            string fileName = $"{executionId}_{endpoint}_{timestamp}.txt";
+            string fullPath = Path.Combine(finalDirectory, fileName);
 
-                    context.Items["LogFileName"] = newLogFileName;
-                    return newLogFileName;
-                }
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex); // Método interno para registrar errores del sistema de logging
-            }
+            // Guardar en Items para reutilizar
+            context.Items["LogFileName"] = fullPath;
 
-            return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
+            return fullPath;
         }
+    }
+    catch (Exception ex)
+    {
+        LogInternalError(ex);
+    }
+
+    // Fallback global
+    return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
+}
