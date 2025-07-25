@@ -1,5 +1,3 @@
-Modifica el InsertQueryBuilder, para que a lo interno si se genera con ?, lo tome como comman.parameters.Add
-
 using QueryBuilder.Helpers;
 using QueryBuilder.Models;
 using System;
@@ -12,6 +10,7 @@ namespace QueryBuilder.Builders;
 /// <summary>
 /// Generador de sentencias INSERT compatibles con AS400 y otros motores.
 /// Permite insertar datos con VALUES, SELECT, IGNORE, condiciones NOT EXISTS y actualización en conflicto.
+/// Genera parámetros automáticamente para uso con DbCommand.
 /// </summary>
 public class InsertQueryBuilder(string _tableName, string? _library = null)
 {
@@ -24,12 +23,9 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
     private bool _insertIgnore = false;
     private readonly Dictionary<string, object?> _onDuplicateUpdate = [];
 
-
     /// <summary>
     /// Agrega un comentario SQL al inicio del INSERT para trazabilidad o debugging.
     /// </summary>
-    /// <param name="comment">Texto del comentario.</param>
-    /// <returns>Instancia modificada de <see cref="InsertQueryBuilder"/>.</returns>
     public InsertQueryBuilder WithComment(string comment)
     {
         if (!string.IsNullOrWhiteSpace(comment))
@@ -49,8 +45,6 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
     /// <summary>
     /// Define columnas que deben actualizarse si hay conflicto de clave duplicada.
     /// </summary>
-    /// <param name="column">Columna a actualizar.</param>
-    /// <param name="value">Nuevo valor para la columna.</param>
     public InsertQueryBuilder OnDuplicateKeyUpdate(string column, object? value)
     {
         _onDuplicateUpdate[column] = value;
@@ -60,7 +54,6 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
     /// <summary>
     /// Define múltiples columnas para actualizar en caso de duplicado.
     /// </summary>
-    /// <param name="updates">Diccionario de columna y valor a asignar.</param>
     public InsertQueryBuilder OnDuplicateKeyUpdate(Dictionary<string, object?> updates)
     {
         foreach (var kvp in updates)
@@ -72,8 +65,6 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
     /// <summary>
     /// Define las columnas que se desean insertar.
     /// </summary>
-    /// <param name="columns">Nombres de las columnas.</param>
-    /// <returns>Instancia modificada del builder.</returns>
     public InsertQueryBuilder IntoColumns(params string[] columns)
     {
         _columns.Clear();
@@ -82,25 +73,27 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
     }
 
     /// <summary>
-    /// Agrega una fila de valores para insertar.
-    /// El orden debe coincidir con el de las columnas definidas en <see cref="IntoColumns"/>.
+    /// Agrega una fila de valores a insertar, junto con los nombres de las columnas en forma de tuplas.
     /// </summary>
-    /// <param name="values">Valores a insertar en una fila.</param>
-    /// <returns>Instancia modificada del builder.</returns>
-    public InsertQueryBuilder Values(params object?[] values)
+    public InsertQueryBuilder Values(params (string Column, object? Value)[] values)
     {
-        if (values.Length != _columns.Count)
-            throw new InvalidOperationException($"Se esperaban {_columns.Count} valores, pero se recibieron {values.Length}.");
+        if (_columns.Count == 0)
+        {
+            _columns.AddRange(values.Select(v => v.Column));
+        }
+        else if (_columns.Count != values.Length)
+        {
+            throw new InvalidOperationException($"Se esperaban {_columns.Count} columnas, pero se recibieron {values.Length}.");
+        }
 
-        _rows.Add([.. values]);
+        var row = values.Select(v => v.Value).ToList();
+        _rows.Add(row);
         return this;
     }
 
     /// <summary>
     /// Agrega una fila de valores sin formato automático, útil para funciones como GETDATE().
     /// </summary>
-    /// <param name="values">Valores SQL en crudo, como funciones o expresiones directas.</param>
-    /// <returns>Instancia modificada del builder.</returns>
     public InsertQueryBuilder ValuesRaw(params string[] values)
     {
         _values.Add(values.Cast<object>().ToList());
@@ -109,9 +102,7 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
 
     /// <summary>
     /// Define una subconsulta SELECT como fuente de datos a insertar.
-    /// Anula el uso de valores directos.
     /// </summary>
-    /// <param name="select">Instancia de <see cref="SelectQueryBuilder"/> que genera el SELECT.</param>
     public InsertQueryBuilder FromSelect(SelectQueryBuilder select)
     {
         _selectSource = select;
@@ -122,8 +113,6 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
     /// <summary>
     /// Agrega una cláusula WHERE NOT EXISTS con una subconsulta, aplicable en INSERT ... SELECT.
     /// </summary>
-    /// <param name="subquery">Subconsulta a evaluar en NOT EXISTS.</param>
-    /// <returns>Instancia modificada de <see cref="InsertQueryBuilder"/>.</returns>
     public InsertQueryBuilder WhereNotExists(Subquery subquery)
     {
         _whereClause = $"NOT EXISTS ({subquery.Sql})";
@@ -131,36 +120,30 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
     }
 
     /// <summary>
-    /// Construye y retorna la consulta INSERT generada.
+    /// Construye y retorna la consulta INSERT generada junto con los parámetros.
     /// </summary>
     public QueryResult Build()
     {
-        // Validaciones básicas
         if (string.IsNullOrWhiteSpace(_tableName))
             throw new InvalidOperationException("Debe especificarse el nombre de la tabla para INSERT.");
 
         if (_columns.Count == 0)
             throw new InvalidOperationException("Debe especificar al menos una columna para el INSERT.");
 
-        if (_selectSource != null && _values.Count > 0)
+        if (_selectSource != null && _rows.Count > 0)
             throw new InvalidOperationException("No se puede usar 'VALUES' y 'FROM SELECT' al mismo tiempo.");
 
-        if (_selectSource == null && _values.Count == 0)
+        if (_selectSource == null && _rows.Count == 0 && _values.Count == 0)
             throw new InvalidOperationException("Debe especificar al menos una fila de valores para el INSERT.");
 
-        foreach (var fila in _values)
-        {
-            if (fila.Count != _columns.Count)
-                throw new InvalidOperationException($"El número de valores ({fila.Count}) no coincide con las columnas ({_columns.Count}).");
-        }
-
         var sb = new StringBuilder();
+        var parameters = new List<object?>();
 
         // Comentario si se agregó
         if (!string.IsNullOrWhiteSpace(_comment))
             sb.AppendLine(_comment);
 
-        // Cláusula INSERT INTO
+        // Cláusula INSERT
         sb.Append("INSERT ");
         if (_insertIgnore) sb.Append("IGNORE ");
         sb.Append("INTO ");
@@ -169,35 +152,50 @@ public class InsertQueryBuilder(string _tableName, string? _library = null)
         sb.Append(_tableName);
         sb.Append(" (");
         sb.Append(string.Join(", ", _columns));
-        sb.Append(')');
+        sb.Append(")");
 
-        // Cuerpo: VALUES o SELECT
         if (_selectSource != null)
         {
             sb.AppendLine();
-            sb.Append(_selectSource.Build().Sql);
+            var selectResult = _selectSource.Build();
+            sb.Append(selectResult.Sql);
+            parameters.AddRange(selectResult.Parameters);
+
             if (!string.IsNullOrWhiteSpace(_whereClause))
                 sb.Append($" WHERE {_whereClause}");
         }
-        else
+        else if (_rows.Count > 0)
         {
-            var valuesSql = _values
-                .Select(row => $"({string.Join(", ", row.Select(SqlHelper.FormatValue))})");
+            sb.Append(" VALUES ");
+            var placeholders = _rows.Select(row =>
+            {
+                parameters.AddRange(row);
+                return "(" + string.Join(", ", row.Select(_ => "?")) + ")";
+            });
+            sb.Append(string.Join(", ", placeholders));
+        }
+        else if (_values.Count > 0)
+        {
+            var valuesSql = _values.Select(row =>
+                "(" + string.Join(", ", row.Select(SqlHelper.FormatValue)) + ")");
             sb.Append(" VALUES ");
             sb.Append(string.Join(", ", valuesSql));
         }
 
-        // ON DUPLICATE KEY UPDATE
         if (_onDuplicateUpdate.Count > 0)
         {
             sb.Append(" ON DUPLICATE KEY UPDATE ");
             sb.Append(string.Join(", ", _onDuplicateUpdate.Select(kv =>
-                $"{kv.Key} = {SqlHelper.FormatValue(kv.Value)}")));
+            {
+                parameters.Add(kv.Value);
+                return $"{kv.Key} = ?";
+            })));
         }
 
         return new QueryResult
         {
-            Sql = sb.ToString()
+            Sql = sb.ToString(),
+            Parameters = parameters
         };
     }
 }
