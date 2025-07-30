@@ -1,173 +1,116 @@
-Necesito que este metodo utilice las librerias RestUtilities.Connections y RestUtilities.QueryBuilder
+public async Task<RespuestaListarComercioDto> ListarComercioAsync(ListarComerciosDto listarComercio)
+{
+    try
+    {
+        connection.Open();
 
-        public async Task<RespuestaListarComercioDto> ListarComercioAsync(ListarComerciosDto listarComercio)
+        var pageSize = string.IsNullOrWhiteSpace(listarComercio.Size) || listarComercio.Size == "0" ? 1 : int.Parse(listarComercio.Size);
+        var currentPage = string.IsNullOrWhiteSpace(listarComercio.Page) ? 0 : int.Parse(listarComercio.Page);
+        var skip = currentPage * pageSize;
+
+        string table = "PQR01L01";
+        string library = "IS4TECHDTA";
+
+        // COUNT
+        var countQuery = new SelectQueryBuilder(table, library)
+            .Select("COUNT(*)")
+            .WhereRaw("1=1");
+
+        // DATA
+        var dataQuery = new SelectQueryBuilder(table, library)
+            .Select("CLINOM", "CLINRO", "CLISTS")
+            .WhereRaw("1=1");
+
+        if (!string.IsNullOrWhiteSpace(listarComercio.Search))
         {
-
-            try
+            if (int.TryParse(listarComercio.Search, out _))
             {
-                connection.Open();
-
-                int totalElements = 0;
-                int totalPages = 0;
-                var listaDeComercios = new List<RespuestaListarComercioDto.Content>();
-                decimal codigoRespuesta = 0;
-                string descripcionRespuesta = "";
-                if (listarComercio.Size == "")
-                {
-                    listarComercio.Size = "1";
-                }
-                else if (listarComercio.Size == "0")
-                {
-                    listarComercio.Size = "1";
-                }
-                if (listarComercio.Page == "")
-                {
-                    listarComercio.Page = "0";
-                }
-
-                //PRIMER CONSULTA PARA CONTAR NUMERO TOTAL DE ELEMTOS //pqr01cli
-                string countQuery = "SELECT COUNT(*) FROM IS4TECHDTA.PQR01L01 WHERE 1=1";
-
-                //SEGUNDA CONSULTA OBTENER DATOS PAGINADOS
-                string dataQuery = "SELECT * FROM IS4TECHDTA.PQR01L01 WHERE 1=1";
-
-                if (!string.IsNullOrEmpty(listarComercio.Search) && int.TryParse(listarComercio.Search, out _))
-                {
-                    // dataQuery += " AND CLINRO LIKE ?";
-                    // countQuery += " AND CLINRO LIKE ?";
-
-                    dataQuery += " AND (LOWER(CLINRO) LIKE LOWER(?))";
-                    countQuery += " AND (LOWER(CLINRO) LIKE LOWER(?)  )";
-                }
-                else if (!string.IsNullOrEmpty(listarComercio.Search))
-                {
-                    // dataQuery += " AND CLINOM LIKE ?";
-                    // countQuery += " AND CLINOM LIKE ?";
-
-                    dataQuery += " AND (LOWER(CLINOM) LIKE LOWER(?))";
-                    countQuery += " AND (LOWER(CLINOM) LIKE LOWER(?))";
-                }
-
-                if (!string.IsNullOrEmpty(listarComercio.Status))
-                {
-                    dataQuery += " AND CLISTS = ?";
-                    countQuery += " AND CLISTS = ?";
-                }
-
-                //CONSULTA COUNT
-                await using (OleDbCommand countCommand = new OleDbCommand(countQuery, connection.Connect.OleDbConnection))
-                {
-                    if (!string.IsNullOrEmpty(listarComercio.Search))
-                    {
-                        countCommand.Parameters.AddWithValue("?", '%' + listarComercio.Search + '%');
-                    }
-
-                    if (!string.IsNullOrEmpty(listarComercio.Status))
-                    {
-                        countCommand.Parameters.AddWithValue("?", listarComercio.Status);
-                    }
-                    totalElements = (int)countCommand.ExecuteScalar()!;
-                }
-
-                if (totalElements == 0)
-                {
-                    RespuestaListarComercioDto respuestaListarComercioDto = new()
-                    {
-                        ResponseCode = 1,
-                        ResponseDescription = "Busqueda no obtuvo datos"
-                    };
-                    return respuestaListarComercioDto;
-                }
-
-                //Calculamos el total de paginas basados en el numero total de elementos y el tamaño de pagina
-                totalPages = (int)Math.Ceiling((double)totalElements / Convert.ToInt32(listarComercio.Size));
-
-                if (Convert.ToInt32(listarComercio.Size) >= totalElements)
-                {
-                    listarComercio.Page = "0";
-                    totalPages = 1;
-
-                }
-                else if (Convert.ToInt32(listarComercio.Page) < 0 || Convert.ToInt32(listarComercio.Page) >= totalPages)
-                {
-                    listarComercio.Page = Convert.ToString(totalPages - 1);
-                }
-
-                int rowsToSkip = Convert.ToInt32(listarComercio.Page) * Convert.ToInt32(listarComercio.Size);
-                int rowsToFetch = Convert.ToInt32(listarComercio.Size);
-
-                if (!string.IsNullOrEmpty(listarComercio.Search) && int.TryParse(listarComercio.Search, out _))
-                {
-                    dataQuery += $" ORDER BY CLINRO";
-                    dataQuery += $" OFFSET {rowsToSkip} ROWS FETCH FIRST {rowsToFetch} ROWS ONLY";
-                }
-                else if (!string.IsNullOrEmpty(listarComercio.Search))
-                {
-                    dataQuery += $" ORDER BY CLINOM";
-                    dataQuery += $" OFFSET {rowsToSkip} ROWS FETCH FIRST {rowsToFetch} ROWS ONLY";
-                }
-                else
-                {
-                    dataQuery += $" OFFSET {rowsToSkip} ROWS FETCH FIRST {rowsToFetch} ROWS ONLY";
-                }
-
-                //Ejecutamos la segunda consulta para obtener los datos paginados
-                await using (OleDbCommand dataCommand = new OleDbCommand(dataQuery, connection.Connect.OleDbConnection))
-                {
-                    if (!string.IsNullOrEmpty(listarComercio.Search))
-                    {
-                        dataCommand.Parameters.AddWithValue("?", '%' + listarComercio.Search + '%');
-                    }
-
-                    if (!string.IsNullOrEmpty(listarComercio.Status))
-                    {
-                        dataCommand.Parameters.AddWithValue("?", listarComercio.Status);
-                    }
-
-                    using (OleDbDataReader reader = dataCommand.ExecuteReader())
-                    {
-                        if (reader.HasRows)
-                        {
-                            while (reader.Read())
-                            {
-                                var comercios = new RespuestaListarComercioDto.Content
-                                {
-                                    Name = reader.GetString(reader.GetOrdinal("CLINOM")),
-                                    Cif = reader.GetString(reader.GetOrdinal("CLINRO")),
-                                    Status = reader.GetString(reader.GetOrdinal("CLISTS"))
-                                };
-                                listaDeComercios.Add(comercios);
-                            }
-                            codigoRespuesta = 0;
-                            descripcionRespuesta = "Comercios Listados Correctamente";
-                        }
-                        else
-                        {
-                            codigoRespuesta = 1;
-                            descripcionRespuesta = "No se pudieron Listar los Comercios";
-                        }
-                    }
-                }
-
-                _respuestaListarComercioDto.Contents = listaDeComercios.ToArray();
-                _respuestaListarComercioDto.FirstPage = Convert.ToInt32(listarComercio.Page) == 0;
-                _respuestaListarComercioDto.LastPage = Convert.ToInt32(listarComercio.Page) == totalPages - 1;
-                _respuestaListarComercioDto.Page = Convert.ToInt32(listarComercio.Page);
-                _respuestaListarComercioDto.TotalPages = totalPages;
-                _respuestaListarComercioDto.TotalElements = totalElements;
-                _respuestaListarComercioDto.ResponseCode = (int)codigoRespuesta;
-                _respuestaListarComercioDto.ResponseDescription = descripcionRespuesta;
-
-
-                return _respuestaListarComercioDto;
+                countQuery.WhereRaw($"LOWER(CLINRO) LIKE LOWER('%{listarComercio.Search}%')");
+                dataQuery.WhereRaw($"LOWER(CLINRO) LIKE LOWER('%{listarComercio.Search}%')")
+                         .OrderBy("CLINRO")
+                         .Offset(skip)
+                         .FetchNext(pageSize);
             }
-            catch (Exception ex)
+            else
             {
-                RespuestaListarComercioDto respuestaListarComercioDto = new()
-                {
-                    ResponseCode = 666,
-                    ResponseDescription = ex.Message
-                };
-                return respuestaListarComercioDto;
+                countQuery.WhereRaw($"LOWER(CLINOM) LIKE LOWER('%{listarComercio.Search}%')");
+                dataQuery.WhereRaw($"LOWER(CLINOM) LIKE LOWER('%{listarComercio.Search}%')")
+                         .OrderBy("CLINOM")
+                         .Offset(skip)
+                         .FetchNext(pageSize);
             }
         }
+        else
+        {
+            dataQuery.Offset(skip).FetchNext(pageSize);
+        }
+
+        if (!string.IsNullOrWhiteSpace(listarComercio.Status))
+        {
+            countQuery.WhereRaw($"CLISTS = '{listarComercio.Status}'");
+            dataQuery.WhereRaw($"CLISTS = '{listarComercio.Status}'");
+        }
+
+        // Ejecutar COUNT
+        var countResult = countQuery.Build();
+        using var countCommand = connection.GetDbCommand(countResult, _httpContextAccessor.HttpContext!);
+        var totalElements = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
+        if (totalElements == 0)
+        {
+            return new RespuestaListarComercioDto
+            {
+                ResponseCode = 1,
+                ResponseDescription = "Busqueda no obtuvo datos"
+            };
+        }
+
+        var totalPages = (int)Math.Ceiling((double)totalElements / pageSize);
+        if (pageSize >= totalElements)
+        {
+            currentPage = 0;
+            totalPages = 1;
+        }
+        else if (currentPage < 0 || currentPage >= totalPages)
+        {
+            currentPage = totalPages - 1;
+        }
+
+        // Ejecutar DATA
+        var dataResult = dataQuery.Build();
+        using var dataCommand = connection.GetDbCommand(dataResult, _httpContextAccessor.HttpContext!);
+        using var reader = await dataCommand.ExecuteReaderAsync();
+
+        var listaDeComercios = new List<RespuestaListarComercioDto.Content>();
+
+        while (reader.Read())
+        {
+            listaDeComercios.Add(new RespuestaListarComercioDto.Content
+            {
+                Name = reader["CLINOM"].ToString(),
+                Cif = reader["CLINRO"].ToString(),
+                Status = reader["CLISTS"].ToString()
+            });
+        }
+
+        return new RespuestaListarComercioDto
+        {
+            Contents = listaDeComercios.ToArray(),
+            FirstPage = currentPage == 0,
+            LastPage = currentPage == totalPages - 1,
+            Page = currentPage,
+            TotalPages = totalPages,
+            TotalElements = totalElements,
+            ResponseCode = 0,
+            ResponseDescription = "Comercios Listados Correctamente"
+        };
+    }
+    catch (Exception ex)
+    {
+        return new RespuestaListarComercioDto
+        {
+            ResponseCode = 666,
+            ResponseDescription = ex.Message
+        };
+    }
+}
