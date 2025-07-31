@@ -1,210 +1,168 @@
-Ahora convierte este método y entregalo completo:
-
 public async Task<RespuestaListarQRAplicadosDto> ListarQRAplicadosAsync(ListarQRAplicadosDto listarQRAplicadosDto)
 {
     try
     {
-        int? codigoRespuesta = 0;
-        string? descripcionRespuesta = "";
-        DateTime fechaInicial = DateTime.ParseExact(listarQRAplicadosDto.DateInit, "yyyy-MM-dd HH:mm:ss", null);
-        DateTime fechaFinal = DateTime.ParseExact(listarQRAplicadosDto.DateEnd, "yyyy-MM-dd HH:mm:ss", null);
-        var respuestDto = new RespuestaListarQRAplicadosDto();
-
         connection.Open();
+        var fechaInicial = DateTime.ParseExact(listarQRAplicadosDto.DateInit, "yyyy-MM-dd HH:mm:ss", null);
+        var fechaFinal = DateTime.ParseExact(listarQRAplicadosDto.DateEnd, "yyyy-MM-dd HH:mm:ss", null);
 
-        string dataQry = "SELECT * FROM IS4TECHDTA.PQR02QRG INNER JOIN IS4TECHDTA.PQR01CLI ON IS4TECHDTA.PQR02QRG.PQRCIF = IS4TECHDTA.PQR01CLI.CLINRO INNER JOIN ACH.ENTIDAD ON IS4TECHDTA.PQR02QRG.PQRABA = ACH.ENTIDAD.CODENT WHERE 1=1";
-
-        List<OleDbParameter> parameters = new List<OleDbParameter>();
+        var query = new SelectQueryBuilder("PQR02QRG", "IS4TECHDTA")
+            .Join("PQR01CLI", "IS4TECHDTA", "C", "PQR02QRG.PQRCIF", "C.CLINRO")
+            .Join("ENTIDAD", "ACH", "E", "PQR02QRG.PQRABA", "E.CODENT")
+            .Select("*")
+            .WhereRaw("1=1")
+            .Where("PQRSTA = 'APL'");
 
         if (!string.IsNullOrEmpty(listarQRAplicadosDto.Cif))
-        {
-            dataQry += " AND LOWER (PQRCIF) LIKE ?";
-            parameters.Add(new OleDbParameter("PQRCIF", listarQRAplicadosDto.Cif.ToString()));
-        }
+            query.WhereRaw($"LOWER(PQRCIF) LIKE LOWER('%{listarQRAplicadosDto.Cif}%')");
+
         if (!string.IsNullOrEmpty(listarQRAplicadosDto.PointOfSaleId))
-        {
-            dataQry += " AND PQRPVI IN (" + string.Join(",", listarQRAplicadosDto.PointOfSaleId) + ")";
+            query.WhereRaw($"PQRPVI IN ({listarQRAplicadosDto.PointOfSaleId})");
 
-        }
         if (!string.IsNullOrEmpty(listarQRAplicadosDto.CashierID))
-        {
-            dataQry += " AND PQRCAI IN (" + string.Join(",", listarQRAplicadosDto.CashierID) + ")";
+            query.WhereRaw($"PQRCAI IN ({listarQRAplicadosDto.CashierID})");
 
-        }
         if (!string.IsNullOrEmpty(listarQRAplicadosDto.Reference))
-        {
-            dataQry += " AND (LOWER(PQRREG) LIKE LOWER(?))";
-            parameters.Add(new OleDbParameter("PQRREG", '%' + listarQRAplicadosDto.Reference.ToString() + '%'));
-        }
+            query.WhereRaw($"LOWER(PQRREG) LIKE LOWER('%{listarQRAplicadosDto.Reference}%')");
+
         if (!string.IsNullOrEmpty(listarQRAplicadosDto.Type))
-        {
-            dataQry += " AND PQRQTI = ?";
-            parameters.Add(new OleDbParameter("PQRQTI", "="));
-        }
+            query.WhereRaw($"PQRQTI = '{listarQRAplicadosDto.Type}'");
 
-        dataQry += " AND PQRSTA = ?";
-        parameters.Add(new OleDbParameter("PQRSTA", "APL"));
-
+        var result = query.Build();
+        using var command = connection.GetDbCommand(result, _httpContextAccessor.HttpContext!);
+        using var reader = await command.ExecuteReaderAsync();
 
         var resultados = new List<Dictionary<string, object>>();
-        using (OleDbCommand command = new OleDbCommand(dataQry, connection.Connect.OleDbConnection))
+        while (await reader.ReadAsync())
         {
-            foreach (var parameter in parameters)
+            var fila = new Dictionary<string, object>();
+            for (int i = 0; i < reader.FieldCount; i++)
             {
-                command.Parameters.Add(parameter);
+                fila[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
             }
-            using (OleDbDataReader reader = command.ExecuteReader())
-            {
-                while (await reader.ReadAsync())
-                {
-                    var fila = new Dictionary<string, object>();
-                    for (int i = 0; i < reader.FieldCount; i++)
-                    {
-                        fila[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                    }
-                    resultados.Add(fila);
-                }
-            }
+            resultados.Add(fila);
         }
 
-        var resultadosFiltrados = resultados
-
-        .Where(r =>
+        // Filtrado por fecha (aplicación)
+        var resultadosFiltrados = resultados.Where(r =>
         {
-            //Aplicados
-            int dia = int.TryParse(r.GetValueOrDefault("PQRADI")?.ToString(), out var tempDia) ? tempDia : 0;
-            int mes = int.TryParse(r.GetValueOrDefault("PQRAME")?.ToString(), out var tempMes) ? tempMes : 0;
-            int año = int.TryParse(r.GetValueOrDefault("PQRAAN")?.ToString(), out var tempAño) ? tempAño : 0;
-            int horacompleta = int.TryParse(r.GetValueOrDefault("PQRAHO")?.ToString(), out var tempHora) ? tempHora : 0;
+            int dia = int.TryParse(r.GetValueOrDefault("PQRADI")?.ToString(), out var d) ? d : 0;
+            int mes = int.TryParse(r.GetValueOrDefault("PQRAME")?.ToString(), out var m) ? m : 0;
+            int anio = int.TryParse(r.GetValueOrDefault("PQRAAN")?.ToString(), out var a) ? a : 0;
+            int horaRaw = int.TryParse(r.GetValueOrDefault("PQRAHO")?.ToString(), out var h) ? h : 0;
 
-            int hora = horacompleta / 10000;
-            int minuto = (horacompleta / 100) % 100;
-            int segundo = horacompleta % 100;
+            var fecha = new DateTime(anio, mes, dia,
+                horaRaw / 10000, (horaRaw / 100) % 100, horaRaw % 100);
 
-            var fecha = new DateTime(año, mes, dia, hora, minuto, segundo);
             return fecha >= fechaInicial && fecha <= fechaFinal;
-
-
         });
 
-        if (listarQRAplicadosDto.Sort == "")
-        {
-            listarQRAplicadosDto.Sort = "Asc";
-        }
-
-        if (listarQRAplicadosDto.Sort == "Desc")
-        {
-            resultadosFiltrados = resultadosFiltrados.OrderByDescending(r =>
+        // Ordenamiento por fecha aplicada
+        listarQRAplicadosDto.Sort ??= "Asc";
+        resultadosFiltrados = listarQRAplicadosDto.Sort == "Desc"
+            ? resultadosFiltrados.OrderByDescending(r =>
             {
-                int dia = int.TryParse(r.GetValueOrDefault("PQRADI")?.ToString(), out var tempDia) ? tempDia : 0;
-                int mes = int.TryParse(r.GetValueOrDefault("PQRAME")?.ToString(), out var tempMes) ? tempMes : 0;
-                int año = int.TryParse(r.GetValueOrDefault("PQRAAN")?.ToString(), out var tempAño) ? tempAño : 0;
-                int horacompleta = int.TryParse(r.GetValueOrDefault("PQRAHO")?.ToString(), out var tempHora) ? tempHora : 0;
-
-                int hora = horacompleta / 10000;
-                int minuto = (horacompleta / 100) % 100;
-                int segundo = horacompleta % 100;
-
-                return new DateTime(año, mes, dia, hora, minuto, segundo);
-            }).ToList();
-        }
-        else if (listarQRAplicadosDto.Sort == "Asc")
-        {
-            resultadosFiltrados = resultadosFiltrados.OrderBy(r =>
+                int dia = int.TryParse(r.GetValueOrDefault("PQRADI")?.ToString(), out var d) ? d : 0;
+                int mes = int.TryParse(r.GetValueOrDefault("PQRAME")?.ToString(), out var m) ? m : 0;
+                int anio = int.TryParse(r.GetValueOrDefault("PQRAAN")?.ToString(), out var a) ? a : 0;
+                int horaRaw = int.TryParse(r.GetValueOrDefault("PQRAHO")?.ToString(), out var h) ? h : 0;
+                return new DateTime(anio, mes, dia, horaRaw / 10000, (horaRaw / 100) % 100, horaRaw % 100);
+            }).ToList()
+            : resultadosFiltrados.OrderBy(r =>
             {
-                int dia = int.TryParse(r.GetValueOrDefault("PQRADI")?.ToString(), out var tempDia) ? tempDia : 0;
-                int mes = int.TryParse(r.GetValueOrDefault("PQRAME")?.ToString(), out var tempMes) ? tempMes : 0;
-                int año = int.TryParse(r.GetValueOrDefault("PQRAAN")?.ToString(), out var tempAño) ? tempAño : 0;
-                int horacompleta = int.TryParse(r.GetValueOrDefault("PQRAHO")?.ToString(), out var tempHora) ? tempHora : 0;
-
-                int hora = horacompleta / 10000;
-                int minuto = (horacompleta / 100) % 100;
-                int segundo = horacompleta % 100;
-
-                return new DateTime(año, mes, dia, hora, minuto, segundo);
+                int dia = int.TryParse(r.GetValueOrDefault("PQRADI")?.ToString(), out var d) ? d : 0;
+                int mes = int.TryParse(r.GetValueOrDefault("PQRAME")?.ToString(), out var m) ? m : 0;
+                int anio = int.TryParse(r.GetValueOrDefault("PQRAAN")?.ToString(), out var a) ? a : 0;
+                int horaRaw = int.TryParse(r.GetValueOrDefault("PQRAHO")?.ToString(), out var h) ? h : 0;
+                return new DateTime(anio, mes, dia, horaRaw / 10000, (horaRaw / 100) % 100, horaRaw % 100);
             }).ToList();
-        }
 
-
-
-        decimal TotalMonto = resultadosFiltrados.Sum(r =>
+        var totalMonto = resultadosFiltrados.Sum(r =>
         {
-            var valorMonto = r.GetValueOrDefault("PQRMTO")?.ToString();
-
-            return decimal.TryParse(valorMonto, out var monto) ? monto : 0;
+            var montoRaw = r.GetValueOrDefault("PQRMTO")?.ToString();
+            return decimal.TryParse(montoRaw, out var monto) ? monto : 0;
         });
 
-
-
-        /*Paginado*/
         int totalRegistros = resultadosFiltrados.Count();
-        if (listarQRAplicadosDto.Size == "")
+        int pageSize = string.IsNullOrEmpty(listarQRAplicadosDto.Size) || listarQRAplicadosDto.Size == "0" ? 1 : int.Parse(listarQRAplicadosDto.Size);
+        int totalPaginas = (int)Math.Ceiling((double)totalRegistros / pageSize);
+        int currentPage = string.IsNullOrEmpty(listarQRAplicadosDto.Page) ? 0 : int.Parse(listarQRAplicadosDto.Page);
+
+        if (pageSize >= totalRegistros)
         {
-            listarQRAplicadosDto.Size = "1";
-        }
-        else if (listarQRAplicadosDto.Size == "0")
-        {
-            listarQRAplicadosDto.Size = "1";
-        }
-        if (listarQRAplicadosDto.Page == "")
-        {
-            listarQRAplicadosDto.Page = "0";
-        }
-
-        int totalPaginas = (int)Math.Ceiling(totalRegistros / Convert.ToDouble(listarQRAplicadosDto.Size));
-
-        if (!resultadosFiltrados.Any())
-        {
-
-            respuestDto.ResponseCode = 1;
-            respuestDto.ResponseDescription = "busqueda no obtuvo datos";
-
-
-            return respuestDto;
-        };
-
-        if (Convert.ToInt32(listarQRAplicadosDto.Size) >= totalRegistros)
-        {
-            listarQRAplicadosDto.Page = "0";
+            currentPage = 0;
             totalPaginas = 1;
-
         }
-        int paginalActual = Convert.ToInt32(listarQRAplicadosDto.Page);
-
-        if (paginalActual < 0)
+        else if (currentPage >= totalPaginas)
         {
-            paginalActual = 0;
-        }
-        else if (paginalActual >= totalPaginas)
-        {
-            paginalActual = totalPaginas - 1;
+            currentPage = totalPaginas - 1;
         }
 
-        int inicio = paginalActual * Convert.ToInt32(listarQRAplicadosDto.Size);
-        int fin = Math.Min(inicio + Convert.ToInt32(listarQRAplicadosDto.Size), totalRegistros);
-        var paginaDeResultados = resultadosFiltrados.Skip(inicio).Take(Convert.ToInt32(listarQRAplicadosDto.Size)).ToList();
-        listarQRAplicadosDto.Page = paginalActual.ToString();
+        int inicio = currentPage * pageSize;
+        int fin = Math.Min(inicio + pageSize, totalRegistros);
+        var paginaDeResultados = resultadosFiltrados.Skip(inicio).Take(pageSize).ToList();
 
-        respuestDto.content = new RespuestaListarQRAplicadosDto.Content[paginaDeResultados.Count];
-
-
-
-        for (int i = 0; i < paginaDeResultados.Count; i++)
+        var content = paginaDeResultados.Select(r =>
         {
-            var result = paginaDeResultados[i];
-            int diacreacion = int.TryParse(result.GetValueOrDefault("PQRCDI")?.ToString(), out var tempDia) ? tempDia : 0;
-            int mescreacion = int.TryParse(result.GetValueOrDefault("PQRCME")?.ToString(), out var tempMes) ? tempMes : 0;
-            int añocreacion = int.TryParse(result.GetValueOrDefault("PQRCAN")?.ToString(), out var tempAño) ? tempAño : 0;
-            int horacreacion = int.TryParse(result.GetValueOrDefault("PQRCHO")?.ToString(), out var tempHora) ? tempHora : 0;
+            int diaC = int.TryParse(r.GetValueOrDefault("PQRCDI")?.ToString(), out var d) ? d : 0;
+            int mesC = int.TryParse(r.GetValueOrDefault("PQRCME")?.ToString(), out var m) ? m : 0;
+            int anioC = int.TryParse(r.GetValueOrDefault("PQRCAN")?.ToString(), out var a) ? a : 0;
+            int horaC = int.TryParse(r.GetValueOrDefault("PQRCHO")?.ToString(), out var h) ? h : 0;
 
-            int hora = horacreacion / 10000;
-            int minuto = (horacreacion / 100) % 100;
-            int segundo = horacreacion % 100;
+            int diaA = int.TryParse(r.GetValueOrDefault("PQRADI")?.ToString(), out var da) ? da : 0;
+            int mesA = int.TryParse(r.GetValueOrDefault("PQRAME")?.ToString(), out var ma) ? ma : 0;
+            int anioA = int.TryParse(r.GetValueOrDefault("PQRAAN")?.ToString(), out var aa) ? aa : 0;
+            int horaA = int.TryParse(r.GetValueOrDefault("PQRAHO")?.ToString(), out var ha) ? ha : 0;
 
+            string cuenta = r.GetValueOrDefault("PQRCTA")?.ToString() ?? "";
 
-            int dia = int.TryParse(result.GetValueOrDefault("PQRADI")?.ToString(), out var tempDiaApl) ? tempDiaApl : 0;
-            int mes = int.TryParse(result.GetValueOrDefault("PQRAME")?.ToString(), out var tempMesApl) ? tempMesApl : 0;
-            int año = int.TryParse(result.GetValueOrDefault("PQRAAN")?.ToString(), out var tempAñoApl) ? tempAñoApl : 0;
+            return new RespuestaListarQRAplicadosDto.Content
+            {
+                CreationDate = $"{diaC:D2}/{mesC:D2}/{anioC} {horaC / 10000:D2}:{(horaC / 100) % 100:D2}:{horaC % 100:D2}",
+                QrId = r.GetValueOrDefault("PQRQID")?.ToString() ?? "",
+                Type = r.GetValueOrDefault("PQRQTI")?.ToString() ?? "",
+                Cif = r.GetValueOrDefault("PQRCIF")?.ToString() ?? "",
+                CifName = r.GetValueOrDefault("CLINOM")?.ToString() ?? "",
+                CreationUser = r.GetValueOrDefault("PQRUMA")?.ToString() ?? "",
+                PointOfSaleID = Convert.ToDecimal(r.GetValueOrDefault("PQRPVI") ?? 0),
+                PointOfSaleDes = r.GetValueOrDefault("PQRPVD")?.ToString() ?? "",
+                CashierId = Convert.ToDecimal(r.GetValueOrDefault("PQRCAI") ?? 0),
+                CashierDes = r.GetValueOrDefault("PQRCAD")?.ToString() ?? "",
+                Account = cuenta.Length > 6 ? new string('*', 6) + cuenta.Substring(6) : new string('*', cuenta.Length),
+                Reference = r.GetValueOrDefault("PQRREG")?.ToString() ?? "",
+                AppliedReference = r.GetValueOrDefault("PQRARE")?.ToString() ?? "",
+                BankName = r.GetValueOrDefault("DESENT")?.ToString() ?? "",
+                OriginatingAccountName = r.GetValueOrDefault("PQRNCO")?.ToString() ?? "",
+                Currency = Convert.ToDecimal(r.GetValueOrDefault("PQRMON") ?? 0),
+                Amount = Convert.ToDecimal(r.GetValueOrDefault("PQRMTO") ?? 0),
+                AppliedDate = $"{diaA:D2}/{mesA:D2}/{anioA} {horaA / 10000:D2}:{(horaA / 100) % 100:D2}:{horaA % 100:D2}",
+                Status = "APL"
+            };
+        }).ToArray();
+
+        return new RespuestaListarQRAplicadosDto
+        {
+            content = content,
+            FirstPage = currentPage == 0,
+            LastPage = currentPage == totalPaginas - 1,
+            Page = currentPage,
+            TotalPages = totalPaginas,
+            TotalElements = totalRegistros,
+            TotalAmount = totalMonto.ToString(),
+            ResponseCode = 0,
+            ResponseDescription = "Se obtuvo la lista de QR generados"
+        };
+    }
+    catch (Exception ex)
+    {
+        return new RespuestaListarQRAplicadosDto
+        {
+            ResponseCode = 1,
+            ResponseDescription = ex.Message,
+            content = Array.Empty<RespuestaListarQRAplicadosDto.Content>()
+        };
+    }
+}            int año = int.TryParse(result.GetValueOrDefault("PQRAAN")?.ToString(), out var tempAñoApl) ? tempAñoApl : 0;
             int horaApplied = int.TryParse(result.GetValueOrDefault("PQRAHO")?.ToString(), out var tempHoraApl) ? tempHoraApl : 0;
 
             int horaAPL = horaApplied / 10000;
