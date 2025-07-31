@@ -1,8 +1,10 @@
+Necesito que me digas si puedo hacer WhereRaw o si no existe ese método
+
 public async Task<RespuestaListarComercioDto> ListarComercioAsync(ListarComerciosDto listarComercio)
 {
     try
     {
-        connection.Open();
+        _connection.Open();
 
         var pageSize = string.IsNullOrWhiteSpace(listarComercio.Size) || listarComercio.Size == "0" ? 1 : int.Parse(listarComercio.Size);
         var currentPage = string.IsNullOrWhiteSpace(listarComercio.Page) ? 0 : int.Parse(listarComercio.Page);
@@ -12,7 +14,8 @@ public async Task<RespuestaListarComercioDto> ListarComercioAsync(ListarComercio
         string library = "IS4TECHDTA";
 
         // COUNT
-        var countQuery = new SelectQueryBuilder(table, library)
+        var countQuery = QueryBuilder.Core.QueryBuilder
+            .From(table, library)
             .Select("COUNT(*)")
             .WhereRaw("1=1");
 
@@ -53,7 +56,7 @@ public async Task<RespuestaListarComercioDto> ListarComercioAsync(ListarComercio
 
         // Ejecutar COUNT
         var countResult = countQuery.Build();
-        using var countCommand = connection.GetDbCommand(countResult, _httpContextAccessor.HttpContext!);
+        using var countCommand = _connection.GetDbCommand(countResult, _httpContextAccessor.HttpContext!);
         var totalElements = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
         if (totalElements == 0)
@@ -78,7 +81,7 @@ public async Task<RespuestaListarComercioDto> ListarComercioAsync(ListarComercio
 
         // Ejecutar DATA
         var dataResult = dataQuery.Build();
-        using var dataCommand = connection.GetDbCommand(dataResult, _httpContextAccessor.HttpContext!);
+        using var dataCommand = _connection.GetDbCommand(dataResult, _httpContextAccessor.HttpContext!);
         using var reader = await dataCommand.ExecuteReaderAsync();
 
         var listaDeComercios = new List<RespuestaListarComercioDto.Content>();
