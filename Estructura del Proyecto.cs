@@ -1,67 +1,40 @@
 /// <summary>
-/// Captura la información de la solicitud HTTP antes de que sea procesada por los controladores.
+/// Obtiene el archivo de log de la petición actual, garantizando que toda la información
+/// se guarde en el mismo archivo. Se organiza por API, controlador, endpoint y fecha.
 /// </summary>
-private static async Task<string> CaptureRequestInfoAsync(HttpContext context)
+public string GetCurrentLogFile()
 {
-    Console.WriteLine("[LOGGING] CaptureRequestInfoAsync");
+    var context = _httpContextAccessor.HttpContext;
 
-    context.Request.EnableBuffering(); // Permite leer el cuerpo de la petición sin afectar la ejecución
-
-    string body = "";
-
-    try
+    if (context is not null)
     {
-        using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-        body = await reader.ReadToEndAsync();
-        context.Request.Body.Position = 0;
+        // Si ya se definió, lo reutiliza
+        if (context.Items.TryGetValue("LogFileName", out var existing) && existing is string existingPath)
+            return existingPath;
 
-        if (!string.IsNullOrWhiteSpace(body))
-        {
-            LogFileNameExtractors.TryExtractLogFileNameFromBody(context, body);
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[LOGGING] Error al leer body: {ex.Message}");
-        // Continúa sin cortar el flujo
-    }
+        // Extraer nombre de endpoint
+        string rawPath = context.Request.Path.Value?.Trim('/') ?? "Unknown/Unknown";
+        var endpoint = rawPath.Split('/').LastOrDefault() ?? "Unknown";
 
-    return LogFormatter.FormatRequestInfo(
-        context,
-        method: context.Request.Method,
-        path: context.Request.Path,
-        queryParams: context.Request.QueryString.ToString(),
-        body: body
-    );
-}
+        // Buscar si se extrajo algún valor personalizado
+        context.Items.TryGetValue("ExtractedLogFileName", out var extracted); // <-- este valor viene de TryExtractLogFileNameFromBody
 
-/// <summary>
-/// Captura la información de la respuesta HTTP antes de enviarla al cliente.
-/// </summary>
-private static async Task<string> CaptureResponseInfoAsync(HttpContext context)
-{
-    try
-    {
-        if (context.Response.Body.CanSeek)
-        {
-            context.Response.Body.Seek(0, SeekOrigin.Begin);
+        string customPart = extracted is string s && !string.IsNullOrWhiteSpace(s) ? $"_{s}" : "";
 
-            using var reader = new StreamReader(context.Response.Body, Encoding.UTF8, leaveOpen: true);
-            string body = await reader.ReadToEndAsync();
+        // Formato base: TraceId_Feature_Fecha.txt
+        string traceId = context.TraceIdentifier;
+        string date = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
 
-            context.Response.Body.Seek(0, SeekOrigin.Begin);
+        string fileName = $"{traceId}{customPart}_{endpoint}_{date}.txt";
 
-            return LogFormatter.FormatResponseInfo(context, body);
-        }
-        else
-        {
-            Console.WriteLine("[LOGGING] El stream de respuesta no es seekable.");
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[LOGGING] Error al leer la respuesta: {ex.Message}");
+        string fullPath = Path.Combine(_logDirectoryRoot, context.Request.Path.Value?.Trim('/').Replace("/", "_") ?? "General", fileName);
+
+        // Guardar en el contexto para reutilización
+        context.Items["LogFileName"] = fullPath;
+
+        return fullPath;
     }
 
-    return LogFormatter.FormatResponseInfo(context, string.Empty);
+    // Si no hay contexto, ruta por defecto
+    return Path.Combine(_logDirectoryRoot, $"Log_{DateTime.UtcNow:yyyyMMdd_HHmmss}.txt");
 }
