@@ -1,3 +1,5 @@
+Esta modificación que sugieres:
+
 try
 {
     // Deserializa a un objeto genérico (puedes usar tipos específicos si prefieres)
@@ -28,8 +30,26 @@ catch
     // Silencioso: si falla el parsing no afecta
 }
 
-string customNamePart = "";
-if (context.Items.TryGetValue("LogFileNameCustom", out var customValue) && customValue is string customStr)
-{
-    customNamePart = $"_{customStr}";
-}
+Cambia bastante el estado actual del codigo
+
+   /// <summary>
+   /// Captura la información de la solicitud HTTP antes de que sea procesada por los controladores.
+   /// </summary>
+   private static async Task<string> CaptureRequestInfoAsync(HttpContext context)
+   {
+       context.Request.EnableBuffering(); // Permite leer el cuerpo de la petición sin afectar la ejecución
+
+       using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
+       string body = await reader.ReadToEndAsync();
+       context.Request.Body.Position = 0; // Restablece la posición para que el controlador pueda leerlo
+
+       return LogFormatter.FormatRequestInfo(context,
+           method: context.Request.Method,
+           path: context.Request.Path,
+           queryParams: context.Request.QueryString.ToString(),
+           body: body
+       );
+   }
+
+se pierde la logica del formateo y almacenamiento de LogFormatter.FormatRequestInfo, eso se debe de mantener, cualquier cambio debe ser un extra a las funciones de los metodos existentes.
+
