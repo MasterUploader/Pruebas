@@ -1,99 +1,139 @@
-private static void TryExtractLogFileNameFromBody(HttpContext context, string body)
+using System.Reflection;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+
+namespace Logging.Helpers
 {
-    try
+    /// <summary>
+    /// Clase auxiliar para detectar automáticamente propiedades marcadas con el atributo
+    /// [LogFileName] dentro del body JSON, sin conocer el tipo DTO en tiempo de compilación.
+    /// </summary>
+    public static class LogFileNameExtractor
     {
-        Console.WriteLine("[LOGGING] Iniciando extracción de LogFileName desde el body...");
+        /// <summary>
+        /// Cache de propiedades que contienen el atributo [LogFileName], por nombre JSON (en minúsculas).
+        /// </summary>
+        private static readonly Dictionary<string, (string Label, PropertyInfo Prop)> _loggableProperties = new();
+        private static bool _cacheBuilt = false;
 
-        var options = new JsonSerializerOptions
+        /// <summary>
+        /// Intenta extraer el valor de una propiedad marcada con [LogFileName] desde el cuerpo JSON.
+        /// Si se encuentra, lo almacena en context.Items["LogFileNameCustom"] para que pueda usarse en el nombre del log.
+        /// </summary>
+        /// <param name="context">Contexto HTTP actual</param>
+        /// <param name="body">Cuerpo de la petición como texto</param>
+        public static void TryExtractLogFileNameFromBody(HttpContext context, string body)
         {
-            PropertyNameCaseInsensitive = true
-        };
-
-        object? dto = JsonSerializer.Deserialize<object>(body, options);
-
-        if (dto == null)
-        {
-            Console.WriteLine("[LOGGING] No se pudo deserializar el body.");
-            return;
-        }
-
-        Console.WriteLine($"[LOGGING] Body deserializado exitosamente: Tipo={dto.GetType().Name}");
-
-        if (TryFindLogFileNameValue(dto, out string? logName) && !string.IsNullOrWhiteSpace(logName))
-        {
-            context.Items["LogFileNameCustom"] = logName;
-            Console.WriteLine($"[LOGGING] Se encontró LogFileNameCustom: {logName}");
-        }
-        else
-        {
-            Console.WriteLine("[LOGGING] No se encontró ninguna propiedad con el atributo [LogFileName].");
-        }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[LOGGING] Error al procesar el body: {ex.Message}");
-    }
-}
-
-private static bool TryFindLogFileNameValue(object obj, out string? logName)
-{
-    logName = null;
-
-    if (obj == null)
-    {
-        Console.WriteLine("[LOGGING] Objeto nulo recibido en TryFindLogFileNameValue.");
-        return false;
-    }
-
-    var type = obj.GetType();
-    Console.WriteLine($"[LOGGING] Analizando objeto de tipo: {type.Name}");
-
-    if (obj is IEnumerable<object> enumerable)
-    {
-        Console.WriteLine("[LOGGING] Es una colección, iterando elementos...");
-        foreach (var item in enumerable)
-        {
-            if (TryFindLogFileNameValue(item, out logName))
-                return true;
-        }
-        return false;
-    }
-
-    foreach (var prop in type.GetProperties())
-    {
-        Console.WriteLine($"[LOGGING] Revisando propiedad: {prop.Name}");
-
-        var attr = prop.GetCustomAttributes(typeof(LogFileNameAttribute), true)
-                       .FirstOrDefault() as LogFileNameAttribute;
-        var value = prop.GetValue(obj);
-
-        if (attr != null)
-        {
-            Console.WriteLine($"[LOGGING] -> Se detectó el atributo [LogFileName(\"{attr.Label}\")] en la propiedad {prop.Name}");
-
-            if (value is string strValue && !string.IsNullOrWhiteSpace(strValue))
+            try
             {
-                logName = string.IsNullOrWhiteSpace(attr.Label)
-                    ? strValue
-                    : $"{attr.Label}-{strValue}";
+                Console.WriteLine("[LOGGING] Iniciando extracción genérica de LogFileName...");
 
-                Console.WriteLine($"[LOGGING] -> Valor válido encontrado: {logName}");
-                return true;
+                if (!_cacheBuilt)
+                {
+                    BuildLoggablePropertyCache();
+                    _cacheBuilt = true;
+                    Console.WriteLine($"[LOGGING] Cache cargada con {_loggableProperties.Count} propiedades.");
+                }
+
+                var jsonDoc = JsonDocument.Parse(body);
+
+                if (TryScanJson(jsonDoc.RootElement, out var logValue))
+                {
+                    context.Items["LogFileNameCustom"] = logValue;
+                    Console.WriteLine($"[LOGGING] Valor log extraído: {logValue}");
+                }
+                else
+                {
+                    Console.WriteLine("[LOGGING] No se encontró ninguna coincidencia de LogFileName.");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                Console.WriteLine("[LOGGING] -> Valor nulo o vacío, ignorando...");
+                Console.WriteLine($"[LOGGING] Error al procesar el body JSON: {ex.Message}");
             }
         }
 
-        // Buscar recursivamente en objetos complejos
-        if (value != null && value.GetType().IsClass && value.GetType() != typeof(string))
+        /// <summary>
+        /// Construye el cache con todas las propiedades en todos los tipos cargados
+        /// que están decoradas con [LogFileName].
+        /// </summary>
+        private static void BuildLoggablePropertyCache()
         {
-            Console.WriteLine($"[LOGGING] -> Propiedad {prop.Name} es un objeto complejo, analizando internamente...");
-            if (TryFindLogFileNameValue(value, out logName))
-                return true;
+            var allTypes = AppDomain.CurrentDomain.GetAssemblies()
+                .Where(a => !a.IsDynamic && !a.FullName!.StartsWith("System"))
+                .SelectMany(a => a.GetTypes())
+                .Where(t => t.IsClass && !t.IsAbstract && !t.FullName!.StartsWith("Microsoft"));
+
+            foreach (var type in allTypes)
+            {
+                foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    var attr = prop.GetCustomAttributes(typeof(LogFileNameAttribute), true)
+                                   .FirstOrDefault() as LogFileNameAttribute;
+
+                    if (attr != null)
+                    {
+                        string jsonName = prop.Name;
+
+                        // Detectar si se usa [JsonPropertyName] o [JsonProperty]
+                        var jsonAttr = prop.GetCustomAttributes().FirstOrDefault(a =>
+                            a.GetType().Name is "JsonPropertyNameAttribute" or "JsonPropertyAttribute");
+
+                        if (jsonAttr != null)
+                        {
+                            var nameProp = jsonAttr.GetType().GetProperty("Name");
+                            jsonName = nameProp?.GetValue(jsonAttr)?.ToString() ?? jsonName;
+                        }
+
+                        string key = jsonName.ToLowerInvariant();
+                        if (!_loggableProperties.ContainsKey(key))
+                        {
+                            _loggableProperties[key] = (attr.Label ?? "", prop);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Escanea recursivamente un JsonElement para buscar coincidencias con propiedades marcadas con [LogFileName].
+        /// </summary>
+        private static bool TryScanJson(JsonElement element, out string? logValue)
+        {
+            logValue = null;
+
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in element.EnumerateObject())
+                {
+                    string propName = prop.Name.ToLowerInvariant();
+
+                    if (_loggableProperties.TryGetValue(propName, out var info))
+                    {
+                        var val = prop.Value.GetString();
+                        if (!string.IsNullOrWhiteSpace(val))
+                        {
+                            logValue = string.IsNullOrWhiteSpace(info.Label) ? val : $"{info.Label}-{val}";
+                            return true;
+                        }
+                    }
+
+                    if (TryScanJson(prop.Value, out logValue))
+                        return true;
+                }
+            }
+            else if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (TryScanJson(item, out logValue))
+                        return true;
+                }
+            }
+
+            return false;
         }
     }
-
-    return false;
 }
+
+LogFileNameExtractor.TryExtractLogFileNameFromBody(context, body);
