@@ -44,55 +44,7 @@ namespace Logging.Services
             }
         }
 
-        /// <summary>
-        /// Obtiene el archivo de log de la petición actual, garantizando que toda la información
-        /// se guarde en el mismo archivo. Se organiza por API, controlador, endpoint y fecha.
-        /// </summary>
-        public string GetCurrentLogFile3()
-        {
-            try
-            {
-                var context = _httpContextAccessor.HttpContext;
-
-                if (context is not null)
-                {
-                    // Reutiliza si ya se definió
-                    if (context.Items.TryGetValue("LogFileName", out var existing) && existing is string existingPath)
-                        return existingPath;
-
-                    // Extrae información del path: /Bts/Consulta → controller=Bts, endpoint=Consulta
-                    string rawPath = context.Request.Path.Value?.Trim('/') ?? "Unknown/Unknown";
-                    var pathParts = rawPath.Split('/');
-                    string endpoint = context.Request.Path.Value?.Trim('/').Split('/').LastOrDefault() ?? "UnknownEndpoint";
-
-                    // Intenta sobrescribir con metadatos (opcional)
-                    var endpointMetadata = context.GetEndpoint();
-                    var controllerName = endpointMetadata?.Metadata
-                        .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
-                        .FirstOrDefault()?.ControllerName ?? "UnknownController";
-
-                    // Fecha, timestamp y ejecución
-                    string fecha = DateTime.UtcNow.ToString("yyyy-MM-dd");
-                    string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-                    string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
-
-                    // _logDirectory YA contiene el nombre de la API
-                    string finalDirectory = Path.Combine(_logDirectory, controllerName, endpoint, fecha);
-                    Directory.CreateDirectory(finalDirectory);
-
-                    string fileName = $"{executionId}_{endpoint}_{timestamp}.txt";
-                    string fullPath = Path.Combine(finalDirectory, fileName);
-
-                    context.Items["LogFileName"] = fullPath;
-                    return fullPath;
-                }
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-            return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
-        }
+       
 
         /// <summary>
         /// Obtiene el archivo de log de la petición actual, garantizando que toda la información
@@ -130,7 +82,12 @@ namespace Logging.Services
                     string customNamePart = "";
                     if (context.Items.TryGetValue("LogFileNameCustom", out var customValue) && customValue is string customStr)
                     {
+                       
                         customNamePart = $"_{customStr}";
+
+                        Console.WriteLine($"CustomStr {customStr}");
+                        Console.WriteLine($"CustomValue {customValue}");
+                        Console.WriteLine($"CustomNAme PArt {customNamePart}");
                     }
 
                     // Construcción de ruta final: /API/Controller/Endpoint/Fecha/
@@ -139,6 +96,8 @@ namespace Logging.Services
 
                     // 📝 Nombre del archivo incluye ID de ejecución, endpoint, customName y timestamp
                     string fileName = $"{executionId}_{endpoint}{customNamePart}_{timestamp}.txt";
+
+                    Console.WriteLine($"File name: {fileName}");
                     string fullPath = Path.Combine(finalDirectory, fileName);
 
                     // Guarda en contexto para reutilización en toda la petición
@@ -146,42 +105,6 @@ namespace Logging.Services
 
                     return fullPath;
                 }
-            }
-            catch (Exception ex)
-            {
-                LogInternalError(ex);
-            }
-
-            return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
-        }
-
-        /// <summary>
-        /// Obtiene el archivo de log de la petición actual, garantizando que toda la información se guarde en el mismo archivo.
-        /// </summary>
-        public string GetCurrentLogFile2()
-        {
-            try
-            {
-                var context = _httpContextAccessor.HttpContext;
-
-                // Si ya existe un archivo de log en esta petición, reutilizarlo
-                if (context is not null && context.Items.ContainsKey("LogFileName") && context.Items["LogFileName"] is string logFileName)
-                {
-                    return logFileName;
-                }
-
-                // Generar un nuevo nombre de archivo solo si no se ha creado antes
-                if (context is not null && context.Items.ContainsKey("ExecutionId"))
-                {
-                    string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
-                    string endpoint = context.Request?.Path.ToString().Replace("/", "_").Trim('/') ?? "UnknownEndpoint";
-                    string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                    string newLogFileName = Path.Combine(_logDirectory, $"{executionId}_{endpoint}_{timestamp}.txt");
-                    context.Items["LogFileName"] = newLogFileName;
-
-                    return newLogFileName;
-                }
-
             }
             catch (Exception ex)
             {
