@@ -1,47 +1,60 @@
-private static async Task<string> CaptureRequestInfoAsync(HttpContext context)
-{
-    context.Request.EnableBuffering(); // Permite leer el cuerpo de la petición sin afectar la ejecución
-
-    using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-    string body = await reader.ReadToEndAsync();
-    context.Request.Body.Position = 0; // Restablece la posición para que el controlador pueda leerlo
-
-    // ✅ Mantener el formateo y almacenamiento actual
-    string formattedRequest = LogFormatter.FormatRequestInfo(context,
-        method: context.Request.Method,
-        path: context.Request.Path,
-        queryParams: context.Request.QueryString.ToString(),
-        body: body
-    );
-
-    // ✅ Agregar lógica adicional SIN modificar el comportamiento actual
-    TryExtractLogFileNameFromBody(context, body);
-
-    return formattedRequest;
-}
-
-private static void TryExtractLogFileNameFromBody(HttpContext context, string body)
+/// <summary>
+/// Obtiene el archivo de log de la petición actual, garantizando que toda la información
+/// se guarde en el mismo archivo. Se organiza por API, controlador, endpoint y fecha.
+/// </summary>
+public string GetCurrentLogFile()
 {
     try
     {
-        var jsonDoc = JsonDocument.Parse(body);
+        var context = _httpContextAccessor.HttpContext;
 
-        foreach (var property in jsonDoc.RootElement.EnumerateObject())
+        if (context is not null)
         {
-            // Aquí puedes personalizar el nombre del campo si quieres que sea más flexible
-            if (property.Name.Equals("CodigoAgencia", StringComparison.OrdinalIgnoreCase))
+            // Reutiliza si ya se definió
+            if (context.Items.TryGetValue("LogFileName", out var existing) && existing is string existingPath)
+                return existingPath;
+
+            // Extrae información del path: /Bts/Consulta → controller=Bts, endpoint=Consulta
+            string rawPath = context.Request.Path.Value?.Trim('/') ?? "Unknown/Unknown";
+            var pathParts = rawPath.Split('/');
+            string endpoint = context.Request.Path.Value?.Trim('/').Split('/').LastOrDefault() ?? "UnknownEndpoint";
+
+            // Intenta sobrescribir con metadatos (opcional)
+            var endpointMetadata = context.GetEndpoint();
+            var controllerName = endpointMetadata?.Metadata
+                .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
+                .FirstOrDefault()?.ControllerName ?? "UnknownController";                    
+
+            // Fecha, timestamp y ejecución
+            string fecha = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+            string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
+
+            // 🔁 Componente extra opcional para el nombre del archivo, definido en middleware
+            string customNamePart = "";
+            if (context.Items.TryGetValue("LogFileNameCustom", out var customValue) && customValue is string customStr)
             {
-                var value = property.Value.GetString();
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    context.Items["LogFileNameCustom"] = $"id-{value}";
-                    break;
-                }
+                customNamePart = $"_{customStr}";
             }
+
+            // Construcción de ruta final: /API/Controller/Endpoint/Fecha/
+            string finalDirectory = Path.Combine(_logDirectory, controllerName, endpoint, fecha);
+            Directory.CreateDirectory(finalDirectory);
+
+            // 📝 Nombre del archivo incluye ID de ejecución, endpoint, customName y timestamp
+            string fileName = $"{executionId}_{endpoint}{customNamePart}_{timestamp}.txt";
+            string fullPath = Path.Combine(finalDirectory, fileName);
+
+            // Guarda en contexto para reutilización en toda la petición
+            context.Items["LogFileName"] = fullPath;
+
+            return fullPath;
         }
     }
-    catch
+    catch (Exception ex)
     {
-        // No interrumpas si falla la lectura
+        LogInternalError(ex);
     }
+
+    return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
 }
