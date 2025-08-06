@@ -1,31 +1,70 @@
-Este es el codigo que me generaste
-
-    private static void TryExtractLogFileNameFromBody(HttpContext context, string body)
+private static void TryExtractLogFileNameFromBody(HttpContext context, string body)
+{
+    try
     {
-        try
+        var options = new JsonSerializerOptions
         {
-            var jsonDoc = JsonDocument.Parse(body);
+            PropertyNameCaseInsensitive = true
+        };
 
-            foreach (var property in jsonDoc.RootElement.EnumerateObject())
-            {
-                // Aquí puedes personalizar el nombre del campo si quieres que sea más flexible
-                if (property.Name.Equals("CodigoAgencia", StringComparison.OrdinalIgnoreCase))
-                {
-                    var value = property.Value.GetString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        string logName = $"id-{value}";
-                        context.Items["LogFileNameCustom"] = $"id-{value}";
-                        break;
-                    }
-                }
-            }
-        }
-        catch
+        // Deserializa como tipo dinámico (objeto genérico)
+        object? dto = JsonSerializer.Deserialize<object>(body, options);
+        if (dto == null) return;
+
+        // Recorrer recursivamente todas las propiedades para encontrar la que tenga [LogFileName]
+        if (TryFindLogFileNameValue(dto, out string? logName) && !string.IsNullOrWhiteSpace(logName))
         {
-            // No interrumpas si falla la lectura
+            context.Items["LogFileNameCustom"] = logName;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[LOGGING] Error al procesar body: {ex.Message}");
+    }
+}
+
+private static bool TryFindLogFileNameValue(object obj, out string? logName)
+{
+    logName = null;
+
+    if (obj == null)
+        return false;
+
+    Type type = obj.GetType();
+
+    // Si es una lista o array, recorrer elementos
+    if (obj is IEnumerable<object> enumerable)
+    {
+        foreach (var item in enumerable)
+        {
+            if (TryFindLogFileNameValue(item, out logName))
+                return true;
+        }
+        return false;
+    }
+
+    // Recorre propiedades del objeto
+    foreach (var prop in type.GetProperties())
+    {
+        var attr = prop.GetCustomAttributes(typeof(LogFileNameAttribute), true).FirstOrDefault() as LogFileNameAttribute;
+        var value = prop.GetValue(obj);
+
+        // Si la propiedad tiene el atributo, y el valor es string
+        if (attr != null && value is string strValue && !string.IsNullOrWhiteSpace(strValue))
+        {
+            logName = string.IsNullOrWhiteSpace(attr.Label)
+                ? strValue
+                : $"{attr.Label}-{strValue}";
+            return true;
+        }
+
+        // Si la propiedad es compleja (objeto anidado), buscar recursivamente
+        if (value != null && value.GetType().IsClass && value.GetType() != typeof(string))
+        {
+            if (TryFindLogFileNameValue(value, out logName))
+                return true;
         }
     }
 
-
-El error esta en el if, porque espera un nombre de propiedad predefinido, pero ese nombre la debe obtener de la propiedad de LogFileNameAttribute
+    return false;
+}
