@@ -1,183 +1,43 @@
-Así tengo el program.cs
-
-using Connections.Helpers;
-using Connections.Interfaces;
-using Connections.Providers.Database;
-using Connections.Services;
-using Logging.Abstractions;
-using Logging.Filters;
-using Logging.Middleware;
-using Logging.Services;
-using Microsoft.OpenApi.Models;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Repository;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Repository.IRepository.Autenticacion;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.IServiceReference;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Companies.Companies_Services;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Payments.Payments_Services;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Receivables.Receivables_Services;
-using MS_BAN_38_UTH_RECAUDACION_PAGOS.Utils;
-using RestUtilities.Logging.Handlers;
-using System.Reflection;
-
-var builder = WebApplication.CreateBuilder(args);
-
-/*Conexiones */
-// Cargar configuración desde Connection.json por ambiente (DEV, UAT, PROD)
-builder.Configuration.AddJsonFile("ConnectionData.json", optional: false, reloadOnChange: true);
-
-var connectionSettings = new ConnectionSettings(builder.Configuration);
-ConnectionManagerHelper.ConnectionConfig = connectionSettings;
-
-// Registrar ConnectionSettings para leer configuración dinámica
-builder.Services.AddSingleton<ConnectionSettings>();
-
-// Registrar IHttpContextAccessor para acceso al contexto en servicios
-builder.Services.AddHttpContextAccessor();
-
-// Registrar servicio de Logging
-builder.Services.AddScoped<ILoggingService, LoggingService>();
-
-// Registrar la conexión principal a AS400 usando OleDbCommand
-// Registrar servicio de conexión con soporte de logging para AS400
-builder.Services.AddScoped<IDatabaseConnection>(sp =>
+private async Task CaptureRequestInfoAsync(HttpContext context)
 {
-    // Obtener configuración general
-    var config = sp.GetRequiredService<IConfiguration>();
-    var settings = new ConnectionSettings(config); // Tu clase para acceder a settings
-
-    // Obtener cadena de conexión desencriptada para AS400
-    var connStr = settings.GetAS400ConnectionString("AS400");
-
-    // Instanciar proveedor interno
-    return new AS400ConnectionProvider(
-        connStr,
-        sp.GetRequiredService<ILoggingService>()); // Constructor de AS400ConnectionProvider
-
-    //// Retornar decorador con logging
-    //return new LoggingDatabaseConnectionDecorator(
-    //    innerProvider,
-    //    sp.GetRequiredService<IHttpContextAccessor>(),
-    //    sp.GetRequiredService<ILoggingService>());        
-});
-/*Conexiones*/
-
-
-
-// Registra IHttpContextAccessor para acceder al HttpContext en el servicio de logging.
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<LoggingActionFilter>();
-
-// Registra el servicio de logging. La implementación utilizará la configuración inyectada (IOptions<LoggingOptions>)
-// y la información del entorno (IHostEnvironment).
-builder.Services.AddSingleton<ILoggingService, LoggingService>();
-
-// Configura LoggingOptions a partir de la sección "LoggingOptions" en el appsettings.json.
-builder.Services.Configure<Logging.Configuration.LoggingOptions>(builder.Configuration.GetSection("LoggingOptions"));
-
-//Login para HTTPClientHandler
-builder.Services.AddTransient<HttpClientLoggingHandler>();
-
-//Configuramos para que capture logs de salida del HTTP
-builder.Services.AddHttpClient("GINIH").AddHttpMessageHandler<HttpClientLoggingHandler>();
-
-
-/*Configuración de la conexión*/
-builder.Configuration
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .AddJsonFile("ConnectionData.json", optional: false, reloadOnChange: true);
-
-var configuration = builder.Configuration;
-
-//Leer Ambiente
-var enviroment = configuration["ApiSettings:Enviroment"] ?? "DEV";
-//Leer node correspondiente desde ConnectionData.json
-var connectionSection = configuration.GetSection(enviroment);
-var connectionConfig = connectionSection.Get<ConnectionConfig>();
-
-//Asignación de conexión Global
-GlobalConnection.Current = connectionConfig!;
-
-/*Configuración de la conexión*/
-
-// Add services to the container.
-builder.Services.AddHttpClient<ILoginRepository, LoginRepository>();
-builder.Services.AddHttpClient<ICompaniesServices, CompaniesServices>();
-builder.Services.AddHttpClient<IPaymentsServices, PaymentsServices>();
-builder.Services.AddHttpClient<IReceivablesServices, ReceivablesServices>();
-
-builder.Services.AddScoped<ILoginRepository, LoginRepository>();
-builder.Services.AddScoped<ICompaniesServices, CompaniesServices>();
-builder.Services.AddScoped<IPaymentsServices, PaymentsServices>();
-builder.Services.AddScoped<IReceivablesServices, ReceivablesServices>();
-
-
-// Add services to the container.
-builder.Services.AddControllers(options =>
-{
-    options.Filters.Add<LoggingActionFilter>();   
-
-});
-
-//builder.Services.AddControllers().AddNewtonsoftJson(options =>
-//{
-//    options.SerializerSettings.ContractResolver = new Newtonsoft.Json.Serialization.DefaultContractResolver();
-//});
-
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
-{
-    options.SwaggerDoc("v1", new OpenApiInfo
+    try
     {
-        Title = "MS_BAN_38_UTH_RECAUDACION_PAGOS",
-        Version = "v1",
-        Description = "API para gestión de pagos mediante Ginih.",
-        Contact = new OpenApiContact
+        var request = context.Request;
+
+        // Ignorar si no es JSON o es una ruta conocida que no necesita análisis
+        if (request.Method != HttpMethods.Post &&
+            request.Method != HttpMethods.Put &&
+            request.Method != HttpMethods.Patch)
         {
-            Name = "Ginih",
-            Email = "soporte@api.com",
-            Url = new Uri("https://api.com")
-        },
-        License = new OpenApiLicense
-        {
-            Name = "License",
-            Url = new Uri("https://api.com")
+            Console.WriteLine("[LOGGING] Método no procesable para body: " + request.Method);
+            return;
         }
-    });
 
-    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+        if (!request.ContentType?.Contains("application/json", StringComparison.OrdinalIgnoreCase) ?? true)
+        {
+            Console.WriteLine("[LOGGING] Content-Type no es JSON: " + request.ContentType);
+            return;
+        }
 
-    options.IncludeXmlComments(xmlPath);
-});
+        if (request.Path.HasValue && request.Path.Value.Contains("swagger", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("[LOGGING] Ruta ignorada por ser swagger: " + request.Path);
+            return;
+        }
 
-//builder.Services.AddSwaggerGenNewtonsoftSupport();
+        request.EnableBuffering();
 
+        using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+        var body = await reader.ReadToEndAsync();
 
-var app = builder.Build();
+        // Restablece el stream para que el controller pueda leerlo luego
+        request.Body.Position = 0;
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
-{
-    app.UseSwagger(c =>
+        Console.WriteLine("[LOGGING] Procesando body JSON...");
+        LogFileNameResolver.TryExtractLogFileNameFromJson(context, body);
+    }
+    catch (Exception ex)
     {
-        c.RouteTemplate = "swagger/{documentName}/swagger.json";
-    });
-
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "API para gestión de pagos mediante Ginih.");
-    });
+        Console.WriteLine("[LOGGING] Error al procesar el body JSON: " + ex.Message);
+    }
 }
-
-//app.UseHeaderValidation();
-
-app.UseHttpsRedirection();
-
-app.UseAuthorization();
-
-app.UseMiddleware<LoggingMiddleware>();
-
-app.MapControllers();
-
-app.Run();
