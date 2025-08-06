@@ -1,43 +1,67 @@
-private async Task CaptureRequestInfoAsync(HttpContext context)
+/// <summary>
+/// Captura la información de la solicitud HTTP antes de que sea procesada por los controladores.
+/// </summary>
+private static async Task<string> CaptureRequestInfoAsync(HttpContext context)
 {
+    Console.WriteLine("[LOGGING] CaptureRequestInfoAsync");
+
+    context.Request.EnableBuffering(); // Permite leer el cuerpo de la petición sin afectar la ejecución
+
+    string body = "";
+
     try
     {
-        var request = context.Request;
+        using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
+        body = await reader.ReadToEndAsync();
+        context.Request.Body.Position = 0;
 
-        // Ignorar si no es JSON o es una ruta conocida que no necesita análisis
-        if (request.Method != HttpMethods.Post &&
-            request.Method != HttpMethods.Put &&
-            request.Method != HttpMethods.Patch)
+        if (!string.IsNullOrWhiteSpace(body))
         {
-            Console.WriteLine("[LOGGING] Método no procesable para body: " + request.Method);
-            return;
+            LogFileNameExtractors.TryExtractLogFileNameFromBody(context, body);
         }
-
-        if (!request.ContentType?.Contains("application/json", StringComparison.OrdinalIgnoreCase) ?? true)
-        {
-            Console.WriteLine("[LOGGING] Content-Type no es JSON: " + request.ContentType);
-            return;
-        }
-
-        if (request.Path.HasValue && request.Path.Value.Contains("swagger", StringComparison.OrdinalIgnoreCase))
-        {
-            Console.WriteLine("[LOGGING] Ruta ignorada por ser swagger: " + request.Path);
-            return;
-        }
-
-        request.EnableBuffering();
-
-        using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
-        var body = await reader.ReadToEndAsync();
-
-        // Restablece el stream para que el controller pueda leerlo luego
-        request.Body.Position = 0;
-
-        Console.WriteLine("[LOGGING] Procesando body JSON...");
-        LogFileNameResolver.TryExtractLogFileNameFromJson(context, body);
     }
     catch (Exception ex)
     {
-        Console.WriteLine("[LOGGING] Error al procesar el body JSON: " + ex.Message);
+        Console.WriteLine($"[LOGGING] Error al leer body: {ex.Message}");
+        // Continúa sin cortar el flujo
     }
+
+    return LogFormatter.FormatRequestInfo(
+        context,
+        method: context.Request.Method,
+        path: context.Request.Path,
+        queryParams: context.Request.QueryString.ToString(),
+        body: body
+    );
+}
+
+/// <summary>
+/// Captura la información de la respuesta HTTP antes de enviarla al cliente.
+/// </summary>
+private static async Task<string> CaptureResponseInfoAsync(HttpContext context)
+{
+    try
+    {
+        if (context.Response.Body.CanSeek)
+        {
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+
+            using var reader = new StreamReader(context.Response.Body, Encoding.UTF8, leaveOpen: true);
+            string body = await reader.ReadToEndAsync();
+
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+
+            return LogFormatter.FormatResponseInfo(context, body);
+        }
+        else
+        {
+            Console.WriteLine("[LOGGING] El stream de respuesta no es seekable.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[LOGGING] Error al leer la respuesta: {ex.Message}");
+    }
+
+    return LogFormatter.FormatResponseInfo(context, string.Empty);
 }
