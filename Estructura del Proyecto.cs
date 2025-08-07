@@ -1,7 +1,8 @@
- Ademas del log de Companies que es el que estoy ejecutando lo genero con el nombre así:
+Console.WriteLine($"[LOGGING] Controlador: {actionDescriptor.ControllerName}, Acción: {actionDescriptor.ActionName}");
+foreach (var param in actionDescriptor.Parameters)
+{
+    Console.WriteLine($"[LOGGING] Parámetro: {param.Name}, Tipo: {param.ParameterType.Name}");
+}
 
-6a3e41a5-6b4d-42a7-b07a-e1f01cf0e7a6_GetCompanies_20250807_163652.txt
-
-Faltando el valor extra que agrego.
-
-
+if (modelType == null)
+    Console.WriteLine("[LOGGING] ❌ No se encontró ningún modelo con propiedades [LogFileName]");
