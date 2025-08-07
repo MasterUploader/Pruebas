@@ -82,3 +82,17 @@ public static class LogFileNameExtractor
         }
     }
 }
+
+// Extraer identificador para el nombre del log y guardarlo en context.Items
+var customPart = LogFileNameExtractor.ExtractLogFileNameFromContext(context, body);
+if (!string.IsNullOrWhiteSpace(customPart))
+{
+    context.Items["LogCustomPart"] = customPart;
+}
+
+
+string? customPart = null;
+if (context.Items.TryGetValue("LogCustomPart", out var partObj) && partObj is string partValue)
+{
+    customPart = partValue;
+}
