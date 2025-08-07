@@ -1,14 +1,6 @@
-public async Task InvokeAsync(HttpContext context)
-{
-    var path = context.Request.Path.Value;
-    if (!string.IsNullOrEmpty(path) &&
-        (path.Contains("swagger", StringComparison.OrdinalIgnoreCase) ||
-         path.Contains("favicon.ico", StringComparison.OrdinalIgnoreCase)))
-    {
-        await _next(context); // No loguear estas rutas
-        return;
-    }
+Ademas deje el if así, no se si este bien?
 
-    // Lógica de logging normal
-    await _next(context);
+if (context.Items.TryGetValue("LogFileName", out var existingObj) && existingObj is string existingPath && context.Items.TryGetValue("LogCustomPart", out var partObj) && partObj is string part && !string.IsNullOrWhiteSpace(part) && !existingPath.Contains($"{part}", StringComparison.OrdinalIgnoreCase))
+{
+    context.Items.Remove("LogFileName");
 }
