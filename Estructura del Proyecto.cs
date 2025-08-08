@@ -1,138 +1,55 @@
-using System.Collections.Concurrent;
-using System.Text;
-using Microsoft.AspNetCore.Http;
+Por ejemplo tengo este codigo, como quedaria con la libreria RestUtils.QueryBuilder:
 
-public partial class LoggingService
-{
-    /// <summary>
-    /// Inicia un bloque de log. Escribe una cabecera común y permite ir agregando filas
-    /// con <see cref="ILogBlock.Add(string)"/>. Al finalizar, llamar <see cref="ILogBlock.End()"/>
-    /// o disponer el objeto (using) para escribir el cierre del bloque.
-    /// </summary>
-    /// <param name="title">Título o nombre del bloque (ej. "Proceso de conciliación").</param>
-    /// <param name="context">Contexto HTTP (opcional). Si es null, se usa el contexto actual si existe.</param>
-    /// <returns>Instancia del bloque para agregar filas.</returns>
-    public ILogBlock StartLogBlock(string title, HttpContext? context = null)
-    {
-        context ??= _httpContextAccessor.HttpContext;
-        var filePath = GetCurrentLogFile(); // asegura que compartimos el mismo archivo de la request
 
-        // Cabecera del bloque
-        var header = BuildBlockHeader(title);
-        LogHelper.SafeWriteLog(_logDirectory, filePath, header);
+                int indexBalance = 0;
+                var resultResp = responseConsulta.Result;
+                var countryID = responseConsulta.CountryId;
 
-        return new LogBlock(this, filePath, title);
-    }
+                foreach (var balance in responseConsulta.Balances.Balance)
+                {
+                    foreach (var currencyB in balance.Currencys)
+                    {
+                        foreach (var denominationB in currencyB.Denominations.Denomination)
+                        {
+                            string responseId = Guid.NewGuid().ToString();
+                            string row = $@"('{hUserId}', '{hProvider}', '{hSessionId}', '{hClientIp}', '{fechaActual}', '{responseId}', '{fechaActual}', '{processingTime}', '{statusCode}', '{message}', '{traceId}', '{httpCode}', '{systemMsg}', '{errorMsg}', '{balance.DeviceCode}', '{balance.DateBalance}',  '',  '',  '',  '', '', '', '','{currencyB.Code}', '{currencyB.Amount}', '{balance.BalanceType}','{denominationB.Value}', '{denominationB.Quantity}', '{denominationB.Amount}', '{denominationB.Type}')";
+                            sqlInsertRows.Add(row.Trim());
+                        }
+                    }
+                    indexBalance++;
+                }
 
-    /// <summary>
-    /// Construye el texto de cabecera para un bloque de log.
-    /// </summary>
-    private static string BuildBlockHeader(string title)
-    {
-        var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        var sb = new StringBuilder();
-        sb.AppendLine($"======================== [BEGIN BLOCK] ========================");
-        sb.AppendLine($"Título     : {title}");
-        sb.AppendLine($"Inicio     : {now}");
-        sb.AppendLine($"===============================================================");
-        return sb.ToString();
-    }
+                foreach (var devcod in responseConsulta.Transaccion.DeviceCode)
+                {
+                    foreach (var DatBa in responseConsulta.Transaccion.DateBalance)
+                    {
+                        foreach (var trx in responseConsulta.Transaccion.Transaction)
+                        {
+                            foreach (var currency in trx.Currency)
+                            {
+                                foreach (var denomination in currency.Denominations.Denomination)
+                                {
 
-    /// <summary>
-    /// Construye el texto de cierre para un bloque de log.
-    /// </summary>
-    private static string BuildBlockFooter()
-    {
-        var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        var sb = new StringBuilder();
-        sb.AppendLine($"===============================================================");
-        sb.AppendLine($"Fin        : {now}");
-        sb.AppendLine($"========================= [END BLOCK] =========================");
-        return sb.ToString();
-    }
+                                    string responseId = Guid.NewGuid().ToString();
+                                    string row = $@"('{hUserId}', '{hProvider}', '{hSessionId}', '{hClientIp}', '{fechaActual}','{responseId}', '{fechaActual}', '{processingTime}', '{statusCode}', '{message}', '{traceId}', '{httpCode}', '{systemMsg}', '{errorMsg}', '', '', '{trx.ActualId}', '{trx.TransactonDate}', '{trx.ServicePoint}', '{trx.ReceiptNumber}', '{currency.Code}', '{currency.Amount}', '{currency.CashierId}','{currency.CashierName}', '{trx.TipoTrans}', '', '{denomination.Value}', '{denomination.Quantity}', '{denomination.Amount}', '{denomination.Type}')";
+                                    sqlInsertRows.Add(row.Trim());
+                                }
+                            }
+                        }
+                    }
+                }
 
-    /// <summary>
-    /// Implementación concreta de un bloque de log.
-    /// </summary>
-    private sealed class LogBlock : ILogBlock
-    {
-        private readonly LoggingService _svc;
-        private readonly string _filePath;
-        private readonly string _title;
-        private int _ended; // 0 no, 1 sí (para idempotencia)
+                if (sqlInsertRows.Any())
+                {
+                    string insertQuery = @"INSERT INTO bcah96dta.RS01BZI(BZI05HUSID, BZI06HPROV, BZI07HSESS, BZI08HCLIP, BZI09HTIME, BZI15IDJS, BZI16FCHR, BZI12PRTM, BZI13STCD, BZI14MSSG, BZI17IDTR, BZI18CDHT, BZI19MSGS, BZI20MSGE, BZI27CDDB, BZI26FECB, BZI39IATR, BZI38FHTR, BZI41PSTR, BZI42NRTR, BZI29CODM, BZI30MTMD, BZI53ICTR, BZI54NCTR, BZI51TTTR, BZI25TIPO, BZI32VRDN, BZI33CANT, BZI34IMTT, BZI35TNCN) VALUES " + string.Join(",", sqlInsertRows);
 
-        public LogBlock(LoggingService svc, string filePath, string title)
-        {
-            _svc = svc;
-            _filePath = filePath;
-            _title = title;
-        }
+                    conection.Open();
 
-        /// <inheritdoc />
-        public void Add(string message)
-        {
-            // cada "Add" es una fila en el mismo archivo, dentro del bloque
-            var line = $"• {message}";
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, line + Environment.NewLine);
-        }
-
-        /// <inheritdoc />
-        public void AddObj(string name, object obj)
-        {
-            var formatted = LogFormatter.FormatObjectLog(name, obj);
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
-        }
-
-        /// <inheritdoc />
-        public void AddException(Exception ex)
-        {
-            var formatted = LogFormatter.FormatExceptionDetails(ex.ToString());
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
-        }
-
-        /// <inheritdoc />
-        public void End()
-        {
-            if (Interlocked.Exchange(ref _ended, 1) == 1) return; // ya finalizado
-            var footer = BuildBlockFooter();
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, footer);
-        }
-
-        public void Dispose() => End();
-    }
-}
-
-/// <summary>
-/// Contrato para un bloque de log que agrupa múltiples filas con un encabezado y un pie comunes.
-/// </summary>
-public interface ILogBlock : IDisposable
-{
-    /// <summary>Agrega una fila de texto al bloque.</summary>
-    void Add(string message);
-
-    /// <summary>Agrega una fila logueando un objeto formateado.</summary>
-    void AddObj(string name, object obj);
-
-    /// <summary>Agrega una fila con detalle de excepción.</summary>
-    void AddException(Exception ex);
-
-    /// <summary>Finaliza el bloque (escribe el pie). Idempotente.</summary>
-    void End();
-}
-
-// Patrón using: garantiza cierre del bloque aunque haya excepciones
-using (var block = _loggingService.StartLogBlock("Proceso de pagos"))
-{
-    block.Add("Validando entrada");
-    block.AddObj("Request", requestDto);
-    block.Add("Llamando servicio externo");
-    // ...
-    block.Add("Proceso finalizado OK");
-}
-
-// O manual:
-var b = _loggingService.StartLogBlock("Conciliación");
-b.Add("Paso 1 completado");
-b.Add("Paso 2 completado");
-// ...
-b.End();
+                    if (conection.Connect.CheckConfigurationState)
+                    {
+                        using (var command = new OleDbCommand(insertQuery, conection.Connect.OleDbConnection))
+                        {
+                            int result = command.ExecuteNonQuery();
+                            return result > 0;
+                        }
+                    }
