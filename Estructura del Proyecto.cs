@@ -1,15 +1,7 @@
 /// <summary>
-/// Obtiene la ruta **completa** del archivo de log para la petición actual,
-/// organizando por **API/Controller/Action/FechaLocal** y agregando, si existe,
-/// el valor personalizado capturado en <c>HttpContext.Items["LogCustomPart"]</c>.
+/// Devuelve el path completo del archivo de log de la request actual,
+/// usando Controller/Action y agregando el LogCustomPart si existe.
 /// </summary>
-/// <remarks>
-/// - Usa **hora local** (no UTC).
-/// - Evita registrar rutas de Swagger y favicon.
-/// - Si el nombre ya estaba cacheado en <c>HttpContext.Items["LogFileName"]</c> pero
-///   aún no contenía el custom part, se **regenera** automáticamente.
-/// </remarks>
-/// <returns>Ruta de archivo completa donde se debe escribir el log actual.</returns>
 public string GetCurrentLogFile()
 {
     try
@@ -18,73 +10,65 @@ public string GetCurrentLogFile()
         if (context is null)
             return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
 
-        // 0) Excluir rutas no deseadas (Swagger / favicon)
-        var reqPath = context.Request.Path.Value ?? string.Empty;
-        if (reqPath.Contains("swagger", StringComparison.OrdinalIgnoreCase) ||
-            reqPath.Contains("favicon", StringComparison.OrdinalIgnoreCase))
-        {
+        // Excluir swagger / favicon
+        var p = context.Request.Path.Value ?? string.Empty;
+        if (p.Contains("swagger", StringComparison.OrdinalIgnoreCase) ||
+            p.Contains("favicon", StringComparison.OrdinalIgnoreCase))
             return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
-        }
 
-        // 1) Fallback: si el Middleware guardó el objeto del body y aún no hay LogCustomPart, intentar extraerlo aquí
+        // (Fallback) si el middleware guardó el body y aún no hay custom, intentar extraerlo aquí
         if (!context.Items.ContainsKey("LogCustomPart") &&
-            context.Items.TryGetValue("RequestBodyObject", out var bodyObj) &&
-            bodyObj is not null)
+            context.Items.TryGetValue("RequestBodyObject", out var bodyObj) && bodyObj is not null)
         {
-            var extracted = GetLogFileNameValue(bodyObj); // <- tu helper recursivo
+            var extracted = GetLogFileNameValue(bodyObj); // tu helper recursivo
             if (!string.IsNullOrWhiteSpace(extracted))
                 context.Items["LogCustomPart"] = extracted;
         }
 
-        // 2) Si ya había un nombre cacheado, pero no incluye el custom, forzar regeneración
+        // Si ya había un path pero sin el custom, forzar regeneración
         if (context.Items.TryGetValue("LogFileName", out var existingObj) &&
             existingObj is string existingPath &&
             context.Items.TryGetValue("LogCustomPart", out var partObj) &&
-            partObj is string part &&
-            !string.IsNullOrWhiteSpace(part) &&
+            partObj is string part && !string.IsNullOrWhiteSpace(part) &&
             !existingPath.Contains(part, StringComparison.OrdinalIgnoreCase))
         {
-            context.Items.Remove("LogFileName"); // fuerza regeneración
+            context.Items.Remove("LogFileName");
         }
 
-        // 3) Reutilizar cache si aplica
+        // Reutilizar si ya está cacheado
         if (context.Items.TryGetValue("LogFileName", out var cached) &&
-            cached is string cachedPath &&
-            !string.IsNullOrWhiteSpace(cachedPath))
-        {
+            cached is string cachedPath && !string.IsNullOrWhiteSpace(cachedPath))
             return cachedPath;
-        }
 
-        // 4) Nombres de Controller/Action seguros
-        var (controllerName, actionName) = GetControllerAndAction(context);
-        controllerName = Sanitize(controllerName);
-        actionName     = Sanitize(actionName);
+        // ********* AQUÍ LO IMPORTANTE: Controller/Action desde CAD, NO RoutePattern *********
+        var cad = context.GetEndpoint()?.Metadata
+            .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
+            .FirstOrDefault();
 
-        // 5) Fecha/Hora **LOCAL**
-        var fechaLocal = DateTime.Now.ToString("yyyy-MM-dd");
-        var timestamp  = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string controllerName = cad?.ControllerName ?? "UnknownController";
+        // si no hay CAD, caer a último segmento del Path
+        string actionName = cad?.ActionName 
+            ?? (p.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "UnknownEndpoint");
 
-        // 6) ExecutionId (establecido por el middleware; si no, generar)
-        var executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
+        // Hora LOCAL
+        string fecha = DateTime.Now.ToString("yyyy-MM-dd");
+        string ts    = DateTime.Now.ToString("yyyyMMdd_HHmmss");
 
-        // 7) Custom part (opcional)
-        string customSuffix = string.Empty;
+        string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
+
+        string customSuffix = "";
         if (context.Items.TryGetValue("LogCustomPart", out var cp) &&
-            cp is string cpStr &&
-            !string.IsNullOrWhiteSpace(cpStr))
-        {
-            customSuffix = "_" + Sanitize(cpStr);
-        }
+            cp is string cpStr && !string.IsNullOrWhiteSpace(cpStr))
+            customSuffix = "_" + cpStr;
 
-        // 8) Carpeta final: <Base>/<API>/<Controller>/<Action>/<yyyy-MM-dd>
-        var finalDirectory = Path.Combine(_logDirectory, controllerName, actionName, fechaLocal);
-        Directory.CreateDirectory(finalDirectory);
+        // Directorio final y nombre
+        string finalDir = Path.Combine(_logDirectory, controllerName, actionName, fecha);
+        Directory.CreateDirectory(finalDir);
 
-        // 9) Nombre final
-        var fileName = $"{executionId}_{actionName}{customSuffix}_{timestamp}.txt";
-        var fullPath = Path.Combine(finalDirectory, fileName);
+        string fileName = $"{executionId}_{actionName}{customSuffix}_{ts}.txt";
+        string fullPath = Path.Combine(finalDir, fileName);
 
-        // 10) Cachear para el resto del ciclo de la request
+        // Cachear SIEMPRE el path completo (no el nombre suelto)
         context.Items["LogFileName"] = fullPath;
         return fullPath;
     }
@@ -93,40 +77,4 @@ public string GetCurrentLogFile()
         LogInternalError(ex);
         return Path.Combine(_logDirectory, "GlobalManualLogs.txt");
     }
-}
-
-/// <summary>
-/// Obtiene nombres **seguros** de Controller y Action para la request actual.
-/// Si no hay metadatos de MVC, cae al Path del request.
-/// </summary>
-private static (string Controller, string Action) GetControllerAndAction(HttpContext context)
-{
-    var cad = context.GetEndpoint()?.Metadata
-        .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
-        .FirstOrDefault();
-
-    if (cad is not null)
-        return (cad.ControllerName ?? "UnknownController", cad.ActionName ?? "UnknownEndpoint");
-
-    // Fallback a la ruta del request (último segmento como "Action", penúltimo como "Controller")
-    var segments = (context.Request.Path.Value ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-    var action   = segments.LastOrDefault() ?? "UnknownEndpoint";
-    var ctrl     = (segments.Length >= 2 ? segments[^2] : "UnknownController");
-
-    return (ctrl, action);
-}
-
-/// <summary>
-/// Sanea un nombre para usarlo en carpeta/archivo (quita caracteres inválidos y recorta espacios).
-/// </summary>
-private static string Sanitize(string? name)
-{
-    if (string.IsNullOrWhiteSpace(name))
-        return "Unknown";
-
-    var invalid = Path.GetInvalidFileNameChars().Concat(Path.GetInvalidPathChars()).Distinct().ToArray();
-    var cleaned = new string(name.Where(c => !invalid.Contains(c)).ToArray());
-
-    // Evitar nombres vacíos tras limpieza
-    return string.IsNullOrWhiteSpace(cleaned) ? "Unknown" : cleaned.Trim();
 }
