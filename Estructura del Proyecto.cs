@@ -1,77 +1,90 @@
-A este método:
+/// <summary>
+/// Devuelve un nombre seguro para usar en rutas/archivos.
+/// </summary>
+private static string Sanitize(string? name)
+{
+    if (string.IsNullOrWhiteSpace(name)) return "Unknown";
+    var invalid = Path.GetInvalidFileNameChars().Concat(Path.GetInvalidPathChars()).Distinct().ToArray();
+    var cleaned = new string(name.Where(c => !invalid.Contains(c)).ToArray()).Trim();
+    return string.IsNullOrWhiteSpace(cleaned) ? "Unknown" : cleaned;
+}
 
-  /// <summary>
-  /// Captura la información del entorno del servidor y del cliente.
-  /// </summary>
-  private static async Task<string> CaptureEnvironmentInfoAsync(HttpContext context)
-  {
-      await Task.Delay(TimeSpan.FromMilliseconds(1));
+/// <summary>
+/// Obtiene un nombre de endpoint seguro desde el HttpContext. Si no existe contexto, devuelve "NoContext".
+/// </summary>
+private static string GetEndpointSafe(HttpContext? context)
+{
+    if (context == null) return "NoContext";
 
-      var request = context.Request;
-      var connection = context.Connection;
-      var hostEnvironment = context.RequestServices.GetService<IHostEnvironment>();
+    // Intentar usar CAD (ActionName); si no, caer al último segmento del Path
+    var cad = context.GetEndpoint()?.Metadata
+        .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
+        .FirstOrDefault();
 
-      // 1. Intentar obtener de un header HTTP
-      var distributionFromHeader = context.Request.Headers["Distribucion"].FirstOrDefault();
+    var endpoint = cad?.ActionName 
+                   ?? (context.Request.Path.Value ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()
+                   ?? "UnknownEndpoint";
 
-      // 2. Intentar obtener de los claims del usuario (si existe autenticación JWT)
-      var distributionFromClaim = context.User?.Claims?
-          .FirstOrDefault(c => c.Type == "distribution")?.Value;
+    return Sanitize(endpoint);
+}
 
-      // 3. Intentar extraer del subdominio (ejemplo: cliente1.api.com)
-      var host = context.Request.Host.Host;
-      var distributionFromSubdomain = !string.IsNullOrWhiteSpace(host) && host.Contains('.')
-          ? host.Split('.')[0]
-          : null;
+/// <summary>
+/// Devuelve la carpeta base de errores con la subcarpeta de fecha local: &lt;_logDirectory&gt;/Errores/&lt;yyyy-MM-dd&gt;
+/// </summary>
+private string GetErrorsDirectory(DateTime nowLocal)
+{
+    var dir = Path.Combine(_logDirectory, "Errores", nowLocal.ToString("yyyy-MM-dd"));
+    Directory.CreateDirectory(dir);
+    return dir;
+}
 
-      // 4. Seleccionar la primera fuente válida o asignar "N/A"
-      var distribution = distributionFromHeader
-                         ?? distributionFromClaim
-                         ?? distributionFromSubdomain
-                         ?? "N/A";
+/// <summary>
+/// Construye un path de archivo de error con ExecutionId, Endpoint y timestamp local.
+/// Sufijo: "internal" para errores internos; "manual" para global manual logs.
+/// </summary>
+private string BuildErrorFilePath(string kind, HttpContext? context)
+{
+    var now = DateTime.Now; // hora local
+    var dir = GetErrorsDirectory(now);
 
-      // Preparar información extendida
-      string application = hostEnvironment?.ApplicationName ?? "Desconocido";
-      string env = hostEnvironment?.EnvironmentName ?? "Desconocido";
-      string contentRoot = hostEnvironment?.ContentRootPath ?? "Desconocido";
-      string executionId = context.TraceIdentifier ?? "Desconocido";
-      string clientIp = connection?.RemoteIpAddress?.ToString() ?? "Desconocido";
-      string userAgent = request.Headers.UserAgent.ToString() ?? "Desconocido";
-      string machineName = Environment.MachineName;
-      string os = Environment.OSVersion.ToString();
-      host = request.Host.ToString() ?? "Desconocido";
+    // ExecutionId (si hay contexto), si no un Guid nuevo
+    var executionId = context?.Items?["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
 
-      // Información adicional del contexto
-      var extras = new Dictionary<string, string>
-          {
-              { "Scheme", request.Scheme },
-              { "Protocol", request.Protocol },
-              { "Method", request.Method },
-              { "Path", request.Path },
-              { "Query", request.QueryString.ToString() },
-              { "ContentType", request.ContentType ?? "N/A" },
-              { "ContentLength", request.ContentLength?.ToString() ?? "N/A" },
-              { "ClientPort", connection?.RemotePort.ToString() ?? "Desconocido" },
-              { "LocalIp", connection?.LocalIpAddress?.ToString() ?? "Desconocido" },
-              { "LocalPort", connection?.LocalPort.ToString() ?? "Desconocido" },
-              { "ConnectionId", connection?.Id ?? "Desconocido" },
-              { "Referer", request.Headers.Referer.ToString() ?? "N/A" }
-          };
+    var endpoint = GetEndpointSafe(context);
+    var timestamp = now.ToString("yyyyMMdd_HHmmss");
 
-      return LogFormatter.FormatEnvironmentInfo(
-              application: application,
-              env: env,
-              contentRoot: contentRoot,
-              executionId: executionId,
-              clientIp: clientIp,
-              userAgent: userAgent,
-              machineName: machineName,
-              os: os,
-              host: host,
-              distribution: distribution,
-              extras: extras
-      );
-  }
+    var suffix = string.Equals(kind, "internal", StringComparison.OrdinalIgnoreCase) ? "_internal" : "";
+    var fileName = $"{executionId}_{endpoint}_{timestamp}{suffix}.txt";
+
+    return Path.Combine(dir, fileName);
+}
+
+/// <summary>
+/// Registra errores internos en un archivo dentro de /Errores/&lt;fecha&gt;/ con nombre:
+/// ExecutionId_Endpoint_yyyyMMdd_HHmmss_internal.txt
+/// </summary>
+public void LogInternalError(Exception ex)
+{
+    try
+    {
+        var context = _httpContextAccessor.HttpContext;
+        var errorPath = BuildErrorFilePath(kind: "internal", context: context);
+
+        var msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Error en LoggingService: {ex}{Environment.NewLine}";
+        File.AppendAllText(errorPath, msg);
+    }
+    catch
+    {
+        // Evita bucles de error
+    }
+}
+if (context == null)
+    return BuildErrorFilePath(kind: "manual", context: null);
 
 
-Le quiero agregar otros valores utiles si existen, sino así dejalo.
+
+catch (Exception ex)
+{
+    LogInternalError(ex);
+}
+return BuildErrorFilePath(kind: "manual", context: _httpContextAccessor.HttpContext);
