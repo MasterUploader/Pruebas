@@ -1,90 +1,138 @@
-/// <summary>
-/// Devuelve un nombre seguro para usar en rutas/archivos.
-/// </summary>
-private static string Sanitize(string? name)
+using System.Collections.Concurrent;
+using System.Text;
+using Microsoft.AspNetCore.Http;
+
+public partial class LoggingService
 {
-    if (string.IsNullOrWhiteSpace(name)) return "Unknown";
-    var invalid = Path.GetInvalidFileNameChars().Concat(Path.GetInvalidPathChars()).Distinct().ToArray();
-    var cleaned = new string(name.Where(c => !invalid.Contains(c)).ToArray()).Trim();
-    return string.IsNullOrWhiteSpace(cleaned) ? "Unknown" : cleaned;
-}
-
-/// <summary>
-/// Obtiene un nombre de endpoint seguro desde el HttpContext. Si no existe contexto, devuelve "NoContext".
-/// </summary>
-private static string GetEndpointSafe(HttpContext? context)
-{
-    if (context == null) return "NoContext";
-
-    // Intentar usar CAD (ActionName); si no, caer al último segmento del Path
-    var cad = context.GetEndpoint()?.Metadata
-        .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
-        .FirstOrDefault();
-
-    var endpoint = cad?.ActionName 
-                   ?? (context.Request.Path.Value ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()
-                   ?? "UnknownEndpoint";
-
-    return Sanitize(endpoint);
-}
-
-/// <summary>
-/// Devuelve la carpeta base de errores con la subcarpeta de fecha local: &lt;_logDirectory&gt;/Errores/&lt;yyyy-MM-dd&gt;
-/// </summary>
-private string GetErrorsDirectory(DateTime nowLocal)
-{
-    var dir = Path.Combine(_logDirectory, "Errores", nowLocal.ToString("yyyy-MM-dd"));
-    Directory.CreateDirectory(dir);
-    return dir;
-}
-
-/// <summary>
-/// Construye un path de archivo de error con ExecutionId, Endpoint y timestamp local.
-/// Sufijo: "internal" para errores internos; "manual" para global manual logs.
-/// </summary>
-private string BuildErrorFilePath(string kind, HttpContext? context)
-{
-    var now = DateTime.Now; // hora local
-    var dir = GetErrorsDirectory(now);
-
-    // ExecutionId (si hay contexto), si no un Guid nuevo
-    var executionId = context?.Items?["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
-
-    var endpoint = GetEndpointSafe(context);
-    var timestamp = now.ToString("yyyyMMdd_HHmmss");
-
-    var suffix = string.Equals(kind, "internal", StringComparison.OrdinalIgnoreCase) ? "_internal" : "";
-    var fileName = $"{executionId}_{endpoint}_{timestamp}{suffix}.txt";
-
-    return Path.Combine(dir, fileName);
-}
-
-/// <summary>
-/// Registra errores internos en un archivo dentro de /Errores/&lt;fecha&gt;/ con nombre:
-/// ExecutionId_Endpoint_yyyyMMdd_HHmmss_internal.txt
-/// </summary>
-public void LogInternalError(Exception ex)
-{
-    try
+    /// <summary>
+    /// Inicia un bloque de log. Escribe una cabecera común y permite ir agregando filas
+    /// con <see cref="ILogBlock.Add(string)"/>. Al finalizar, llamar <see cref="ILogBlock.End()"/>
+    /// o disponer el objeto (using) para escribir el cierre del bloque.
+    /// </summary>
+    /// <param name="title">Título o nombre del bloque (ej. "Proceso de conciliación").</param>
+    /// <param name="context">Contexto HTTP (opcional). Si es null, se usa el contexto actual si existe.</param>
+    /// <returns>Instancia del bloque para agregar filas.</returns>
+    public ILogBlock StartLogBlock(string title, HttpContext? context = null)
     {
-        var context = _httpContextAccessor.HttpContext;
-        var errorPath = BuildErrorFilePath(kind: "internal", context: context);
+        context ??= _httpContextAccessor.HttpContext;
+        var filePath = GetCurrentLogFile(); // asegura que compartimos el mismo archivo de la request
 
-        var msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Error en LoggingService: {ex}{Environment.NewLine}";
-        File.AppendAllText(errorPath, msg);
+        // Cabecera del bloque
+        var header = BuildBlockHeader(title);
+        LogHelper.SafeWriteLog(_logDirectory, filePath, header);
+
+        return new LogBlock(this, filePath, title);
     }
-    catch
+
+    /// <summary>
+    /// Construye el texto de cabecera para un bloque de log.
+    /// </summary>
+    private static string BuildBlockHeader(string title)
     {
-        // Evita bucles de error
+        var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        var sb = new StringBuilder();
+        sb.AppendLine($"======================== [BEGIN BLOCK] ========================");
+        sb.AppendLine($"Título     : {title}");
+        sb.AppendLine($"Inicio     : {now}");
+        sb.AppendLine($"===============================================================");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Construye el texto de cierre para un bloque de log.
+    /// </summary>
+    private static string BuildBlockFooter()
+    {
+        var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        var sb = new StringBuilder();
+        sb.AppendLine($"===============================================================");
+        sb.AppendLine($"Fin        : {now}");
+        sb.AppendLine($"========================= [END BLOCK] =========================");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Implementación concreta de un bloque de log.
+    /// </summary>
+    private sealed class LogBlock : ILogBlock
+    {
+        private readonly LoggingService _svc;
+        private readonly string _filePath;
+        private readonly string _title;
+        private int _ended; // 0 no, 1 sí (para idempotencia)
+
+        public LogBlock(LoggingService svc, string filePath, string title)
+        {
+            _svc = svc;
+            _filePath = filePath;
+            _title = title;
+        }
+
+        /// <inheritdoc />
+        public void Add(string message)
+        {
+            // cada "Add" es una fila en el mismo archivo, dentro del bloque
+            var line = $"• {message}";
+            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, line + Environment.NewLine);
+        }
+
+        /// <inheritdoc />
+        public void AddObj(string name, object obj)
+        {
+            var formatted = LogFormatter.FormatObjectLog(name, obj);
+            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
+        }
+
+        /// <inheritdoc />
+        public void AddException(Exception ex)
+        {
+            var formatted = LogFormatter.FormatExceptionDetails(ex.ToString());
+            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
+        }
+
+        /// <inheritdoc />
+        public void End()
+        {
+            if (Interlocked.Exchange(ref _ended, 1) == 1) return; // ya finalizado
+            var footer = BuildBlockFooter();
+            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, footer);
+        }
+
+        public void Dispose() => End();
     }
 }
-if (context == null)
-    return BuildErrorFilePath(kind: "manual", context: null);
 
-
-
-catch (Exception ex)
+/// <summary>
+/// Contrato para un bloque de log que agrupa múltiples filas con un encabezado y un pie comunes.
+/// </summary>
+public interface ILogBlock : IDisposable
 {
-    LogInternalError(ex);
+    /// <summary>Agrega una fila de texto al bloque.</summary>
+    void Add(string message);
+
+    /// <summary>Agrega una fila logueando un objeto formateado.</summary>
+    void AddObj(string name, object obj);
+
+    /// <summary>Agrega una fila con detalle de excepción.</summary>
+    void AddException(Exception ex);
+
+    /// <summary>Finaliza el bloque (escribe el pie). Idempotente.</summary>
+    void End();
 }
-return BuildErrorFilePath(kind: "manual", context: _httpContextAccessor.HttpContext);
+
+// Patrón using: garantiza cierre del bloque aunque haya excepciones
+using (var block = _loggingService.StartLogBlock("Proceso de pagos"))
+{
+    block.Add("Validando entrada");
+    block.AddObj("Request", requestDto);
+    block.Add("Llamando servicio externo");
+    // ...
+    block.Add("Proceso finalizado OK");
+}
+
+// O manual:
+var b = _loggingService.StartLogBlock("Conciliación");
+b.Add("Paso 1 completado");
+b.Add("Paso 2 completado");
+// ...
+b.End();
