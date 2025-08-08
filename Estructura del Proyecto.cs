@@ -1,55 +1,109 @@
-Por ejemplo tengo este codigo, como quedaria con la libreria RestUtils.QueryBuilder:
+// Abrimos conexión
+_connection.Open();
 
+// Preparamos un único INSERT masivo
+var insert = new InsertQueryBuilder("RS01BZI", "bcah96dta");
 
-                int indexBalance = 0;
-                var resultResp = responseConsulta.Result;
-                var countryID = responseConsulta.CountryId;
+// --- Bloque de BALANCES ---
+foreach (var balance in responseConsulta.Balances.Balance)
+{
+    foreach (var currencyB in balance.Currencys)
+    {
+        foreach (var denominationB in currencyB.Denominations.Denomination)
+        {
+            string responseId = Guid.NewGuid().ToString();
 
-                foreach (var balance in responseConsulta.Balances.Balance)
+            insert.Values(
+                ("BZI05HUSID", hUserId),
+                ("BZI06HPROV", hProvider),
+                ("BZI07HSESS", hSessionId),
+                ("BZI08HCLIP", hClientIp),
+                ("BZI09HTIME", fechaActual),
+                ("BZI15IDJS", responseId),
+                ("BZI16FCHR", fechaActual),
+                ("BZI12PRTM", processingTime),
+                ("BZI13STCD", statusCode),
+                ("BZI14MSSG", message),
+                ("BZI17IDTR", traceId),
+                ("BZI18CDHT", httpCode),
+                ("BZI19MSGS", systemMsg),
+                ("BZI20MSGE", errorMsg),
+                ("BZI27CDDB", balance.DeviceCode),
+                ("BZI26FECB", balance.DateBalance),
+                ("BZI39IATR", ""),                  // campos vacíos igual que tu SQL original
+                ("BZI38FHTR", ""),
+                ("BZI41PSTR", ""),
+                ("BZI42NRTR", ""),
+                ("BZI29CODM", currencyB.Code),
+                ("BZI30MTMD", currencyB.Amount),
+                ("BZI53ICTR", balance.BalanceType),
+                ("BZI54NCTR", denominationB.Value),
+                ("BZI51TTTR", denominationB.Quantity),
+                ("BZI32VRDN", denominationB.Amount),
+                ("BZI33CANT", denominationB.Type)
+            );
+        }
+    }
+}
+
+// --- Bloque de TRANSACCIONES ---
+foreach (var devcod in responseConsulta.Transaccion.DeviceCode)
+{
+    foreach (var DatBa in responseConsulta.Transaccion.DateBalance)
+    {
+        foreach (var trx in responseConsulta.Transaccion.Transaction)
+        {
+            foreach (var currency in trx.Currency)
+            {
+                foreach (var denomination in currency.Denominations.Denomination)
                 {
-                    foreach (var currencyB in balance.Currencys)
-                    {
-                        foreach (var denominationB in currencyB.Denominations.Denomination)
-                        {
-                            string responseId = Guid.NewGuid().ToString();
-                            string row = $@"('{hUserId}', '{hProvider}', '{hSessionId}', '{hClientIp}', '{fechaActual}', '{responseId}', '{fechaActual}', '{processingTime}', '{statusCode}', '{message}', '{traceId}', '{httpCode}', '{systemMsg}', '{errorMsg}', '{balance.DeviceCode}', '{balance.DateBalance}',  '',  '',  '',  '', '', '', '','{currencyB.Code}', '{currencyB.Amount}', '{balance.BalanceType}','{denominationB.Value}', '{denominationB.Quantity}', '{denominationB.Amount}', '{denominationB.Type}')";
-                            sqlInsertRows.Add(row.Trim());
-                        }
-                    }
-                    indexBalance++;
+                    string responseId = Guid.NewGuid().ToString();
+
+                    insert.Values(
+                        ("BZI05HUSID", hUserId),
+                        ("BZI06HPROV", hProvider),
+                        ("BZI07HSESS", hSessionId),
+                        ("BZI08HCLIP", hClientIp),
+                        ("BZI09HTIME", fechaActual),
+                        ("BZI15IDJS", responseId),
+                        ("BZI16FCHR", fechaActual),
+                        ("BZI12PRTM", processingTime),
+                        ("BZI13STCD", statusCode),
+                        ("BZI14MSSG", message),
+                        ("BZI17IDTR", traceId),
+                        ("BZI18CDHT", httpCode),
+                        ("BZI19MSGS", systemMsg),
+                        ("BZI20MSGE", errorMsg),
+                        ("BZI27CDDB", ""),                   // en tu SQL original aquí eran vacíos
+                        ("BZI26FECB", ""),
+                        ("BZI39IATR", trx.ActualId),
+                        ("BZI38FHTR", trx.TransactonDate),
+                        ("BZI41PSTR", trx.ServicePoint),
+                        ("BZI42NRTR", trx.ReceiptNumber),
+                        ("BZI29CODM", currency.Code),
+                        ("BZI30MTMD", currency.Amount),
+                        ("BZI53ICTR", currency.CashierId),
+                        ("BZI54NCTR", currency.CashierName),
+                        ("BZI51TTTR", trx.TipoTrans),
+                        ("BZI25TIPO", ""),
+                        ("BZI32VRDN", denomination.Value),
+                        ("BZI33CANT", denomination.Quantity),
+                        ("BZI34IMTT", denomination.Amount),
+                        ("BZI35TNCN", denomination.Type)
+                    );
                 }
+            }
+        }
+    }
+}
 
-                foreach (var devcod in responseConsulta.Transaccion.DeviceCode)
-                {
-                    foreach (var DatBa in responseConsulta.Transaccion.DateBalance)
-                    {
-                        foreach (var trx in responseConsulta.Transaccion.Transaction)
-                        {
-                            foreach (var currency in trx.Currency)
-                            {
-                                foreach (var denomination in currency.Denominations.Denomination)
-                                {
+// Construimos el SQL con placeholders y parámetros
+var result = insert.Build();
 
-                                    string responseId = Guid.NewGuid().ToString();
-                                    string row = $@"('{hUserId}', '{hProvider}', '{hSessionId}', '{hClientIp}', '{fechaActual}','{responseId}', '{fechaActual}', '{processingTime}', '{statusCode}', '{message}', '{traceId}', '{httpCode}', '{systemMsg}', '{errorMsg}', '', '', '{trx.ActualId}', '{trx.TransactonDate}', '{trx.ServicePoint}', '{trx.ReceiptNumber}', '{currency.Code}', '{currency.Amount}', '{currency.CashierId}','{currency.CashierName}', '{trx.TipoTrans}', '', '{denomination.Value}', '{denomination.Quantity}', '{denomination.Amount}', '{denomination.Type}')";
-                                    sqlInsertRows.Add(row.Trim());
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (sqlInsertRows.Any())
-                {
-                    string insertQuery = @"INSERT INTO bcah96dta.RS01BZI(BZI05HUSID, BZI06HPROV, BZI07HSESS, BZI08HCLIP, BZI09HTIME, BZI15IDJS, BZI16FCHR, BZI12PRTM, BZI13STCD, BZI14MSSG, BZI17IDTR, BZI18CDHT, BZI19MSGS, BZI20MSGE, BZI27CDDB, BZI26FECB, BZI39IATR, BZI38FHTR, BZI41PSTR, BZI42NRTR, BZI29CODM, BZI30MTMD, BZI53ICTR, BZI54NCTR, BZI51TTTR, BZI25TIPO, BZI32VRDN, BZI33CANT, BZI34IMTT, BZI35TNCN) VALUES " + string.Join(",", sqlInsertRows);
-
-                    conection.Open();
-
-                    if (conection.Connect.CheckConfigurationState)
-                    {
-                        using (var command = new OleDbCommand(insertQuery, conection.Connect.OleDbConnection))
-                        {
-                            int result = command.ExecuteNonQuery();
-                            return result > 0;
-                        }
-                    }
+// Ejecutamos con parámetros (sin concatenar SQL a mano)
+using (var cmd = _connection.GetDbCommand(result, _httpContextAccessor.HttpContext))
+{
+    var rows = await cmd.ExecuteNonQueryAsync();
+    // rows es el total de filas insertadas
+    return rows > 0;
+}
