@@ -1,107 +1,93 @@
-using System;
-using System.Collections.Generic;
-using System.Reflection;
+#region Helpers (IN / OUT) — uso simple y sin ambigüedades
 
-namespace RestUtilities.Connections.Helpers
-{
-    /// <summary>
-    /// Resultado de invocar un programa CLLE/RPGLE mediante <c>CALL</c>.
-    /// Contiene el número de filas afectadas y los valores de parámetros OUT/INOUT devueltos por el programa.
-    /// </summary>
-    public sealed class ProgramCallResult
-    {
-        /// <summary>
-        /// Obtiene o establece el número de filas afectadas reportado por la ejecución del comando.
-        /// Para llamadas <c>CALL</c> suele ser 0, pero si el programa realiza operaciones DML podría ser &gt; 0.
-        /// </summary>
-        public int RowsAffected { get; internal set; }
+/// <summary>
+/// Declara un parámetro <c>OUT</c> de tipo <c>NVARCHAR/VARCHAR</c> (según proveedor) con tamaño fijo.
+/// Evita la ambigüedad de overloads cuando solo se requiere <paramref name="size"/>.
+/// </summary>
+/// <param name="name">Nombre lógico del parámetro (clave para recuperar el valor).</param>
+/// <param name="size">Tamaño máximo del texto.</param>
+/// <param name="initialValue">
+/// Valor inicial opcional. Si se establece, el parámetro operará como <c>INOUT</c> en lugar de <c>OUT</c>.
+/// </param>
+public ProgramCallBuilder OutString(string name, int size, object? initialValue = null)
+    => Out(name: name, dbType: DbType.String, size: size, precision: null, scale: null, initialValue: initialValue);
 
-        /// <summary>
-        /// Diccionario inmutable con los valores finales de los parámetros de salida (OUT/INOUT),
-        /// indexados por la clave lógica (normalmente el nombre de parámetro declarado).
-        /// </summary>
-        public IReadOnlyDictionary<string, object?> OutValues => _outValues;
-        private readonly Dictionary<string, object?> _outValues = new(StringComparer.OrdinalIgnoreCase);
+/// <summary>
+/// Declara un parámetro <c>OUT</c> de tipo carácter fijo (por ejemplo <c>CHAR(n)</c> / ANSI fixed).
+/// Útil cuando el programa espera padding a derecha.
+/// </summary>
+/// <param name="name">Nombre lógico del parámetro.</param>
+/// <param name="size">Longitud fija.</param>
+/// <param name="initialValue">Si se define, el parámetro será <c>INOUT</c>.</param>
+public ProgramCallBuilder OutChar(string name, int size, object? initialValue = null)
+    => Out(name: name, dbType: DbType.AnsiStringFixedLength, size: size, precision: null, scale: null, initialValue: initialValue);
 
-        /// <summary>
-        /// Agrega o reemplaza un valor OUT/INOUT en el resultado. Uso interno del builder.
-        /// </summary>
-        /// <param name="name">Nombre lógico del parámetro (clave).</param>
-        /// <param name="value">Valor devuelto por el motor; puede ser <see cref="DBNull"/> o <c>null</c>.</param>
-        internal void AddOut(string name, object? value) => _outValues[name] = value;
+/// <summary>
+/// Declara un parámetro <c>OUT</c> decimal con precisión/escala explícitas (p.ej. <c>DEC(10,0)</c>).
+/// </summary>
+/// <param name="name">Nombre lógico del parámetro.</param>
+/// <param name="precision">Número total de dígitos.</param>
+/// <param name="scale">Dígitos a la derecha del punto decimal.</param>
+/// <param name="initialValue">Si se define, el parámetro será <c>INOUT</c>.</param>
+public ProgramCallBuilder OutDecimal(string name, byte precision, byte scale, object? initialValue = null)
+    => Out(name: name, dbType: DbType.Decimal, size: null, precision: precision, scale: scale, initialValue: initialValue);
 
-        /// <summary>
-        /// Intenta obtener un valor OUT/INOUT fuertemente tipado.
-        /// </summary>
-        /// <typeparam name="T">Tipo de destino (por ejemplo, <c>int</c>, <c>decimal</c>, <c>string</c>).</typeparam>
-        /// <param name="key">Nombre lógico del parámetro OUT/INOUT.</param>
-        /// <param name="value">Valor convertido a <typeparamref name="T"/> si existe y puede convertirse.</param>
-        /// <returns><c>true</c> si la clave existe y la conversión fue exitosa; de lo contrario, <c>false</c>.</returns>
-        public bool TryGet<T>(string key, out T? value)
-        {
-            if (_outValues.TryGetValue(key, out var raw))
-            {
-                value = TypeCoercion.ChangeType<T>(raw);
-                return true;
-            }
-            value = default;
-            return false;
-        }
+/// <summary>
+/// Declara un parámetro <c>OUT</c> entero de 32 bits. Útil para códigos numéricos simples.
+/// </summary>
+/// <param name="name">Nombre lógico del parámetro.</param>
+/// <param name="initialValue">Si se define, el parámetro será <c>INOUT</c>.</param>
+public ProgramCallBuilder OutInt32(string name, int? initialValue = null)
+    => Out(name: name, dbType: DbType.Int32, size: null, precision: null, scale: null, initialValue: initialValue);
 
-        /// <summary>
-        /// Mapea los valores OUT/INOUT a un DTO de salida, mediante un mapeo declarativo OUT→Propiedad.
-        /// </summary>
-        /// <typeparam name="T">Tipo del DTO de destino. Debe tener un constructor público sin parámetros.</typeparam>
-        /// <param name="map">
-        /// Acción que configura las asociaciones entre claves OUT y propiedades del DTO usando <see cref="OutputMapBuilder{T}"/>.
-        /// </param>
-        /// <returns>Instancia de <typeparamref name="T"/> con las propiedades asignadas desde los OUT encontrados.</returns>
-        /// <remarks>
-        /// Solo se asignan las claves OUT que existan en <see cref="OutValues"/> y tengan una propiedad asociada.
-        /// Las conversiones usan <see cref="Convert.ChangeType(object, Type)"/> con manejo básico para enums y nullables.
-        /// </remarks>
-        public T MapTo<T>(Action<OutputMapBuilder<T>> map) where T : new()
-        {
-            if (map is null) throw new ArgumentNullException(nameof(map));
+/// <summary>
+/// Declara un parámetro <c>OUT</c> fecha/hora (p.ej. <c>DATE</c>/<c>TIMESTAMP</c> según proveedor).
+/// </summary>
+/// <param name="name">Nombre lógico del parámetro.</param>
+/// <param name="initialValue">Si se define, el parámetro será <c>INOUT</c>.</param>
+public ProgramCallBuilder OutDateTime(string name, DateTime? initialValue = null)
+    => Out(name: name, dbType: DbType.DateTime, size: null, precision: null, scale: null, initialValue: initialValue);
 
-            var builder = new OutputMapBuilder<T>();
-            map(builder);
+/// <summary>
+/// Agrega un parámetro de entrada <c>IN</c> string (NVARCHAR/VARCHAR) con tamaño opcional.
+/// </summary>
+/// <param name="value">Valor del parámetro (se permite <c>null</c>).</param>
+/// <param name="size">Tamaño máximo; si se omite, el proveedor lo inferirá.</param>
+public ProgramCallBuilder InString(string? value, int? size = null)
+    => In(value, dbType: DbType.String, size: size);
 
-            var target = new T();
+/// <summary>
+/// Agrega un parámetro de entrada <c>IN</c> carácter fijo (por ejemplo <c>CHAR(n)</c>).
+/// </summary>
+/// <param name="value">Valor del parámetro (se permite <c>null</c>).</param>
+/// <param name="size">Longitud fija requerida.</param>
+public ProgramCallBuilder InChar(string? value, int size)
+    => In(value, dbType: DbType.AnsiStringFixedLength, size: size);
 
-            foreach (var kv in builder.Bindings)
-            {
-                var outKey = kv.Key;
-                var prop = kv.Value;
+/// <summary>
+/// Agrega un parámetro de entrada <c>IN</c> decimal con precisión/escala opcionales.
+/// </summary>
+/// <param name="value">Valor decimal (se permite <c>null</c>).</param>
+/// <param name="precision">Dígitos totales (opcional).</param>
+/// <param name="scale">Dígitos decimales (opcional).</param>
+public ProgramCallBuilder InDecimal(decimal? value, byte? precision = null, byte? scale = null)
+    => In(value, dbType: DbType.Decimal, size: null, precision: precision, scale: scale);
 
-                if (_outValues.TryGetValue(outKey, out var raw))
-                {
-                    var converted = TypeCoercion.ChangeType(raw, prop.PropertyType);
-                    prop.SetValue(target, converted);
-                }
-            }
+/// <summary>
+/// Agrega un parámetro de entrada <c>IN</c> entero de 32 bits.
+/// </summary>
+/// <param name="value">Valor entero (se permite <c>null</c>).</param>
+public ProgramCallBuilder InInt32(int? value)
+    => In(value, dbType: DbType.Int32);
 
-            return target;
-        }
+/// <summary>
+/// Agrega un parámetro de entrada <c>IN</c> fecha/hora.
+/// </summary>
+/// <param name="value">Fecha/hora (se permite <c>null</c>).</param>
+public ProgramCallBuilder InDateTime(DateTime? value)
+    => In(value, dbType: DbType.DateTime);
 
-        /// <summary>
-        /// Utilidades internas para conversión de tipos comunes, incluyendo nullables y enums.
-        /// </summary>
-        private static class TypeCoercion
-        {
-            public static T? ChangeType<T>(object? value)
-            {
-                if (value is null || value is DBNull) return default;
-                var target = typeof(T);
-                return (T?)ChangeType(value, target);
-            }
-
-            public static object? ChangeType(object? value, Type destinationType)
-            {
-                if (value is null || value is DBNull) return null;
-
-                var nonNullable = Nullable.GetUnderlyingType(destinationType) ?? destinationType;
-
+#endregion
                 // Enum: soporta fuente numérica o string
                 if (nonNullable.IsEnum)
                 {
@@ -181,3 +167,4 @@ namespace RestUtilities.Connections.Helpers
         }
     }
 }
+
