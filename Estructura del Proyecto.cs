@@ -1,7 +1,17 @@
-Tengo el error:
+private enum Naming { SqlDot, SystemSlash }
+private Naming _naming = Naming.SqlDot;
+private bool _wrapWithBraces = true;
 
-System.Data.OleDb.OleDbException: 'SQL5016: Nombre de objeto calificado PQRIFZ04CL no válido.
-Causa . . . . . :   Se ha producido una de las causas siguientes: -- La sintaxis utilizada para el nombre de objeto calificado no es válida para la opción de denominación especificada. Con la denominación del sistema, la forma calificada de un nombre de objeto es nombre-esquema/nombre-objeto o nombre-esquema.nombre-objeto. Con denominación SQL, la forma calificada de un nombre de objeto es nombre-autorización.nombre-objeto. -- La sintaxis utilizada para el nombre de objeto calificado no está permitida. Los tipos definidos por el usuario, funciones, variables y secuencias no pueden calificarse con el nombre de esquema mediante el separador / en el convenio de denominación del sistema si se utilizan en una consulta. Recuperación . .:   Realice una de las siguientes acciones y vuelva a intentar la petición : -- Si desea utilizar el convenio de denominación SQL, especifique la opción de denominación SQL y califique los nombres de objeto con el formato id-autorización.nombre-objeto. -- Si desea utilizar el convenio de denominación del sistema, especifique la opción de denominación del sistema y califique los nombres de objeto con el formato nombre-esquema/nombre-objeto o nombre-esquema.nombre-objeto. -- En el convenio de denominación del sistema, asegúrese de que los tipos definidos por usuario, funciones o variables se pueden encontrar en la vía de acceso actual, o utilice el formato de denominación con punto para calificar el objeto.'
+public ProgramCallBuilder UseSqlNaming() { _naming = Naming.SqlDot; return this; }
+public ProgramCallBuilder UseSystemNaming() { _naming = Naming.SystemSlash; return this; }
+public ProgramCallBuilder WrapCallWithBraces(bool enable = true) { _wrapWithBraces = enable; return this; }
 
-
-Porque espera que el llamado sea así {CALL BCAH96.PQRIFZ06CL(?, ?, ?, ?, ?) }, es decir que lleve esas {}
+private string BuildSql()
+{
+    int paramCount = _paramFactories.Count + _bulkOuts.Count;
+    var placeholders = paramCount == 0 ? "" : string.Join(", ", Enumerable.Repeat("?", paramCount));
+    var sep = _naming == Naming.SqlDot ? "." : "/";
+    var target = $"{_library}{sep}{_program}".ToUpperInvariant();
+    var core = paramCount == 0 ? $"CALL {target}()" : $"CALL {target}({placeholders})";
+    return _wrapWithBraces ? "{" + core + "}" : core;
+}
