@@ -398,4 +398,38 @@ namespace RestUtilities.Connections.Helpers
 
         private string BuildSql()
         {
-            // Placeholders totales = IN + OUT/INOUT (DB2/OleD
+            // Placeholders totales = IN + OUT/INOUT (DB2/OleDb esperan todos posicionales)
+            int paramCount = _paramFactories.Count + _bulkOuts.Count;
+            var placeholders = paramCount == 0 ? "" : string.Join(", ", Enumerable.Repeat("?", paramCount));
+
+            var sep = _naming == Naming.SqlDot ? "." : "/";
+            var target = $"{_library}{sep}{_program}".ToUpperInvariant();
+            var core = paramCount == 0 ? $"CALL {target}()" : $"CALL {target}({placeholders})";
+
+            return _wrapWithBraces ? "{" + core + "}" : core;
+        }
+
+        private static bool IsTransient(DbException ex)
+        {
+            // Heurística básica (ajusta con tu mapa de SQLSTATE/SQLCODE si lo deseas)
+            var msg = ex.Message?.ToLowerInvariant() ?? "";
+            return msg.Contains("deadlock") || msg.Contains("timeout") || msg.Contains("temporar")
+                   || msg.Contains("lock") || msg.Contains("08001") || msg.Contains("08004")
+                   || msg.Contains("40001") || msg.Contains("57033") || msg.Contains("57014") || msg.Contains("57016");
+        }
+
+        private static async Task<int> ExecuteNonQueryAsync(DbCommand command, CancellationToken ct)
+        {
+            try { return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
+            catch (NotSupportedException) { return await Task.Run(() => command.ExecuteNonQuery(), ct).ConfigureAwait(false); }
+        }
+
+        private static async Task<DbDataReader> ExecuteReaderAsync(DbCommand command, CancellationToken ct)
+        {
+            try { return await command.ExecuteReaderAsync(ct).ConfigureAwait(false); }
+            catch (NotSupportedException) { return await Task.Run(() => command.ExecuteReader(), ct).ConfigureAwait(false); }
+        }
+
+        #endregion
+    }
+}
