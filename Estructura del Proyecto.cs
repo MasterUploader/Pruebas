@@ -1,8 +1,8 @@
 using System;
-using System.Buffers.Text;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace RestUtilities.Connections.Helpers
 {
-    #region Atributos y helpers
+    #region Atributos y utilidades
 
     /// <summary>
     /// Marca una propiedad como sensible para enmascarar su valor en logs/diagnóstico.
@@ -27,9 +27,7 @@ namespace RestUtilities.Connections.Helpers
             "password","pwd","pass","secret","token","apikey","api_key","pin","cvv","pan","card","tarjeta"
         };
 
-        /// <summary>
-        /// Devuelve un texto enmascarado si el nombre sugiere dato sensible o si el miembro está anotado con [Sensitive].
-        /// </summary>
+        /// <summary>Devuelve un texto enmascarado si el nombre sugiere dato sensible o si el miembro está anotado con <see cref="SensitiveAttribute"/>.</summary>
         public static string MaskIfSensitive(string logicalName, object? value, MemberInfo? sourceMember = null)
         {
             if (value is null) return "null";
@@ -72,7 +70,7 @@ namespace RestUtilities.Connections.Helpers
     /// </summary>
     public sealed class ProgramCallResult
     {
-        /// <summary>Filas afectadas reportadas por ExecuteNonQuery().</summary>
+        /// <summary>Filas afectadas reportadas por ExecuteNonQuery()/RecordsAffected.</summary>
         public int RowsAffected { get; internal set; }
 
         /// <summary>Parámetros de salida (OUT/INOUT) con sus valores finales por clave lógica.</summary>
@@ -81,9 +79,7 @@ namespace RestUtilities.Connections.Helpers
 
         internal void AddOut(string name, object? value) => _outValues[name] = value;
 
-        /// <summary>
-        /// Intenta obtener un OUT por nombre fuertemente tipado.
-        /// </summary>
+        /// <summary>Intenta obtener un OUT por nombre fuertemente tipado.</summary>
         public bool TryGet<T>(string key, out T? value)
         {
             if (_outValues.TryGetValue(key, out var raw))
@@ -95,9 +91,7 @@ namespace RestUtilities.Connections.Helpers
             return false;
         }
 
-        /// <summary>
-        /// Mapea los OUT/INOUT a un DTO. Usa un diccionario "claveOUT" → "propiedadDTO".
-        /// </summary>
+        /// <summary>Mapea los OUT/INOUT a un DTO. Usa un diccionario "claveOUT" → "propiedadDTO".</summary>
         public T MapTo<T>(Action<OutputMapBuilder<T>> map) where T : new()
         {
             var builder = new OutputMapBuilder<T>();
@@ -118,16 +112,12 @@ namespace RestUtilities.Connections.Helpers
         }
     }
 
-    /// <summary>
-    /// Builder para definir el mapeo OUT → DTO.
-    /// </summary>
+    /// <summary>Builder para definir el mapeo OUT → DTO.</summary>
     public sealed class OutputMapBuilder<T> where T : new()
     {
         internal Dictionary<string, PropertyInfo> Bindings { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>
-        /// Asocia la clave OUT "outName" a la propiedad del DTO seleccionada.
-        /// </summary>
+        /// <summary>Asocia la clave OUT <paramref name="outName"/> a la propiedad seleccionada del DTO.</summary>
         public OutputMapBuilder<T> Bind(string outName, System.Linq.Expressions.Expression<Func<T, object?>> selector)
         {
             if (string.IsNullOrWhiteSpace(outName)) throw new ArgumentNullException(nameof(outName));
@@ -170,9 +160,7 @@ namespace RestUtilities.Connections.Helpers
             _program = string.IsNullOrWhiteSpace(program) ? throw new ArgumentNullException(nameof(program)) : program.Trim();
         }
 
-        /// <summary>
-        /// Crea un builder para CALL LIBRARY/PROGRAM usando la conexión de RestUtilities.
-        /// </summary>
+        /// <summary>Crea un builder para CALL LIBRARY/PROGRAM usando la conexión de RestUtilities.</summary>
         public static ProgramCallBuilder For(IDatabaseConnection connection, string library, string program)
             => new(connection, library, program);
 
@@ -190,7 +178,7 @@ namespace RestUtilities.Connections.Helpers
             return this;
         }
 
-        /// <summary>Asigna un TraceId que tu wrapper de logging pueda propagar.</summary>
+        /// <summary>Asigna un TraceId que puede ser recogido por tu LoggingDbCommandWrapper.</summary>
         public ProgramCallBuilder WithTraceId(string? traceId)
         {
             _traceId = string.IsNullOrWhiteSpace(traceId) ? null : traceId;
@@ -205,9 +193,7 @@ namespace RestUtilities.Connections.Helpers
             return this;
         }
 
-        /// <summary>
-        /// Agrega un parámetro de entrada (IN). Usa parámetros posicionales.
-        /// </summary>
+        /// <summary>Agrega un parámetro de entrada (IN) posicional.</summary>
         public ProgramCallBuilder In(object? value, DbType? dbType = null, int? size = null, byte? precision = null, byte? scale = null)
         {
             _paramFactories.Add(cmd =>
@@ -224,19 +210,14 @@ namespace RestUtilities.Connections.Helpers
             return this;
         }
 
-        /// <summary>
-        /// Agrega un parámetro de salida OUT/INOUT de manera individual.
-        /// </summary>
+        /// <summary>Agrega un parámetro de salida OUT o INOUT.</summary>
         public ProgramCallBuilder Out(string name, DbType dbType, int? size = null, object? initialValue = null)
         {
             _bulkOuts.Add((name ?? $"out{_bulkOuts.Count + 1}", dbType, size, initialValue));
             return this;
         }
 
-        /// <summary>
-        /// Agrega múltiples parámetros de salida mediante un diccionario.
-        /// Use tuplas (DbType,int?) para tamaño cuando aplique. Para INOUT, setea initialValue en el tercer componente.
-        /// </summary>
+        /// <summary>Agrega múltiples OUT/INOUT de una sola vez.</summary>
         public ProgramCallBuilder OutMap(IEnumerable<(string Name, DbType Type, int? Size, object? Initial)> outs)
         {
             foreach (var o in outs) _bulkOuts.Add(o);
@@ -246,8 +227,6 @@ namespace RestUtilities.Connections.Helpers
         /// <summary>
         /// Agrega IN posicionales a partir de un objeto/DTO según el orden especificado.
         /// </summary>
-        /// <param name="source">Objeto origen.</param>
-        /// <param name="order">Lista de nombres de propiedad en el orden deseado.</param>
         public ProgramCallBuilder FromObject(object source, IEnumerable<string> order)
         {
             if (source is null) throw new ArgumentNullException(nameof(source));
@@ -274,35 +253,33 @@ namespace RestUtilities.Connections.Helpers
             return this;
         }
 
-        /// <summary>
-        /// Ejecuta el CALL y devuelve filas afectadas + OUT/INOUT.
-        /// </summary>
+        /// <summary>Ejecuta el CALL y devuelve filas afectadas + OUT/INOUT.</summary>
         public Task<ProgramCallResult> CallAsync(HttpContext? httpContext = null, CancellationToken cancellationToken = default)
             => ExecuteInternalAsync(httpContext, readerCallback: null, cancellationToken);
 
-        /// <summary>
-        /// Ejecuta el CALL y permite leer un result set si el programa devuelve filas (SELECT/cursores).
-        /// </summary>
+        /// <summary>Ejecuta el CALL y permite leer un result set si el programa devuelve filas.</summary>
         public Task<ProgramCallResult> CallAndReadAsync(HttpContext? httpContext, Func<DbDataReader, Task> readerCallback, CancellationToken cancellationToken = default)
             => ExecuteInternalAsync(httpContext, readerCallback, cancellationToken);
 
         private async Task<ProgramCallResult> ExecuteInternalAsync(HttpContext? httpContext, Func<DbDataReader, Task>? readerCallback, CancellationToken ct)
         {
             var sql = BuildSql();
+            int attempt = 0;
 
-            for (int attempt = 0; ; attempt++)
+            while (true)
             {
                 ct.ThrowIfCancellationRequested();
 
                 try
                 {
-                    using var command = httpContext is null
-                        ? _connection.GetDbCommand()
-                        : _connection.GetDbCommand(httpContext);
-
+                    using var command = _connection.GetDbCommand(httpContext); // HttpContext? OK
                     command.CommandText = sql;
                     command.CommandType = CommandType.Text;
                     if (_commandTimeoutSeconds.HasValue) command.CommandTimeout = _commandTimeoutSeconds.Value;
+
+                    // Expone TraceId para el wrapper de logging (si existe)
+                    if (httpContext != null && !string.IsNullOrWhiteSpace(_traceId))
+                        httpContext.Items["TraceId"] = _traceId;
 
                     // Parámetros IN
                     foreach (var factory in _paramFactories)
@@ -320,7 +297,7 @@ namespace RestUtilities.Connections.Helpers
                         command.Parameters.Add(p);
                     }
 
-                    var started = DateTime.UtcNow;
+                    var sw = Stopwatch.StartNew();
 
                     ProgramCallResult result = new();
 
@@ -336,6 +313,10 @@ namespace RestUtilities.Connections.Helpers
                         result.RowsAffected = reader.RecordsAffected;
                     }
 
+                    sw.Stop();
+                    if (httpContext != null)
+                        httpContext.Items["ProgramCallDurationMs"] = sw.ElapsedMilliseconds;
+
                     // Recupera OUT/INOUT
                     foreach (DbParameter p in command.Parameters)
                     {
@@ -348,13 +329,11 @@ namespace RestUtilities.Connections.Helpers
                         }
                     }
 
-                    // (Opcional) aquí puedes aprovechar _traceId para enriquecer tus logs con tu LoggingDbCommandWrapper
-
                     return result;
                 }
                 catch (DbException ex) when (attempt < _retryAttempts && IsTransient(ex))
                 {
-                    // Espera exponencial lineal/simple
+                    attempt++;
                     if (_retryBackoff > TimeSpan.Zero)
                         await Task.Delay(_retryBackoff, ct).ConfigureAwait(false);
                     continue; // reintenta
@@ -373,8 +352,7 @@ namespace RestUtilities.Connections.Helpers
 
         private static bool IsTransient(DbException ex)
         {
-            // Heurística básica (ajusta SQLSTATE/SQLCODE de DB2 i):
-            // 57033, 57014, 57016: resource busy/cancelled; 40001: deadlock; 08001/08004: connection
+            // Heurística básica (ajusta a tus SQLSTATE/SQLCODE de DB2 i)
             var msg = ex.Message?.ToLowerInvariant() ?? "";
             return msg.Contains("deadlock") || msg.Contains("timeout") || msg.Contains("temporar")
                    || msg.Contains("lock") || msg.Contains("08001") || msg.Contains("08004")
@@ -384,13 +362,21 @@ namespace RestUtilities.Connections.Helpers
         private static async Task<int> ExecuteNonQueryAsync(DbCommand command, CancellationToken ct)
         {
             try { return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
-            catch (NotSupportedException) { return command.ExecuteNonQuery(); }
+            catch (NotSupportedException)
+            {
+                // Fallback síncrono en Task para cumplir reglas async
+                return await Task.Run(() => command.ExecuteNonQuery(), ct).ConfigureAwait(false);
+            }
         }
 
         private static async Task<DbDataReader> ExecuteReaderAsync(DbCommand command, CancellationToken ct)
         {
             try { return await command.ExecuteReaderAsync(ct).ConfigureAwait(false); }
-            catch (NotSupportedException) { return command.ExecuteReader(); }
+            catch (NotSupportedException)
+            {
+                // Fallback síncrono en Task para cumplir reglas async
+                return await Task.Run(() => command.ExecuteReader(), ct).ConfigureAwait(false);
+            }
         }
     }
 
