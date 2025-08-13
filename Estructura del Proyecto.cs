@@ -1,428 +1,714 @@
+using QueryBuilder.Enums;
+using QueryBuilder.Helpers;
+using QueryBuilder.Models;
+using QueryBuilder.Translators;
 using System;
 using System.Collections.Generic;
-using System.Data;
-using System.Data.Common;
-using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
-using RestUtilities.Connections.Abstractions; // <- donde vive tu IDatabaseConnection
+using System.Linq.Expressions;
+using System.Text;
 
-namespace RestUtilities.Connections.Helpers
+namespace QueryBuilder.Builders;
+
+/// <summary>
+/// Generador de consultas SELECT compatible con AS400.
+/// Soporta DISTINCT, alias, JOINs, GROUP BY, HAVING, ORDER BY y funciones agregadas.
+/// </summary>
+public class SelectQueryBuilder
 {
+    internal string? WhereClause { get; set; }
+    internal string? HavingClause { get; set; }
+
+    private int? _offset;
+    private int? _fetch;
+    private readonly string? _tableName;
+    private readonly string? _library;
+    private string? _tableAlias;
+    private readonly List<(string Column, string? Alias)> _columns = [];
+    private readonly List<(string Column, SortDirection Direction)> _orderBy = [];
+    private readonly List<string> _groupBy = [];
+    private readonly List<JoinClause> _joins = [];
+    private readonly List<CommonTableExpression> _ctes = [];
+
+    private readonly Dictionary<string, string> _aliasMap = [];
+    private int? _limit;
+    private bool _distinct = false;
+    private readonly Subquery? _derivedTable;
+
     /// <summary>
-    /// Especifica un parámetro OUT/INOUT, incluyendo metadatos como tamaño y precisión/escala.
+    /// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/> con una tabla derivada.
     /// </summary>
-    public readonly struct OutSpec
+    /// <param name="derivedTable">Subconsulta que actúa como tabla.</param>
+    public SelectQueryBuilder(Subquery derivedTable)
     {
-        public OutSpec(string name, DbType type, int? size = null, byte? precision = null, byte? scale = null, object? initial = null)
-        {
-            Name = name;
-            Type = type;
-            Size = size;
-            Precision = precision;
-            Scale = scale;
-            Initial = initial;
-        }
-        public string Name { get; }
-        public DbType Type { get; }
-        public int? Size { get; }
-        public byte? Precision { get; }
-        public byte? Scale { get; }
-        public object? Initial { get; }
+        _derivedTable = derivedTable;
     }
 
     /// <summary>
-    /// Builder fluido para invocar programas CLLE/RPGLE mediante <c>{CALL LIB.PROG(?, ?, ...)}</c>
-    /// con parámetros **posicionales** y helpers que exigen el **nombre lógico** de cada parámetro
-    /// (solo para trazabilidad; el proveedor sigue usando el orden).
+    /// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/>.
     /// </summary>
-    public sealed class ProgramCallBuilder
+    public SelectQueryBuilder(string tableName, string? library = null)
     {
-        // Dependencias / estado
-        private readonly IDatabaseConnection? _connection;             // overload con interfaz
-        private readonly Func<HttpContext?, DbCommand>? _getCmd;       // overload con delegado
+        _tableName = tableName;
+        _library = library;
+    }
+    /// <summary>
+    /// Agrega una condición WHERE del tipo "CAMPO IN (...)".
+    /// </summary>
+    /// <param name="column">Nombre de la columna a comparar.</param>
+    /// <param name="values">Lista de valores a incluir.</param>
+    public SelectQueryBuilder WhereIn(string column, IEnumerable<object> values)
+    {
+        if (values is null || !values.Any()) return this;
 
-        private string _library;
-        private readonly string _program;
+        string formatted = string.Join(", ", values.Select(SqlHelper.FormatValue));
+        string clause = $"{column} IN ({formatted})";
 
-        // IN: lista de fábricas de parámetros en el orden en que se agregan
-        private readonly List<Func<DbCommand, DbParameter>> _paramFactories = new();
-        // OUT: especificaciones con metadatos
-        private readonly List<OutSpec> _bulkOuts = new();
+        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
+        return this;
+    }
 
-        // Configuración operativa
-        private int? _commandTimeoutSeconds;
-        private int _retryAttempts = 0;
-        private TimeSpan _retryBackoff = TimeSpan.Zero;
-        private string? _traceId;
+    /// <summary>
+    /// Agrega una condición WHERE del tipo "CAMPO NOT IN (...)".
+    /// </summary>
+    /// <param name="column">Nombre de la columna a comparar.</param>
+    /// <param name="values">Lista de valores a excluir.</param>
+    public SelectQueryBuilder WhereNotIn(string column, IEnumerable<object> values)
+    {
+        if (values is null || !values.Any()) return this;
 
-        // SQL emitido
-        private enum Naming { SqlDot, SystemSlash }
-        private Naming _naming = Naming.SqlDot;     // LIB.PROG
-        private bool _wrapWithBraces = true;        // {CALL ...}
+        string formatted = string.Join(", ", values.Select(SqlHelper.FormatValue));
+        string clause = $"{column} NOT IN ({formatted})";
 
-        // Normalización de OUTs
-        private bool _trimOutStringPadding = true;  // recorta '\0' y ' '
-        private bool _emptyStringAsNull = false;    // "" -> null
-        private bool _forceUnspecifiedDateTime = true;
+        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
+        return this;
+    }
 
-        #region Creación
+    /// <summary>
+    /// Agrega una condición WHERE del tipo "CAMPO BETWEEN VALOR1 AND VALOR2".
+    /// </summary>
+    /// <param name="column">Nombre de la columna a comparar.</param>
+    /// <param name="start">Valor inicial del rango.</param>
+    /// <param name="end">Valor final del rango.</param>
+    public SelectQueryBuilder WhereBetween(string column, object start, object end)
+    {
+        string formattedStart = SqlHelper.FormatValue(start);
+        string formattedEnd = SqlHelper.FormatValue(end);
+        string clause = $"{column} BETWEEN {formattedStart} AND {formattedEnd}";
 
-        private ProgramCallBuilder(IDatabaseConnection connection, string library, string program)
+        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
+        return this;
+    }
+
+
+    /// <summary>
+    /// Agrega un JOIN con una subconsulta como tabla.
+    /// </summary>
+    /// <param name="subquery">Instancia de subconsulta a usar como tabla.</param>
+    /// <param name="alias">Alias de la tabla derivada.</param>
+    /// <param name="left">Columna izquierda para la condición ON.</param>
+    /// <param name="right">Columna derecha para la condición ON.</param>
+    /// <param name="joinType">Tipo de JOIN: INNER, LEFT, etc.</param>
+    public SelectQueryBuilder Join(Subquery subquery, string alias, string left, string right, string joinType = "INNER")
+    {
+        _joins.Add(new JoinClause
         {
-            _connection = connection ?? throw new ArgumentNullException(nameof(connection));
-            _library = EnsureText(library);
-            _program = EnsureText(program);
+            JoinType = joinType.ToUpperInvariant(),
+            TableName = $"({subquery.Sql})",
+            Alias = alias,
+            LeftColumn = left,
+            RightColumn = right
+        });
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una o más expresiones CTE a la consulta.
+    /// </summary>
+    /// <param name="ctes">CTEs a incluir en la cláusula WITH.</param>
+    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder With(params CommonTableExpression[] ctes)
+    {
+        if (ctes != null && ctes.Length > 0)
+            _ctes.AddRange(ctes);
+
+        return this;
+    }
+
+    /// <summary>
+    /// Indica que se desea una consulta SELECT DISTINCT.
+    /// </summary>
+    public SelectQueryBuilder Distinct()
+    {
+        _distinct = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Define un alias para la tabla.
+    /// </summary>
+    public SelectQueryBuilder As(string alias)
+    {
+        _tableAlias = alias;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una subconsulta como una columna seleccionada.
+    /// </summary>
+    /// <param name="subquery">Subconsulta construida previamente.</param>
+    /// <param name="alias">Alias de la columna resultante.</param>
+    public SelectQueryBuilder Select(Subquery subquery, string alias)
+    {
+        _columns.Add(($"({subquery.Sql})", alias));
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una expresión CASE WHEN como columna seleccionada, con un alias explícito.
+    /// </summary>
+    /// <param name="caseExpression">Expresión CASE generada con <see cref="CaseWhenBuilder"/>.</param>
+    /// <param name="alias">Alias para la columna resultante.</param>
+    public SelectQueryBuilder SelectCase(string caseExpression, string alias)
+    {
+        _columns.Add((caseExpression, alias));
+        _aliasMap[caseExpression] = alias;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una o varias expresiones CASE WHEN al SELECT.
+    /// </summary>
+    /// <param name="caseColumns">
+    /// Tuplas donde el primer valor es la expresión CASE WHEN generada por <see cref="CaseWhenBuilder"/>,
+    /// y el segundo valor es el alias de la columna.
+    /// </param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder SelectCase(params (string ColumnSql, string? Alias)[] caseColumns)
+    {
+        foreach (var (column, alias) in caseColumns)
+        {
+            _columns.Add((column, alias));
+            if (!string.IsNullOrWhiteSpace(alias))
+                _aliasMap[column] = alias;
         }
 
-        private ProgramCallBuilder(Func<HttpContext?, DbCommand> getDbCommand, string library, string program)
+        return this;
+    }
+
+    /// <summary>
+    /// Define las columnas a seleccionar (sin alias explícito).
+    /// Si detecta funciones agregadas, genera alias automáticos como "SUM_CAMPO".
+    /// </summary>
+    /// <param name="columns">Nombres de columnas o funciones agregadas.</param>
+    public SelectQueryBuilder Select(params string[] columns)
+    {
+        foreach (var column in columns)
         {
-            _getCmd = getDbCommand ?? throw new ArgumentNullException(nameof(getDbCommand));
-            _library = EnsureText(library);
-            _program = EnsureText(program);
+            if (TryGenerateAlias(column, out var alias))
+                _columns.Add((column, alias));
+            else
+                _columns.Add((column, null));
         }
 
-        private static string EnsureText(string v)
-            => string.IsNullOrWhiteSpace(v) ? throw new ArgumentNullException(nameof(v)) : v.Trim();
+        return this;
+    }
 
-        /// <summary>Crea el builder usando una conexión de la librería (recomendado).</summary>
-        public static ProgramCallBuilder For(IDatabaseConnection connection, string library, string program)
-            => new(connection, library, program);
-
-        /// <summary>
-        /// Crea el builder usando un delegado que devuelve <see cref="DbCommand"/>.
-        /// Útil si quieres evitar referenciar la interfaz directamente.
-        /// </summary>
-        public static ProgramCallBuilder For(Func<HttpContext?, DbCommand> getDbCommand, string library, string program)
-            => new(getDbCommand, library, program);
-
-        #endregion
-
-        #region Configuración general
-
-        /// <summary>Override puntual de la librería (schema).</summary>
-        public ProgramCallBuilder OnLibrary(string library) { _library = EnsureText(library); return this; }
-
-        /// <summary>Define el timeout del comando en segundos.</summary>
-        public ProgramCallBuilder WithTimeout(int seconds)
+    /// <summary>
+    /// Define columnas con alias.
+    /// </summary>
+    public SelectQueryBuilder Select(params (string Column, string Alias)[] columns)
+    {
+        foreach (var (column, alias) in columns)
         {
-            _commandTimeoutSeconds = seconds >= 0 ? seconds : throw new ArgumentOutOfRangeException(nameof(seconds));
+            _columns.Add((column, alias));
+            _aliasMap[column] = alias;
+        }
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición WHERE con una función SQL directamente como string.
+    /// Ejemplo: "UPPER(NOMBRE) = 'PEDRO'"
+    /// </summary>
+    /// <param name="sqlFunctionCondition">Condición completa en SQL.</param>
+    public SelectQueryBuilder WhereFunction(string sqlFunctionCondition)
+    {
+        if (string.IsNullOrWhiteSpace(sqlFunctionCondition))
             return this;
-        }
 
-        /// <summary>Asigna un TraceId visible en <see cref="HttpContext.Items"/> con la clave <c>"TraceId"</c>.</summary>
-        public ProgramCallBuilder WithTraceId(string? traceId) { _traceId = string.IsNullOrWhiteSpace(traceId) ? null : traceId; return this; }
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = sqlFunctionCondition;
+        else
+            WhereClause += $" AND {sqlFunctionCondition}";
 
-        /// <summary>Configura reintentos ante errores transitorios con backoff.</summary>
-        public ProgramCallBuilder WithRetry(int attempts, TimeSpan backoff)
-        {
-            _retryAttempts = Math.Max(0, attempts);
-            _retryBackoff = backoff < TimeSpan.Zero ? TimeSpan.Zero : backoff;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición WHERE en formato SQL crudo (string libre).
+    /// Ejemplo: "ESTADO = 'ACTIVO' OR TIPO = 'X'"
+    /// </summary>
+    /// <param name="rawCondition">Condición SQL sin procesar.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder WhereRaw(string rawCondition)
+    {
+        if (string.IsNullOrWhiteSpace(rawCondition))
             return this;
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = rawCondition;
+        else
+            WhereClause += $" AND {rawCondition}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición HAVING con una función SQL directamente como string.
+    /// Ejemplo: "SUM(CANTIDAD) > 10"
+    /// </summary>
+    /// <param name="sqlFunctionCondition">Condición completa en SQL.</param>
+    public SelectQueryBuilder HavingFunction(string sqlFunctionCondition)
+    {
+        if (string.IsNullOrWhiteSpace(sqlFunctionCondition))
+            return this;
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = sqlFunctionCondition;
+        else
+            HavingClause += $" AND {sqlFunctionCondition}";
+
+        return this;
+    }
+
+
+    /// <summary>
+    /// Agrega una cláusula WHERE con una expresión CASE WHEN directamente como string.
+    /// Ej: "CASE WHEN TIPO = 'A' THEN 1 ELSE 0 END = 1"
+    /// </summary>
+    /// <param name="sqlCaseCondition">Condición CASE completa.</param>
+    public SelectQueryBuilder WhereCase(string sqlCaseCondition)
+    {
+        if (string.IsNullOrWhiteSpace(sqlCaseCondition))
+            return this;
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = sqlCaseCondition;
+        else
+            WhereClause += $" AND {sqlCaseCondition}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula WHERE con una expresión CASE WHEN generada desde <see cref="CaseWhenBuilder"/>.
+    /// </summary>
+    /// <param name="caseBuilder">Instancia del builder de CASE.</param>
+    /// <param name="comparison">Condición adicional (por ejemplo: "= 1").</param>
+    public SelectQueryBuilder WhereCase(CaseWhenBuilder caseBuilder, string comparison)
+    {
+        if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison))
+            return this;
+
+        string expression = $"{caseBuilder.Build()} {comparison}";
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = expression;
+        else
+            WhereClause += $" AND {expression}";
+
+        return this;
+    }
+
+
+    /// <summary>
+    /// Agrega una condición WHERE.
+    /// </summary>
+    public SelectQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
+    {
+        LambdaWhereTranslator.Translate(this, expression);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula HAVING EXISTS con una subconsulta.
+    /// </summary>
+    /// <param name="subquery">Subconsulta que se evaluará con EXISTS.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder HavingExists(Subquery subquery)
+    {
+        if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
+            return this;
+
+        var clause = $"EXISTS ({subquery.Sql})";
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = clause;
+        else
+            HavingClause += $" AND {clause}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula HAVING NOT EXISTS con una subconsulta.
+    /// </summary>
+    /// <param name="subquery">Subconsulta que se evaluará con NOT EXISTS.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder HavingNotExists(Subquery subquery)
+    {
+        if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
+            return this;
+
+        var clause = $"NOT EXISTS ({subquery.Sql})";
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = clause;
+        else
+            HavingClause += $" AND {clause}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula HAVING con una expresión CASE WHEN directamente como string.
+    /// Ejemplo: "CASE WHEN SUM(CANTIDAD) > 10 THEN 1 ELSE 0 END = 1"
+    /// </summary>
+    /// <param name="sqlCaseCondition">Expresión CASE completa en SQL.</param>
+    public SelectQueryBuilder HavingCase(string sqlCaseCondition)
+    {
+        if (string.IsNullOrWhiteSpace(sqlCaseCondition))
+            return this;
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = sqlCaseCondition;
+        else
+            HavingClause += $" AND {sqlCaseCondition}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula HAVING con una expresión CASE WHEN generada con <see cref="CaseWhenBuilder"/>.
+    /// </summary>
+    /// <param name="caseBuilder">Builder de CASE WHEN.</param>
+    /// <param name="comparison">Comparación adicional (ej: "= 1").</param>
+    public SelectQueryBuilder HavingCase(CaseWhenBuilder caseBuilder, string comparison)
+    {
+        if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison))
+            return this;
+
+        string expression = $"{caseBuilder.Build()} {comparison}";
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = expression;
+        else
+            HavingClause += $" AND {expression}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición HAVING.
+    /// </summary>
+    public SelectQueryBuilder Having<T>(Expression<Func<T, bool>> expression)
+    {
+        LambdaHavingTranslator.Translate(this, expression);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
+    /// </summary>
+    /// <param name="subqueryBuilderAction">
+    /// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de EXISTS.
+    /// </param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder WhereExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+    {
+        var subqueryBuilder = new SelectQueryBuilder("DUMMY"); // El nombre se sobreescribirá
+        subqueryBuilderAction(subqueryBuilder);
+        var subquerySql = subqueryBuilder.Build().Sql;
+
+        var existsClause = $"EXISTS ({subquerySql})";
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = existsClause;
+        else
+            WhereClause += $" AND {existsClause}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición NOT EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
+    /// </summary>
+    /// <param name="subqueryBuilderAction">
+    /// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de NOT EXISTS.
+    /// </param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder WhereNotExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+    {
+        var subqueryBuilder = new SelectQueryBuilder("DUMMY");
+        subqueryBuilderAction(subqueryBuilder);
+        var subquerySql = subqueryBuilder.Build().Sql;
+
+        var notExistsClause = $"NOT EXISTS ({subquerySql})";
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = notExistsClause;
+        else
+            WhereClause += $" AND {notExistsClause}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Establece las columnas para agrupar (GROUP BY).
+    /// </summary>
+    public SelectQueryBuilder GroupBy(params string[] columns)
+    {
+        _groupBy.AddRange(columns);
+        return this;
+    }
+
+    /// <summary>
+    /// Establece el límite de resultados (FETCH FIRST para AS400).
+    /// </summary>
+    public SelectQueryBuilder Limit(int rowCount)
+    {
+        _limit = rowCount;
+        return this;
+    }
+
+    /// <summary>
+    /// Ordena por una o varias columnas.
+    /// </summary>
+    public SelectQueryBuilder OrderBy(params (string Column, SortDirection Direction)[] columns)
+    {
+        _orderBy.AddRange(columns);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula JOIN a la consulta SQL, permitiendo especificar la tabla con o sin librería.
+    /// </summary>
+    /// <param name="table">Nombre de la tabla a unir. Puede incluir la librería (ej. LIBRERIA.TABLA).</param>
+    /// <param name="library">Nombre de la librería si no se especifica en la tabla. Se ignora si <paramref name="table"/> ya incluye la librería.</param>
+    /// <param name="alias">Alias opcional para la tabla unida.</param>
+    /// <param name="left">Columna del lado izquierdo de la condición ON.</param>
+    /// <param name="right">Columna del lado derecho de la condición ON.</param>
+    /// <param name="joinType">Tipo de JOIN (INNER, LEFT, RIGHT, FULL).</param>
+    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder Join(string table, string? library, string alias, string left, string right, string joinType = "INNER")
+    {
+        if (string.IsNullOrWhiteSpace(table))
+            throw new ArgumentNullException(nameof(table));
+
+        if (string.IsNullOrWhiteSpace(left))
+            throw new ArgumentNullException(nameof(left));
+
+        if (string.IsNullOrWhiteSpace(right))
+            throw new ArgumentNullException(nameof(right));
+
+        string finalLibrary = library;
+        string finalTable = table;
+
+        // Si el nombre incluye un punto (.), asumimos que ya viene con la librería: LIBRERIA.TABLA
+        if (table.Contains('.'))
+        {
+            var parts = table.Split('.', 2, StringSplitOptions.TrimEntries);
+            finalLibrary = parts[0];
+            finalTable = parts[1];
         }
 
-        /// <summary>Usa convención SQL (LIB.PROG). Es la opción por defecto.</summary>
-        public ProgramCallBuilder UseSqlNaming() { _naming = Naming.SqlDot; return this; }
-        /// <summary>Usa convención de sistema (LIB/PROG).</summary>
-        public ProgramCallBuilder UseSystemNaming() { _naming = Naming.SystemSlash; return this; }
-        /// <summary>Envuelve el CALL en llaves ODBC: <c>{CALL ...}</c>. Activado por defecto.</summary>
-        public ProgramCallBuilder WrapCallWithBraces(bool enable = true) { _wrapWithBraces = enable; return this; }
-
-        /// <summary>Recorta '\0' y espacios a la derecha en OUTs de texto.</summary>
-        public ProgramCallBuilder TrimOutStringPadding(bool enabled = true) { _trimOutStringPadding = enabled; return this; }
-        /// <summary>Convierte cadenas vacías a <c>null</c> en OUTs.</summary>
-        public ProgramCallBuilder EmptyStringAsNull(bool enabled = true) { _emptyStringAsNull = enabled; return this; }
-        /// <summary>Fuerza <see cref="DateTimeKind.Unspecified"/> en OUTs de fecha/hora.</summary>
-        public ProgramCallBuilder ForceUnspecifiedDateTime(bool enabled = true) { _forceUnspecifiedDateTime = enabled; return this; }
-
-        #endregion
-
-        #region Parámetros IN (helpers con nombre obligatorio)
-
-        /// <summary>
-        /// Agrega un parámetro IN genérico (posicional). El nombre es solo para trazas.
-        /// </summary>
-        public ProgramCallBuilder In(
-            string name,
-            object? value,
-            DbType? dbType = null,
-            int? size = null,
-            byte? precision = null,
-            byte? scale = null)
+        _joins.Add(new JoinClause
         {
-            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
+            JoinType = joinType.ToUpperInvariant(),
+            TableName = finalTable,
+            Library = finalLibrary,
+            Alias = alias,
+            LeftColumn = left,
+            RightColumn = right
+        });
 
-            _paramFactories.Add(cmd =>
+        return this;
+    }
+
+
+    /// <summary>
+    /// Define el valor de desplazamiento de filas (OFFSET).
+    /// </summary>
+    /// <param name="offset">Cantidad de filas a omitir.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder Offset(int offset)
+    {
+        _offset = offset;
+        return this;
+    }
+
+    /// <summary>
+    /// Define la cantidad de filas a recuperar después del OFFSET (FETCH NEXT).
+    /// </summary>
+    /// <param name="rowCount">Cantidad de filas a recuperar.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder FetchNext(int rowCount)
+    {
+        _fetch = rowCount;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una expresión CASE WHEN al ORDER BY, con soporte para condiciones tipadas.
+    /// </summary>
+    /// <param name="caseWhen">Expresión CASE WHEN construida mediante <see cref="CaseWhenBuilder"/>.</param>
+    /// <param name="alias">Alias opcional para la expresión CASE (no se usa en ORDER BY pero puede ser útil si se reutiliza).</param>
+    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder OrderByCase(CaseWhenBuilder caseWhen, SortDirection direction = SortDirection.None, string? alias = null)
+    {
+        ArgumentNullException.ThrowIfNull(caseWhen);
+
+        var expression = caseWhen.Build();
+
+        // No se requiere alias en ORDER BY, pero lo soportamos si se quiere reutilizar
+        if (!string.IsNullOrWhiteSpace(alias))
+            expression += $" AS {alias}";
+
+        _orderBy.Add((caseWhen.Build(), direction)); // Se agrega sin alias para efecto de ordenamiento
+        return this;
+    }
+
+
+    /// <summary>
+    /// Construye y retorna el SQL.
+    /// </summary>
+    public QueryResult Build()
+    {
+        var sb = new StringBuilder();
+
+        // Si hay CTEs, agregarlas antes del SELECT
+        if (_ctes.Count > 0)
+        {
+            sb.Append("WITH ");
+            sb.Append(string.Join(", ", _ctes.Select(cte => cte.ToString())));
+            sb.AppendLine();
+        }
+
+        sb.Append("SELECT ");
+        if (_distinct) sb.Append("DISTINCT ");
+
+        if (_columns.Count == 0)
+            sb.Append('*');
+        else
+        {
+            var colParts = _columns.Select(c =>
+                string.IsNullOrWhiteSpace(c.Alias)
+                    ? c.Column
+                    : $"{c.Column} AS {c.Alias}"
+            );
+            sb.Append(string.Join(", ", colParts));
+        }
+
+        sb.Append(" FROM ");
+        if (_derivedTable != null)
+        {
+            sb.Append(_derivedTable.ToString());
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(_library))
+                sb.Append($"{_library}.");
+            sb.Append(_tableName);
+            if (!string.IsNullOrWhiteSpace(_tableAlias))
+                sb.Append($" {_tableAlias}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_tableAlias))
+            sb.Append($" {_tableAlias}");
+
+        foreach (var join in _joins)
+        {
+            sb.Append($" {join.JoinType} JOIN ");
+            if (!string.IsNullOrWhiteSpace(join.Library))
+                sb.Append($"{join.Library}.");
+            sb.Append($"{join.TableName} {join.Alias} ON {join.LeftColumn} = {join.RightColumn}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(WhereClause))
+            sb.Append($" WHERE {WhereClause}");
+
+        if (_groupBy.Count > 0)
+        {
+            sb.Append(" GROUP BY ");
+            var grouped = _groupBy.Select(col => _aliasMap.TryGetValue(col, out var alias) ? alias : col);
+            sb.Append(string.Join(", ", grouped));
+        }
+
+        if (!string.IsNullOrWhiteSpace(HavingClause))
+            sb.Append($" HAVING {HavingClause}");
+
+        if (_orderBy.Count > 0)
+        {
+            sb.Append(" ORDER BY ");
+            var orderParts = _orderBy.Select(order =>
             {
-                var p = cmd.CreateParameter();
-                p.ParameterName = name;                  // etiqueta para logging; el binding sigue siendo posicional
-                p.Direction = ParameterDirection.Input;
-
-                if (dbType.HasValue)    p.DbType = dbType.Value;
-                if (size.HasValue)      p.Size = size.Value;
-                if (precision.HasValue) p.Precision = precision.Value;
-                if (scale.HasValue)     p.Scale = scale.Value;
-
-                p.Value = value ?? DBNull.Value;
-                return p;
+                var (col, dir) = order;
+                return dir switch
+                {
+                    SortDirection.Asc => $"{col} ASC",
+                    SortDirection.Desc => $"{col} DESC",
+                    SortDirection.None or _ => col // No se incluye ASC ni DESC
+                };
             });
-            return this;
+            sb.Append(string.Join(", ", orderParts));
         }
 
-        /// <summary>IN string (VARCHAR/NVARCHAR) con nombre obligatorio.</summary>
-        public ProgramCallBuilder InString(string name, string? value, int? size = null)
-            => In(name, value, DbType.String, size: size);
+        if (_limit.HasValue)
+            sb.Append(GetLimitClause());
 
-        /// <summary>IN carácter fijo (CHAR(n)) con nombre obligatorio.</summary>
-        public ProgramCallBuilder InChar(string name, string? value, int size)
-            => In(name, value, DbType.AnsiStringFixedLength, size: size);
+        return new QueryResult { Sql = sb.ToString() };
+    }
 
-        /// <summary>IN decimal con nombre obligatorio (precisión/escala opcionales).</summary>
-        public ProgramCallBuilder InDecimal(string name, decimal? value, byte? precision = null, byte? scale = null)
-            => In(name, value, DbType.Decimal, precision: precision, scale: scale);
+    /// <summary>
+    /// Genera un alias automático para funciones agregadas como SUM(CAMPO), COUNT(*), etc.
+    /// </summary>
+    /// <param name="column">Expresión de columna a analizar.</param>
+    /// <param name="alias">Alias generado si aplica.</param>
+    /// <returns>True si se generó un alias; false en caso contrario.</returns>
+    private static bool TryGenerateAlias(string column, out string alias)
+    {
+        alias = string.Empty;
 
-        /// <summary>IN entero de 32 bits con nombre obligatorio.</summary>
-        public ProgramCallBuilder InInt32(string name, int? value)
-            => In(name, value, DbType.Int32);
+        if (string.IsNullOrWhiteSpace(column) || !column.Contains('(') || !column.Contains(')'))
+            return false;
 
-        /// <summary>IN fecha/hora con nombre obligatorio.</summary>
-        public ProgramCallBuilder InDateTime(string name, DateTime? value)
-            => In(name, value, DbType.DateTime);
+        int start = column.IndexOf('(');
+        int end = column.IndexOf(')');
 
-        #endregion
+        if (start < 1 || end <= start)
+            return false;
 
-        #region Parámetros OUT/INOUT (helpers con nombre obligatorio)
+        var function = column[..start].Trim().ToUpperInvariant();
+        var argument = column.Substring(start + 1, end - start - 1).Trim();
 
-        /// <summary>
-        /// Declara un parámetro OUT/INOUT. Si <paramref name="initialValue"/> se define, el parámetro actuará como INOUT.
-        /// </summary>
-        public ProgramCallBuilder Out(
-            string name,
-            DbType dbType,
-            int? size = null,
-            byte? precision = null,
-            byte? scale = null,
-            object? initialValue = null)
-        {
-            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentNullException(nameof(name));
-            _bulkOuts.Add(new OutSpec(name, dbType, size, precision, scale, initialValue));
-            return this;
-        }
+        var validFunctions = new[] { "SUM", "COUNT", "AVG", "MIN", "MAX" };
+        if (!validFunctions.Contains(function))
+            return false;
 
-        /// <summary>OUT string (VARCHAR/NVARCHAR) con tamaño y nombre obligatorios.</summary>
-        public ProgramCallBuilder OutString(string name, int size, object? initialValue = null)
-            => Out(name, DbType.String, size: size, initialValue: initialValue);
+        if (string.IsNullOrWhiteSpace(argument))
+            return false;
 
-        /// <summary>OUT carácter fijo (CHAR(n)) con nombre obligatorio.</summary>
-        public ProgramCallBuilder OutChar(string name, int size, object? initialValue = null)
-            => Out(name, DbType.AnsiStringFixedLength, size: size, initialValue: initialValue);
+        alias = $"{function}_{argument.Replace("*", "ALL")}";
+        return true;
+    }
 
-        /// <summary>OUT decimal con precisión/escala y nombre obligatorios.</summary>
-        public ProgramCallBuilder OutDecimal(string name, byte precision, byte scale, object? initialValue = null)
-            => Out(name, DbType.Decimal, precision: precision, scale: scale, initialValue: initialValue);
-
-        /// <summary>OUT entero de 32 bits con nombre obligatorio.</summary>
-        public ProgramCallBuilder OutInt32(string name, int? initialValue = null)
-            => Out(name, DbType.Int32, initialValue: initialValue);
-
-        /// <summary>OUT fecha/hora con nombre obligatorio.</summary>
-        public ProgramCallBuilder OutDateTime(string name, DateTime? initialValue = null)
-            => Out(name, DbType.DateTime, initialValue: initialValue);
-
-        #endregion
-
-        #region Mapeo desde DTO (IN)
-
-        /// <summary>
-        /// Agrega parámetros IN posicionales a partir de un objeto,
-        /// siguiendo el orden de nombres de propiedades proporcionado.
-        /// Útil para llamadas con muchos IN.
-        /// </summary>
-        public ProgramCallBuilder FromObject(object source, IEnumerable<string> order)
-        {
-            if (source is null) throw new ArgumentNullException(nameof(source));
-            if (order is null) throw new ArgumentNullException(nameof(order));
-
-            var type = source.GetType();
-            var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                            .ToDictionary(p => p.Name, p => p, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var name in order)
-            {
-                if (!props.TryGetValue(name, out var pi))
-                    throw new ArgumentException($"La propiedad '{name}' no existe en {type.Name}.");
-
-                var value = pi.GetValue(source);
-                In(name, value); // reusa la API IN con nombre
-            }
-            return this;
-        }
-
-        #endregion
-
-        #region Ejecución
-
-        /// <summary>Ejecuta el <c>CALL</c> y devuelve filas afectadas + OUT/INOUT.</summary>
-        public Task<ProgramCallResult> CallAsync(HttpContext? httpContext = null, CancellationToken cancellationToken = default)
-            => ExecuteInternalAsync(httpContext, readerCallback: null, cancellationToken);
-
-        /// <summary>Ejecuta el <c>CALL</c> y permite leer un result set si el programa hace <c>SELECT</c>.</summary>
-        public Task<ProgramCallResult> CallAndReadAsync(HttpContext? httpContext, Func<DbDataReader, Task> readerCallback, CancellationToken cancellationToken = default)
-            => ExecuteInternalAsync(httpContext, readerCallback, cancellationToken);
-
-        private async Task<ProgramCallResult> ExecuteInternalAsync(HttpContext? httpContext, Func<DbDataReader, Task>? readerCallback, CancellationToken ct)
-        {
-            var sql = BuildSql();
-            int attempt = 0;
-
-            while (true)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                try
-                {
-                    // Crea el comando (según overload usado al construir el builder)
-                    using var command = _getCmd is not null ? _getCmd(httpContext) : _connection!.GetDbCommand(httpContext);
-
-                    command.CommandText = sql;
-                    command.CommandType = CommandType.Text;
-                    if (_commandTimeoutSeconds.HasValue) command.CommandTimeout = _commandTimeoutSeconds.Value;
-
-                    // Enviar TraceId a logging (si lo usas en tu wrapper)
-                    if (httpContext != null && !string.IsNullOrWhiteSpace(_traceId))
-                        httpContext.Items["TraceId"] = _traceId;
-
-                    // 1) IN en orden de registro
-                    foreach (var factory in _paramFactories)
-                        command.Parameters.Add(factory(command));
-
-                    // 2) OUT/INOUT (van después de IN, también posicionales)
-                    foreach (var o in _bulkOuts)
-                    {
-                        var p = command.CreateParameter();
-                        p.ParameterName = o.Name;
-                        p.Direction = o.Initial is null ? ParameterDirection.Output : ParameterDirection.InputOutput;
-                        p.DbType = o.Type;
-                        if (o.Size.HasValue)      p.Size = o.Size.Value;
-                        if (o.Precision.HasValue) p.Precision = o.Precision.Value;
-                        if (o.Scale.HasValue)     p.Scale = o.Scale.Value;
-                        if (o.Initial is not null) p.Value = o.Initial;
-                        command.Parameters.Add(p);
-                    }
-
-                    var sw = Stopwatch.StartNew();
-
-                    var result = new ProgramCallResult();
-
-                    if (readerCallback is null)
-                    {
-                        var rows = await ExecuteNonQueryAsync(command, ct).ConfigureAwait(false);
-                        result.RowsAffected = rows;
-                    }
-                    else
-                    {
-                        using var reader = await ExecuteReaderAsync(command, ct).ConfigureAwait(false);
-                        await readerCallback(reader).ConfigureAwait(false);
-                        result.RowsAffected = reader.RecordsAffected;
-                    }
-
-                    sw.Stop();
-                    if (httpContext != null) httpContext.Items["ProgramCallDurationMs"] = sw.ElapsedMilliseconds;
-
-                    // Captura de OUT/INOUT con normalización
-                    foreach (DbParameter p in command.Parameters)
-                    {
-                        if (p.Direction is ParameterDirection.Output or ParameterDirection.InputOutput or ParameterDirection.ReturnValue)
-                        {
-                            var key = string.IsNullOrWhiteSpace(p.ParameterName)
-                                ? $"out_{result.OutValues.Count + 1}"
-                                : p.ParameterName!;
-                            result.AddOut(key, NormalizeOutValue(p.Value));
-                        }
-                    }
-
-                    return result;
-                }
-                catch (DbException ex) when (attempt < _retryAttempts && IsTransient(ex))
-                {
-                    attempt++;
-                    if (_retryBackoff > TimeSpan.Zero)
-                        await Task.Delay(_retryBackoff, ct).ConfigureAwait(false);
-                    // reintentar
-                }
-            }
-        }
-
-        /// <summary>
-        /// Normaliza valores OUT: 
-        /// - string/char[]: quita NUL (0x00) y espacios a la derecha; opcionalmente ""→null
-        /// - DateTime: fuerza Kind=Unspecified si está activado
-        /// - DBNull → null
-        /// </summary>
-        private object? NormalizeOutValue(object? raw)
-        {
-            if (raw is null || raw is DBNull) return null;
-
-            switch (raw)
-            {
-                case string s:
-                    if (_trimOutStringPadding) s = s.TrimEnd('\0', ' ');
-                    if (_emptyStringAsNull && s.Length == 0) return null;
-                    return s;
-
-                case char[] chars:
-                    var s2 = new string(chars);
-                    if (_trimOutStringPadding) s2 = s2.TrimEnd('\0', ' ');
-                    if (_emptyStringAsNull && s2.Length == 0) return null;
-                    return s2;
-
-                case DateTime dt:
-                    return _forceUnspecifiedDateTime && dt.Kind != DateTimeKind.Unspecified
-                        ? DateTime.SpecifyKind(dt, DateTimeKind.Unspecified)
-                        : dt;
-
-                default:
-                    return raw;
-            }
-        }
-
-        private string BuildSql()
-        {
-            // Total de placeholders = IN + OUT/INOUT (todo posicional)
-            int paramCount = _paramFactories.Count + _bulkOuts.Count;
-            var placeholders = paramCount == 0 ? "" : string.Join(", ", Enumerable.Repeat("?", paramCount));
-
-            var sep = _naming == Naming.SqlDot ? "." : "/";
-            var target = $"{_library}{sep}{_program}".ToUpperInvariant();
-            var core = paramCount == 0 ? $"CALL {target}()" : $"CALL {target}({placeholders})";
-
-            return _wrapWithBraces ? "{" + core + "}" : core;
-        }
-
-        private static bool IsTransient(DbException ex)
-        {
-            // Ajusta con tus SQLSTATE/SQLCODE según necesites
-            var msg = ex.Message?.ToLowerInvariant() ?? "";
-            return msg.Contains("deadlock") || msg.Contains("timeout") || msg.Contains("temporar")
-                   || msg.Contains("lock") || msg.Contains("08001") || msg.Contains("08004")
-                   || msg.Contains("40001") || msg.Contains("57033") || msg.Contains("57014") || msg.Contains("57016");
-        }
-
-        private static async Task<int> ExecuteNonQueryAsync(DbCommand command, CancellationToken ct)
-        {
-            try { return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false); }
-            catch (NotSupportedException) { return await Task.Run(() => command.ExecuteNonQuery(), ct).ConfigureAwait(false); }
-        }
-
-        private static async Task<DbDataReader> ExecuteReaderAsync(DbCommand command, CancellationToken ct)
-        {
-            try { return await command.ExecuteReaderAsync(ct).ConfigureAwait(false); }
-            catch (NotSupportedException) { return await Task.Run(() => command.ExecuteReader(), ct).ConfigureAwait(false); }
-        }
-
-        #endregion
+    private string GetLimitClause()
+    {
+        if (_offset.HasValue && _fetch.HasValue)
+            return $" OFFSET {_offset.Value} ROWS FETCH NEXT {_fetch.Value} ROWS ONLY";
+        if (_fetch.HasValue)
+            return $" FETCH FIRST {_fetch.Value} ROWS ONLY";
+        return string.Empty;
     }
 }
