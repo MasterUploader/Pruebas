@@ -1,780 +1,893 @@
-using Logging.Abstractions;
-using Logging.Configuration;
-using Logging.Extensions;
-using Logging.Helpers;
-using Logging.Models;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
-using System.Data.Common;
+using QueryBuilder.Enums;
+using QueryBuilder.Helpers;
+using QueryBuilder.Models;
+using QueryBuilder.Translators;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Linq.Expressions;
 using System.Text;
 
-namespace Logging.Services;
+namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Servicio de logging que captura y almacena eventos en archivos de log.
+/// Generador de consultas SELECT compatible con AS400.
+/// Soporta DISTINCT, alias, JOINs, GROUP BY, HAVING, ORDER BY y funciones agregadas.
 /// </summary>
-public class LoggingService : ILoggingService
+public class SelectQueryBuilder
 {
-    private readonly string _logDirectory;
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly LoggingOptions _loggingOptions;
+    internal string? WhereClause { get; set; }
+    internal string? HavingClause { get; set; }
+
+    private int? _offset;
+    private int? _fetch;
+    private readonly string? _tableName;
+    private readonly string? _library;
+    private string? _tableAlias;
+    private readonly List<(string Column, string? Alias)> _columns = [];
+    private readonly List<(string Column, SortDirection Direction)> _orderBy = [];
+    private readonly List<string> _groupBy = [];
+    private readonly List<JoinClause> _joins = [];
+    private readonly List<CommonTableExpression> _ctes = [];
+
+    private readonly Dictionary<string, string> _aliasMap = [];
+    private int? _limit;
+    private bool _distinct = false;
+    private readonly Subquery? _derivedTable;
 
     /// <summary>
-    /// Constructor que inicializa el servicio de logging con la configuración de rutas.
+    /// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/> con una tabla derivada.
     /// </summary>
-    public LoggingService(IHttpContextAccessor httpContextAccessor, IHostEnvironment hostEnvironment, IOptions<LoggingOptions> loggingOptions)
+    /// <param name="derivedTable">Subconsulta que actúa como tabla.</param>
+    public SelectQueryBuilder(Subquery derivedTable)
     {
-        _httpContextAccessor = httpContextAccessor;
-        _loggingOptions = loggingOptions.Value;
-        string baseLogDir = loggingOptions.Value.BaseLogDirectory;
-        string apiName = !string.IsNullOrWhiteSpace(hostEnvironment.ApplicationName) ? hostEnvironment.ApplicationName : "Desconocido";
-        _logDirectory = Path.Combine(baseLogDir, apiName);
-
-        try
-        {
-            if (!Directory.Exists(_logDirectory))
-                Directory.CreateDirectory(_logDirectory);
-        }
-        catch (Exception ex)
-        {
-            LogInternalError(ex);
-        }
+        _derivedTable = derivedTable;
     }
 
     /// <summary>
-    /// Obtiene el archivo de log de la petición actual, garantizando que toda la información
-    /// se guarde en el mismo archivo. Organiza por API, controlador, endpoint (desde Path) y fecha.
-    /// Agrega el LogCustomPart si existe. Usa hora local.
+    /// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/>.
     /// </summary>
-    public string GetCurrentLogFile()
+    public SelectQueryBuilder(string tableName, string? library = null)
     {
-        try
-        {
-            var context = _httpContextAccessor.HttpContext;
-            if (context == null)
-                return BuildErrorFilePath(kind: "manual", context: null);
-
-            // 🔹 Regenerar si el path cacheado no contiene el custom part
-            if (context.Items.TryGetValue("LogFileName", out var existingObj) &&
-                existingObj is string existingPath &&
-                context.Items.TryGetValue("LogCustomPart", out var partObj) &&
-                partObj is string part && !string.IsNullOrWhiteSpace(part) &&
-                !existingPath.Contains(part, StringComparison.OrdinalIgnoreCase))
-            {
-                context.Items.Remove("LogFileName");
-            }
-
-            // 🔹 Reutilizar si ya estaba cacheado (ojo: aquí esperamos el FULL PATH)
-            if (context.Items.TryGetValue("LogFileName", out var cached) &&
-                cached is string cachedPath && !string.IsNullOrWhiteSpace(cachedPath))
-            {
-                return cachedPath;
-            }
-
-            // Nombre del Endpoint
-            string endpoint = context.Request.Path.Value?.Trim('/').Split('/').LastOrDefault() ?? "UnknownEndpoint";            
-
-            // ✅ Controller desde CAD (si está), si no, “UnknownController”
-            var endpointMetadata = context.GetEndpoint();
-            string controllerName = endpointMetadata?.Metadata
-                .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
-                .FirstOrDefault()?.ControllerName ?? "UnknownController";
-
-            // 📅 Hora local
-            string fecha = DateTime.Now.ToString("yyyy-MM-dd");
-            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
-
-            // 🧩 Sufijo custom opcional
-            string customPart = "";
-            if (context.Items.TryGetValue("LogCustomPart", out var partValue) &&
-                partValue is string partStr && !string.IsNullOrWhiteSpace(partStr))
-            {
-                customPart = $"_{partStr}";
-            }
-
-            // 📁 Carpeta final
-            string finalDirectory = Path.Combine(_logDirectory, controllerName, endpoint, fecha);
-            Directory.CreateDirectory(finalDirectory);
-
-            // 📝 Nombre final
-            string fileName = $"{endpoint}_{executionId}{customPart}_{timestamp}.txt";
-            string fullPath = Path.Combine(finalDirectory, fileName);
-
-            // ✅ Cachear SIEMPRE el FULL PATH (antes guardabas solo el fileName)
-            context.Items["LogFileName"] = fullPath;
-
-            return fullPath;
-        }
-        catch (Exception ex)
-        {
-            LogInternalError(ex);
-        }
-        return BuildErrorFilePath(kind: "manual", context: _httpContextAccessor.HttpContext);            
-    }        
-
+        _tableName = tableName;
+        _library = library;
+    }
     /// <summary>
-    /// Registra errores internos en un archivo dentro de /Errores/&lt;fecha&gt;/ con nombre:
-    /// ExecutionId_Endpoint_yyyyMMdd_HHmmss_internal.txt
+    /// Agrega una condición WHERE del tipo "CAMPO IN (...)".
     /// </summary>
-    public void LogInternalError(Exception ex)
+    /// <param name="column">Nombre de la columna a comparar.</param>
+    /// <param name="values">Lista de valores a incluir.</param>
+    public SelectQueryBuilder WhereIn(string column, IEnumerable<object> values)
     {
-        try
-        {
-            var context = _httpContextAccessor.HttpContext;
-            var errorPath = BuildErrorFilePath(kind: "internal", context: context);
+        if (values is null || !values.Any()) return this;
 
-            var msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Error en LoggingService: {ex}{Environment.NewLine}";
-            File.AppendAllText(errorPath, msg);
-        }
-        catch
-        {
-            // Evita bucles de error
-        }
+        string formatted = string.Join(", ", values.Select(SqlHelper.FormatValue));
+        string clause = $"{column} IN ({formatted})";
+
+        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
+        return this;
     }
 
     /// <summary>
-    /// Escribe un log en el archivo correspondiente de la petición actual (.txt)
-    /// y en su respectivo archivo .csv. Si el contenido excede cierto tamaño,
-    /// se ejecuta en un hilo aparte para no afectar el flujo de la API.
+    /// Agrega una condición WHERE del tipo "CAMPO NOT IN (...)".
     /// </summary>
-    /// <param name="context">Contexto HTTP actual (opcional, para asociar el archivo de log).</param>
-    /// <param name="logContent">Contenido del log a registrar.</param>
-    public void WriteLog(HttpContext? context, string logContent)
+    /// <param name="column">Nombre de la columna a comparar.</param>
+    /// <param name="values">Lista de valores a excluir.</param>
+    public SelectQueryBuilder WhereNotIn(string column, IEnumerable<object> values)
     {
-        try
+        if (values is null || !values.Any()) return this;
+
+        string formatted = string.Join(", ", values.Select(SqlHelper.FormatValue));
+        string clause = $"{column} NOT IN ({formatted})";
+
+        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición WHERE del tipo "CAMPO BETWEEN VALOR1 AND VALOR2".
+    /// </summary>
+    /// <param name="column">Nombre de la columna a comparar.</param>
+    /// <param name="start">Valor inicial del rango.</param>
+    /// <param name="end">Valor final del rango.</param>
+    public SelectQueryBuilder WhereBetween(string column, object start, object end)
+    {
+        string formattedStart = SqlHelper.FormatValue(start);
+        string formattedEnd = SqlHelper.FormatValue(end);
+        string clause = $"{column} BETWEEN {formattedStart} AND {formattedEnd}";
+
+        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
+        return this;
+    }
+
+
+    /// <summary>
+    /// Agrega un JOIN con una subconsulta como tabla.
+    /// </summary>
+    /// <param name="subquery">Instancia de subconsulta a usar como tabla.</param>
+    /// <param name="alias">Alias de la tabla derivada.</param>
+    /// <param name="left">Columna izquierda para la condición ON.</param>
+    /// <param name="right">Columna derecha para la condición ON.</param>
+    /// <param name="joinType">Tipo de JOIN: INNER, LEFT, etc.</param>
+    public SelectQueryBuilder Join(Subquery subquery, string alias, string left, string right, string joinType = "INNER")
+    {
+        _joins.Add(new JoinClause
         {
-            string filePath = GetCurrentLogFile();
-            bool isNewFile = !File.Exists(filePath);
+            JoinType = joinType.ToUpperInvariant(),
+            TableName = $"({subquery.Sql})",
+            Alias = alias,
+            LeftColumn = left,
+            RightColumn = right
+        });
+        return this;
+    }
 
-            var logBuilder = new StringBuilder();
+    /// <summary>
+    /// Agrega una o más expresiones CTE a la consulta.
+    /// </summary>
+    /// <param name="ctes">CTEs a incluir en la cláusula WITH.</param>
+    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder With(params CommonTableExpression[] ctes)
+    {
+        if (ctes != null && ctes.Length > 0)
+            _ctes.AddRange(ctes);
 
-            // Agregar inicio si es el primer log
-            if (isNewFile)
-                logBuilder.AppendLine(LogFormatter.FormatBeginLog());
+        return this;
+    }
 
-            // Agregar el contenido del log
-            logBuilder.AppendLine(logContent);
+    /// <summary>
+    /// Indica que se desea una consulta SELECT DISTINCT.
+    /// </summary>
+    public SelectQueryBuilder Distinct()
+    {
+        _distinct = true;
+        return this;
+    }
 
-            // Agregar cierre si ya inició la respuesta
-            if (context != null && context.Response.HasStarted)
-                logBuilder.AppendLine(LogFormatter.FormatEndLog());
+    /// <summary>
+    /// Define un alias para la tabla.
+    /// </summary>
+    public SelectQueryBuilder As(string alias)
+    {
+        _tableAlias = alias;
+        return this;
+    }
 
-            string fullText = logBuilder.ToString();
+    /// <summary>
+    /// Agrega una subconsulta como una columna seleccionada.
+    /// </summary>
+    /// <param name="subquery">Subconsulta construida previamente.</param>
+    /// <param name="alias">Alias de la columna resultante.</param>
+    public SelectQueryBuilder Select(Subquery subquery, string alias)
+    {
+        _columns.Add(($"({subquery.Sql})", alias));
+        return this;
+    }
 
-            // Si el log es mayor a 128 KB, delegar a un hilo (Task.Run) para no bloquear
-            bool isLargeLog = fullText.Length > (128 * 1024); // ~128 KB
+    /// <summary>
+    /// Agrega una expresión CASE WHEN como columna seleccionada, con un alias explícito.
+    /// </summary>
+    /// <param name="caseExpression">Expresión CASE generada con <see cref="CaseWhenBuilder"/>.</param>
+    /// <param name="alias">Alias para la columna resultante.</param>
+    public SelectQueryBuilder SelectCase(string caseExpression, string alias)
+    {
+        _columns.Add((caseExpression, alias));
+        _aliasMap[caseExpression] = alias;
+        return this;
+    }
 
-            if (isLargeLog)
-            {
-                Task.Run(() =>
-                {
-                    if (_loggingOptions.GenerateTxt)
-                    {
-                        LogHelper.WriteLogToFile(_logDirectory, filePath, fullText);
-                    }
-                    if (_loggingOptions.GenerateCsv)
-                    {
-                        LogHelper.SaveLogAsCsv(_logDirectory, filePath, logContent);
-                    }
-                });
-            }
+    /// <summary>
+    /// Agrega una o varias expresiones CASE WHEN al SELECT.
+    /// </summary>
+    /// <param name="caseColumns">
+    /// Tuplas donde el primer valor es la expresión CASE WHEN generada por <see cref="CaseWhenBuilder"/>,
+    /// y el segundo valor es el alias de la columna.
+    /// </param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder SelectCase(params (string ColumnSql, string? Alias)[] caseColumns)
+    {
+        foreach (var (column, alias) in caseColumns)
+        {
+            _columns.Add((column, alias));
+            if (!string.IsNullOrWhiteSpace(alias))
+                _aliasMap[column] = alias;
+        }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Define las columnas a seleccionar (sin alias explícito).
+    /// Si detecta funciones agregadas, genera alias automáticos como "SUM_CAMPO".
+    /// </summary>
+    /// <param name="columns">Nombres de columnas o funciones agregadas.</param>
+    public SelectQueryBuilder Select(params string[] columns)
+    {
+        foreach (var column in columns)
+        {
+            if (TryGenerateAlias(column, out var alias))
+                _columns.Add((column, alias));
             else
-            {
-                // Escritura directa en orden (preserva el flujo)
-                if (_loggingOptions.GenerateTxt)
-                {
-                    LogHelper.WriteLogToFile(_logDirectory, filePath, fullText);
-                }
-                if (_loggingOptions.GenerateCsv)
-                {
-                    LogHelper.SaveLogAsCsv(_logDirectory, filePath, logContent);
-                }
-            }
+                _columns.Add((column, null));
         }
-        catch (Exception ex)
-        {
-            LogInternalError(ex);
-        }
+
+        return this;
     }
 
     /// <summary>
-    /// Agrega un log manual de texto en el archivo de log actual.
+    /// Define columnas con alias.
     /// </summary>
-    public void AddSingleLog(string message)
+    public SelectQueryBuilder Select(params (string Column, string Alias)[] columns)
     {
-        try
+        foreach (var (column, alias) in columns)
         {
-            string formatted = LogFormatter.FormatSingleLog(message).Indent(LogScope.CurrentLevel);
-            LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
+            _columns.Add((column, alias));
+            _aliasMap[column] = alias;
         }
-        catch (Exception ex)
-        {
-            LogInternalError(ex);
-        }
+        return this;
     }
 
     /// <summary>
-    /// Registra un objeto en los logs con un nombre descriptivo.
+    /// Agrega una condición WHERE con una función SQL directamente como string.
+    /// Ejemplo: "UPPER(NOMBRE) = 'PEDRO'"
     /// </summary>
-    /// <param name="objectName">Nombre descriptivo del objeto.</param>
-    /// <param name="logObject">Objeto a registrar.</param>
-    public void AddObjLog(string objectName, object logObject)
+    /// <param name="sqlFunctionCondition">Condición completa en SQL.</param>
+    public SelectQueryBuilder WhereFunction(string sqlFunctionCondition)
     {
-        try
-        {
-            string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
-            LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
-        }
-        catch (Exception ex)
-        {
-            LogInternalError(ex);
-        }
+        if (string.IsNullOrWhiteSpace(sqlFunctionCondition))
+            return this;
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = sqlFunctionCondition;
+        else
+            WhereClause += $" AND {sqlFunctionCondition}";
+
+        return this;
     }
 
     /// <summary>
-    /// Registra un objeto en los logs sin necesidad de un nombre específico.
-    /// Se intentará capturar automáticamente el tipo de objeto.
+    /// Agrega una condición WHERE en formato SQL crudo (string libre).
+    /// Ejemplo: "ESTADO = 'ACTIVO' OR TIPO = 'X'"
     /// </summary>
-    /// <param name="logObject">Objeto a registrar.</param>
-    public void AddObjLog(object logObject)
+    /// <param name="rawCondition">Condición SQL sin procesar.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder WhereRaw(string rawCondition)
     {
-        try
-        {
-            // Obtener el nombre del tipo del objeto
-            string objectName = logObject?.GetType()?.Name ?? "ObjetoDesconocido";
-            object safeObject = logObject ?? new { };
+        if (string.IsNullOrWhiteSpace(rawCondition))
+            return this;
 
-            // Convertir objeto a JSON o XML según el formato
-            string formatted = LogFormatter.FormatObjectLog(objectName, safeObject).Indent(LogScope.CurrentLevel);
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = rawCondition;
+        else
+            WhereClause += $" AND {rawCondition}";
 
-            // Guardar el log en archivo
-            LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
-        }
-        catch (Exception ex)
-        {
-            LogInternalError(ex);
-        }
+        return this;
     }
 
     /// <summary>
-    /// Registra excepciones en los logs.
+    /// Agrega una condición HAVING con una función SQL directamente como string.
+    /// Ejemplo: "SUM(CANTIDAD) > 10"
     /// </summary>
-    public void AddExceptionLog(Exception ex)
+    /// <param name="sqlFunctionCondition">Condición completa en SQL.</param>
+    public SelectQueryBuilder HavingFunction(string sqlFunctionCondition)
     {
-        try
-        {
-            string formatted = LogFormatter.FormatExceptionDetails(ex.ToString()).Indent(LogScope.CurrentLevel);
-            LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
-        }
-        catch (Exception e)
-        {
-            LogInternalError(e);
-        }
+        if (string.IsNullOrWhiteSpace(sqlFunctionCondition))
+            return this;
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = sqlFunctionCondition;
+        else
+            HavingClause += $" AND {sqlFunctionCondition}";
+
+        return this;
     }
 
-    /// <inheritdoc />
-    public void LogDatabaseSuccess(SqlLogModel model, HttpContext? context = null)
-    {
-        // Usa el formateador que ya tienes para texto plano, si lo deseas
-        var formatted = LogFormatter.FormatDbExecution(model);
 
-        LogHelper.SaveStructuredLog(formatted, context);
+    /// <summary>
+    /// Agrega una cláusula WHERE con una expresión CASE WHEN directamente como string.
+    /// Ej: "CASE WHEN TIPO = 'A' THEN 1 ELSE 0 END = 1"
+    /// </summary>
+    /// <param name="sqlCaseCondition">Condición CASE completa.</param>
+    public SelectQueryBuilder WhereCase(string sqlCaseCondition)
+    {
+        if (string.IsNullOrWhiteSpace(sqlCaseCondition))
+            return this;
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = sqlCaseCondition;
+        else
+            WhereClause += $" AND {sqlCaseCondition}";
+
+        return this;
     }
 
     /// <summary>
-    /// Método para registrar comandos SQL fallidos
+    /// Agrega una cláusula WHERE con una expresión CASE WHEN generada desde <see cref="CaseWhenBuilder"/>.
     /// </summary>
-    /// <param name="command"></param>
-    /// <param name="ex"></param>
-    /// <param name="context"></param>
-    public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null)
+    /// <param name="caseBuilder">Instancia del builder de CASE.</param>
+    /// <param name="comparison">Condición adicional (por ejemplo: "= 1").</param>
+    public SelectQueryBuilder WhereCase(CaseWhenBuilder caseBuilder, string comparison)
     {
-        try
-        {
-            var connectionInfo = LogHelper.ExtractDbConnectionInfo(command.Connection?.ConnectionString);
-            var tabla = LogHelper.ExtractTableName(command.CommandText);
+        if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison))
+            return this;
 
-            var formatted = LogFormatter.FormatDbExecutionError(
-                nombreBD: connectionInfo.Database,
-                ip: connectionInfo.Ip,
-                puerto: connectionInfo.Port,
-                biblioteca: connectionInfo.Library,
-                tabla: tabla,
-                sentenciaSQL: command.CommandText,
-                exception: ex,
-                horaError: DateTime.Now
+        string expression = $"{caseBuilder.Build()} {comparison}";
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = expression;
+        else
+            WhereClause += $" AND {expression}";
+
+        return this;
+    }
+
+
+    /// <summary>
+    /// Agrega una condición WHERE.
+    /// </summary>
+    public SelectQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
+    {
+        LambdaWhereTranslator.Translate(this, expression);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula HAVING EXISTS con una subconsulta.
+    /// </summary>
+    /// <param name="subquery">Subconsulta que se evaluará con EXISTS.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder HavingExists(Subquery subquery)
+    {
+        if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
+            return this;
+
+        var clause = $"EXISTS ({subquery.Sql})";
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = clause;
+        else
+            HavingClause += $" AND {clause}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula HAVING NOT EXISTS con una subconsulta.
+    /// </summary>
+    /// <param name="subquery">Subconsulta que se evaluará con NOT EXISTS.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder HavingNotExists(Subquery subquery)
+    {
+        if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
+            return this;
+
+        var clause = $"NOT EXISTS ({subquery.Sql})";
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = clause;
+        else
+            HavingClause += $" AND {clause}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula HAVING con una expresión CASE WHEN directamente como string.
+    /// Ejemplo: "CASE WHEN SUM(CANTIDAD) > 10 THEN 1 ELSE 0 END = 1"
+    /// </summary>
+    /// <param name="sqlCaseCondition">Expresión CASE completa en SQL.</param>
+    public SelectQueryBuilder HavingCase(string sqlCaseCondition)
+    {
+        if (string.IsNullOrWhiteSpace(sqlCaseCondition))
+            return this;
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = sqlCaseCondition;
+        else
+            HavingClause += $" AND {sqlCaseCondition}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula HAVING con una expresión CASE WHEN generada con <see cref="CaseWhenBuilder"/>.
+    /// </summary>
+    /// <param name="caseBuilder">Builder de CASE WHEN.</param>
+    /// <param name="comparison">Comparación adicional (ej: "= 1").</param>
+    public SelectQueryBuilder HavingCase(CaseWhenBuilder caseBuilder, string comparison)
+    {
+        if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison))
+            return this;
+
+        string expression = $"{caseBuilder.Build()} {comparison}";
+
+        if (string.IsNullOrWhiteSpace(HavingClause))
+            HavingClause = expression;
+        else
+            HavingClause += $" AND {expression}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición HAVING.
+    /// </summary>
+    public SelectQueryBuilder Having<T>(Expression<Func<T, bool>> expression)
+    {
+        LambdaHavingTranslator.Translate(this, expression);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
+    /// </summary>
+    /// <param name="subqueryBuilderAction">
+    /// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de EXISTS.
+    /// </param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder WhereExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+    {
+        var subqueryBuilder = new SelectQueryBuilder("DUMMY"); // El nombre se sobreescribirá
+        subqueryBuilderAction(subqueryBuilder);
+        var subquerySql = subqueryBuilder.Build().Sql;
+
+        var existsClause = $"EXISTS ({subquerySql})";
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = existsClause;
+        else
+            WhereClause += $" AND {existsClause}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una condición NOT EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
+    /// </summary>
+    /// <param name="subqueryBuilderAction">
+    /// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de NOT EXISTS.
+    /// </param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder WhereNotExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+    {
+        var subqueryBuilder = new SelectQueryBuilder("DUMMY");
+        subqueryBuilderAction(subqueryBuilder);
+        var subquerySql = subqueryBuilder.Build().Sql;
+
+        var notExistsClause = $"NOT EXISTS ({subquerySql})";
+
+        if (string.IsNullOrWhiteSpace(WhereClause))
+            WhereClause = notExistsClause;
+        else
+            WhereClause += $" AND {notExistsClause}";
+
+        return this;
+    }
+
+    /// <summary>
+    /// Establece las columnas para agrupar (GROUP BY).
+    /// </summary>
+    public SelectQueryBuilder GroupBy(params string[] columns)
+    {
+        _groupBy.AddRange(columns);
+        return this;
+    }
+
+    /// <summary>
+    /// Establece el límite de resultados (FETCH FIRST para AS400).
+    /// </summary>
+    public SelectQueryBuilder Limit(int rowCount)
+    {
+        _limit = rowCount;
+        return this;
+    }
+
+    /// <summary>
+    /// Ordena por una o varias columnas.
+    /// </summary>
+    public SelectQueryBuilder OrderBy(params (string Column, SortDirection Direction)[] columns)
+    {
+        _orderBy.AddRange(columns);
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula JOIN a la consulta SQL, permitiendo especificar la tabla con o sin librería.
+    /// </summary>
+    /// <param name="table">Nombre de la tabla a unir. Puede incluir la librería (ej. LIBRERIA.TABLA).</param>
+    /// <param name="library">Nombre de la librería si no se especifica en la tabla. Se ignora si <paramref name="table"/> ya incluye la librería.</param>
+    /// <param name="alias">Alias opcional para la tabla unida.</param>
+    /// <param name="left">Columna del lado izquierdo de la condición ON.</param>
+    /// <param name="right">Columna del lado derecho de la condición ON.</param>
+    /// <param name="joinType">Tipo de JOIN (INNER, LEFT, RIGHT, FULL).</param>
+    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder Join(string table, string? library, string alias, string left, string right, string joinType = "INNER")
+    {
+        if (string.IsNullOrWhiteSpace(table))
+            throw new ArgumentNullException(nameof(table));
+
+        if (string.IsNullOrWhiteSpace(left))
+            throw new ArgumentNullException(nameof(left));
+
+        if (string.IsNullOrWhiteSpace(right))
+            throw new ArgumentNullException(nameof(right));
+
+        string finalLibrary = library;
+        string finalTable = table;
+
+        // Si el nombre incluye un punto (.), asumimos que ya viene con la librería: LIBRERIA.TABLA
+        if (table.Contains('.'))
+        {
+            var parts = table.Split('.', 2, StringSplitOptions.TrimEntries);
+            finalLibrary = parts[0];
+            finalTable = parts[1];
+        }
+
+        _joins.Add(new JoinClause
+        {
+            JoinType = joinType.ToUpperInvariant(),
+            TableName = finalTable,
+            Library = finalLibrary,
+            Alias = alias,
+            LeftColumn = left,
+            RightColumn = right
+        });
+
+        return this;
+    }
+
+
+    /// <summary>
+    /// Define el valor de desplazamiento de filas (OFFSET).
+    /// </summary>
+    /// <param name="offset">Cantidad de filas a omitir.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder Offset(int offset)
+    {
+        _offset = offset;
+        return this;
+    }
+
+    /// <summary>
+    /// Define la cantidad de filas a recuperar después del OFFSET (FETCH NEXT).
+    /// </summary>
+    /// <param name="rowCount">Cantidad de filas a recuperar.</param>
+    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder FetchNext(int rowCount)
+    {
+        _fetch = rowCount;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una expresión CASE WHEN al ORDER BY, con soporte para condiciones tipadas.
+    /// </summary>
+    /// <param name="caseWhen">Expresión CASE WHEN construida mediante <see cref="CaseWhenBuilder"/>.</param>
+    /// <param name="alias">Alias opcional para la expresión CASE (no se usa en ORDER BY pero puede ser útil si se reutiliza).</param>
+    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
+    public SelectQueryBuilder OrderByCase(CaseWhenBuilder caseWhen, SortDirection direction = SortDirection.None, string? alias = null)
+    {
+        ArgumentNullException.ThrowIfNull(caseWhen);
+
+        var expression = caseWhen.Build();
+
+        // No se requiere alias en ORDER BY, pero lo soportamos si se quiere reutilizar
+        if (!string.IsNullOrWhiteSpace(alias))
+            expression += $" AS {alias}";
+
+        _orderBy.Add((caseWhen.Build(), direction)); // Se agrega sin alias para efecto de ordenamiento
+        return this;
+    }
+
+
+    /// <summary>
+    /// Construye y retorna el SQL.
+    /// </summary>
+    public QueryResult Build()
+    {
+        var sb = new StringBuilder();
+
+        // Si hay CTEs, agregarlas antes del SELECT
+        if (_ctes.Count > 0)
+        {
+            sb.Append("WITH ");
+            sb.Append(string.Join(", ", _ctes.Select(cte => cte.ToString())));
+            sb.AppendLine();
+        }
+
+        sb.Append("SELECT ");
+        if (_distinct) sb.Append("DISTINCT ");
+
+        if (_columns.Count == 0)
+            sb.Append('*');
+        else
+        {
+            var colParts = _columns.Select(c =>
+                string.IsNullOrWhiteSpace(c.Alias)
+                    ? c.Column
+                    : $"{c.Column} AS {c.Alias}"
             );
-
-            WriteLog(context, formatted);
-            AddExceptionLog(ex); // También lo guardás como log general si usás esa ruta
+            sb.Append(string.Join(", ", colParts));
         }
-        catch (Exception errorAlLoguear)
+
+        sb.Append(" FROM ");
+        if (_derivedTable != null)
         {
-            LogInternalError(errorAlLoguear);
+            sb.Append(_derivedTable.ToString());
         }
-    }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(_library))
+                sb.Append($"{_library}.");
+            sb.Append(_tableName);
+            if (!string.IsNullOrWhiteSpace(_tableAlias))
+                sb.Append($" {_tableAlias}");
+        }
 
-    #region Métodos Privados
+        if (!string.IsNullOrWhiteSpace(_tableAlias))
+            sb.Append($" {_tableAlias}");
 
-    /// <summary>
-    /// Devuelve un nombre seguro para usar en rutas/archivos.
-    /// </summary>
-    private static string Sanitize(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "Unknown";
-        var invalid = Path.GetInvalidFileNameChars().Concat(Path.GetInvalidPathChars()).Distinct().ToArray();
-        var cleaned = new string(name.Where(c => !invalid.Contains(c)).ToArray()).Trim();
-        return string.IsNullOrWhiteSpace(cleaned) ? "Unknown" : cleaned;
-    }
+        foreach (var join in _joins)
+        {
+            sb.Append($" {join.JoinType} JOIN ");
+            if (!string.IsNullOrWhiteSpace(join.Library))
+                sb.Append($"{join.Library}.");
+            sb.Append($"{join.TableName} {join.Alias} ON {join.LeftColumn} = {join.RightColumn}");
+        }
 
-    /// <summary>
-    /// Obtiene un nombre de endpoint seguro desde el HttpContext. Si no existe contexto, devuelve "NoContext".
-    /// </summary>
-    private static string GetEndpointSafe(HttpContext? context)
-    {
-        if (context == null) return "NoContext";
+        if (!string.IsNullOrWhiteSpace(WhereClause))
+            sb.Append($" WHERE {WhereClause}");
 
-        // Intentar usar CAD (ActionName); si no, caer al último segmento del Path
-        var cad = context.GetEndpoint()?.Metadata
-            .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
-            .FirstOrDefault();
+        if (_groupBy.Count > 0)
+        {
+            sb.Append(" GROUP BY ");
+            var grouped = _groupBy.Select(col => _aliasMap.TryGetValue(col, out var alias) ? alias : col);
+            sb.Append(string.Join(", ", grouped));
+        }
 
-        var endpoint = cad?.ActionName
-                       ?? (context.Request.Path.Value ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()
-                       ?? "UnknownEndpoint";
+        if (!string.IsNullOrWhiteSpace(HavingClause))
+            sb.Append($" HAVING {HavingClause}");
 
-        return Sanitize(endpoint);
-    }
+        if (_orderBy.Count > 0)
+        {
+            sb.Append(" ORDER BY ");
+            var orderParts = _orderBy.Select(order =>
+            {
+                var (col, dir) = order;
+                return dir switch
+                {
+                    SortDirection.Asc => $"{col} ASC",
+                    SortDirection.Desc => $"{col} DESC",
+                    SortDirection.None or _ => col // No se incluye ASC ni DESC
+                };
+            });
+            sb.Append(string.Join(", ", orderParts));
+        }
 
-    /// <summary>
-    /// Devuelve la carpeta base de errores con la subcarpeta de fecha local: &lt;_logDirectory&gt;/Errores/&lt;yyyy-MM-dd&gt;
-    /// </summary>
-    private string GetErrorsDirectory(DateTime nowLocal)
-    {
-        var dir = Path.Combine(_logDirectory, "Errores", nowLocal.ToString("yyyy-MM-dd"));
-        Directory.CreateDirectory(dir);
-        return dir;
-    }
+        if (_limit.HasValue)
+            sb.Append(GetLimitClause());
 
-    /// <summary>
-    /// Construye un path de archivo de error con ExecutionId, Endpoint y timestamp local.
-    /// Sufijo: "internal" para errores internos; "manual" para global manual logs.
-    /// </summary>
-    private string BuildErrorFilePath(string kind, HttpContext? context)
-    {
-        var now = DateTime.Now; // hora local
-        var dir = GetErrorsDirectory(now);
-
-        // ExecutionId (si hay contexto), si no un Guid nuevo
-        var executionId = context?.Items?["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
-
-        var endpoint = GetEndpointSafe(context);
-        var timestamp = now.ToString("yyyyMMdd_HHmmss");
-
-        var suffix = string.Equals(kind, "internal", StringComparison.OrdinalIgnoreCase) ? "_internal" : "";
-        var fileName = $"{executionId}_{endpoint}_{timestamp}{suffix}.txt";
-
-        return Path.Combine(dir, fileName);
-    }
-
-    #endregion
-
-
-    #region Métodos para AddSingleLog en bloque
-
-    /// <summary>
-    /// Inicia un bloque de log. Escribe una cabecera común y permite ir agregando filas
-    /// con <see cref="ILogBlock.Add(string)"/>. Al finalizar, llamar <see cref="ILogBlock.End()"/>
-    /// o disponer el objeto (using) para escribir el cierre del bloque.
-    /// </summary>
-    /// <param name="title">Título o nombre del bloque (ej. "Proceso de conciliación").</param>
-    /// <param name="context">Contexto HTTP (opcional). Si es null, se usa el contexto actual si existe.</param>
-    /// <returns>Instancia del bloque para agregar filas.</returns>
-    public ILogBlock StartLogBlock(string title, HttpContext? context = null)
-    {
-        context ??= _httpContextAccessor.HttpContext;
-        var filePath = GetCurrentLogFile(); // asegura que compartimos el mismo archivo de la request
-
-        // Cabecera del bloque
-        var header = LogFormatter.BuildBlockHeader(title);
-        LogHelper.SafeWriteLog(_logDirectory, filePath, header);
-
-        return new LogBlock(this, filePath, title);
+        return new QueryResult { Sql = sb.ToString() };
     }
 
     /// <summary>
-    /// Implementación concreta de un bloque de log.
+    /// Genera un alias automático para funciones agregadas como SUM(CAMPO), COUNT(*), etc.
     /// </summary>
-    private sealed class LogBlock : ILogBlock
+    /// <param name="column">Expresión de columna a analizar.</param>
+    /// <param name="alias">Alias generado si aplica.</param>
+    /// <returns>True si se generó un alias; false en caso contrario.</returns>
+    private static bool TryGenerateAlias(string column, out string alias)
     {
-        private readonly LoggingService _svc;
-        private readonly string _filePath;
-        private readonly string _title;
-        private int _ended; // 0 no, 1 sí (para idempotencia)
+        alias = string.Empty;
 
-        public LogBlock(LoggingService svc, string filePath, string title)
-        {
-            _svc = svc;
-            _filePath = filePath;
-            _title = title;
-        }
+        if (string.IsNullOrWhiteSpace(column) || !column.Contains('(') || !column.Contains(')'))
+            return false;
 
-        /// <inheritdoc />
-        public void Add(string message, bool includeTimestamp = false)
-        {
-            // cada "Add" es una fila en el mismo archivo, dentro del bloque
-            var line = includeTimestamp 
-                ? $"[{DateTime.Now:HH:mm:ss}]•{message}" 
-                :  $"• {message}";
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, line + Environment.NewLine);
-        }
+        int start = column.IndexOf('(');
+        int end = column.IndexOf(')');
 
-        /// <inheritdoc />
-        public void AddObj(string name, object obj)
-        {
-            var formatted = LogFormatter.FormatObjectLog(name, obj);
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
-        }
+        if (start < 1 || end <= start)
+            return false;
 
-        /// <inheritdoc />
-        public void AddException(Exception ex)
-        {
-            var formatted = LogFormatter.FormatExceptionDetails(ex.ToString());
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
-        }
+        var function = column[..start].Trim().ToUpperInvariant();
+        var argument = column.Substring(start + 1, end - start - 1).Trim();
 
-        /// <inheritdoc />
-        public void End()
-        {
-            if (Interlocked.Exchange(ref _ended, 1) == 1) return; // ya finalizado
-            var footer = LogFormatter.BuildBlockFooter();
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, footer);
-        }
+        var validFunctions = new[] { "SUM", "COUNT", "AVG", "MIN", "MAX" };
+        if (!validFunctions.Contains(function))
+            return false;
 
-        public void Dispose() => End();
+        if (string.IsNullOrWhiteSpace(argument))
+            return false;
+
+        alias = $"{function}_{argument.Replace("*", "ALL")}";
+        return true;
+    }
+
+    private string GetLimitClause()
+    {
+        if (_offset.HasValue && _fetch.HasValue)
+            return $" OFFSET {_offset.Value} ROWS FETCH NEXT {_fetch.Value} ROWS ONLY";
+        if (_fetch.HasValue)
+            return $" FETCH FIRST {_fetch.Value} ROWS ONLY";
+        return string.Empty;
     }
 }
 
-    #endregion
 
 
-/// <summary>
-/// Atributo para indicar qué propiedad del modelo debe usarse como parte del nombre del archivo de log.
-/// Debe aplicarse únicamente a propiedades públicas sin parámetros (no indexers).
-/// </summary>
-[AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
-public sealed class LogFileNameAttribute : Attribute
-{ }
-
-
-
-using Logging.Abstractions;
-using Logging.Attributes;
-using Logging.Helpers;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using System.Diagnostics;
-using System.Reflection;
+using QueryBuilder.Helpers;
+using QueryBuilder.Models;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
-using System.Text.Json;
 
-namespace Logging.Middleware;
-
+namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Middleware para capturar logs de ejecución de controladores en la API.
-/// Captura información de Request, Response, Excepciones y Entorno.
+/// Generador de sentencias INSERT compatibles con AS400 y otros motores.
+/// Utiliza parámetros seguros y garantiza la asignación correcta a los comandos.
 /// </summary>
-public class LoggingMiddleware
+public class InsertQueryBuilder(string _tableName, string? _library = null)
 {
-    private readonly RequestDelegate _next;
-    private readonly ILoggingService _loggingService;
+    private readonly List<string> _columns = [];
+    private readonly List<List<object?>> _rows = [];
+    private readonly List<List<object>> _valuesRaw = [];
+    private SelectQueryBuilder? _selectSource;
+    private string? _comment;
+    private string? _whereClause;
+    private bool _insertIgnore = false;
+    private readonly Dictionary<string, object?> _onDuplicateUpdate = [];
 
     /// <summary>
-    /// Cronómetro utilizado para medir el tiempo de ejecución de la acción.
-    /// Se inicializa cuando la acción comienza a ejecutarse.
+    /// Agrega un comentario SQL al inicio del INSERT para trazabilidad o debugging.
     /// </summary>
-    private Stopwatch _stopwatch = new();
-
-    /// <summary>
-    /// Inicializa una nueva instancia del <see cref="LoggingMiddleware"/>.
-    /// </summary>
-    public LoggingMiddleware(RequestDelegate next, ILoggingService loggingService)
+    public InsertQueryBuilder WithComment(string comment)
     {
-        _next = next ?? throw new ArgumentNullException(nameof(next));
-        _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
+        if (!string.IsNullOrWhiteSpace(comment))
+            _comment = $"-- {comment}";
+        return this;
     }
 
     /// <summary>
-    /// Método principal que intercepta las solicitudes HTTP y captura logs.
+    /// Indica que se debe usar INSERT IGNORE para omitir errores de duplicado.
     /// </summary>
-    public async Task InvokeAsync(HttpContext context)
+    public InsertQueryBuilder InsertIgnore()
     {
-        try
-        {
-            // Excluir rutas no necesarias en el log
-            var path = context.Request.Path.Value;
-            if (!string.IsNullOrEmpty(path) &&
-                (path.Contains("swagger", StringComparison.OrdinalIgnoreCase) ||
-                 path.Contains("favicon.ico", StringComparison.OrdinalIgnoreCase)))
-            {
-                await _next(context);
-                return;
-            }
-
-            _stopwatch = Stopwatch.StartNew();
-
-            // Asignar ExecutionId único
-            if (!context.Items.ContainsKey("ExecutionId"))
-                context.Items["ExecutionId"] = Guid.NewGuid().ToString();
-
-            // 📌 Pre-extracción del LogCustomPart antes de escribir cualquier log
-            await ExtractLogCustomPartFromBody(context);
-
-            // Continuar flujo de logging normal
-            _loggingService.WriteLog(context, await CaptureEnvironmentInfoAsync(context));
-            _loggingService.WriteLog(context, await CaptureRequestInfoAsync(context));
-
-            var originalBodyStream = context.Response.Body;
-            using var responseBody = new MemoryStream();
-            context.Response.Body = responseBody;
-
-            await _next(context);
-
-            // Logs de HttpClient si existen
-            if (context.Items.TryGetValue("HttpClientLogs", out var clientLogsObj) && clientLogsObj is List<string> clientLogs)
-                foreach (var log in clientLogs) _loggingService.WriteLog(context, log);
-
-            _loggingService.WriteLog(context, await CaptureResponseInfoAsync(context));
-
-            responseBody.Seek(0, SeekOrigin.Begin);
-            await responseBody.CopyToAsync(originalBodyStream);
-
-            if (context.Items.ContainsKey("Exception") && context.Items["Exception"] is Exception ex)
-                _loggingService.AddExceptionLog(ex);
-        }
-        catch (Exception ex)
-        {
-            _loggingService.AddExceptionLog(ex);
-        }
-        finally
-        {
-            _stopwatch.Stop();
-            _loggingService.WriteLog(context, $"[Tiempo Total de Ejecución]: {_stopwatch.ElapsedMilliseconds} ms");
-        }
+        _insertIgnore = true;
+        return this;
     }
 
     /// <summary>
-    /// Obtiene el valor para LogCustomPart deserializando el body al tipo REAL del parámetro del Action
-    /// (si hay JSON) o hidratando el DTO desde Query/Route (para GET/sin body). Guarda el resultado
-    /// en <c>HttpContext.Items["LogCustomPart"]</c>.
+    /// Define columnas que deben actualizarse si hay conflicto de clave duplicada.
     /// </summary>
-    private static async Task ExtractLogCustomPartFromBody(HttpContext context)
+    public InsertQueryBuilder OnDuplicateKeyUpdate(string column, object? value)
     {
-        string? bodyString = null;
-
-        // Si viene JSON, lo leemos (para POST/PUT/PATCH, etc.)
-        if (context.Request.ContentType?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            context.Request.EnableBuffering();
-            using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-            bodyString = await reader.ReadToEndAsync();
-            context.Request.Body.Position = 0;
-        }
-
-        try
-        {
-            // 👉 El extractor soporta tanto JSON (tipado) como GET (Query/Route) si bodyString es null o vacío
-            var customPart = StrongTypedLogFileNameExtractor.Extract(context, bodyString);
-            if (!string.IsNullOrWhiteSpace(customPart))
-            {
-                context.Items["LogCustomPart"] = customPart;
-            }
-        }
-        catch
-        {
-            // No interrumpir el pipeline por fallos de extracción
-        }
+        _onDuplicateUpdate[column] = value;
+        return this;
     }
 
     /// <summary>
-    /// Busca recursivamente en un objeto cualquier propiedad marcada con [LogFileName].
+    /// Define múltiples columnas para actualizar en caso de duplicado.
     /// </summary>
-    private static string? GetLogFileNameValue(object? obj)
+    public InsertQueryBuilder OnDuplicateKeyUpdate(Dictionary<string, object?> updates)
     {
-        if (obj == null) return null;
-
-        var type = obj.GetType();
-        if (type.IsPrimitive || type == typeof(string) || type == typeof(decimal))
-            return null;
-
-        // Propiedades actuales
-        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-        {
-            if (Attribute.IsDefined(prop, typeof(LogFileNameAttribute)))
-            {
-                var value = prop.GetValue(obj)?.ToString();
-                if (!string.IsNullOrWhiteSpace(value))
-                    return value;
-            }
-        }
-
-        // Propiedades anidadas
-        foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-        {
-            var value = prop.GetValue(obj);
-            var nested = GetLogFileNameValue(value);
-            if (!string.IsNullOrWhiteSpace(nested))
-                return nested;
-        }
-
-        return null;
+        foreach (var kvp in updates)
+            _onDuplicateUpdate[kvp.Key] = kvp.Value;
+        return this;
     }
 
     /// <summary>
-    /// Captura la información del entorno del servidor y del cliente.
+    /// Define las columnas y valores a insertar. El orden será tomado desde el primer uso.
     /// </summary>
-    private static async Task<string> CaptureEnvironmentInfoAsync(HttpContext context)
+    public InsertQueryBuilder Values(params (string Column, object? Value)[] values)
     {
-        await Task.Delay(TimeSpan.FromMilliseconds(1));
+        if (_columns.Count == 0)
+            _columns.AddRange(values.Select(v => v.Column));
+        else if (_columns.Count != values.Length)
+            throw new InvalidOperationException("El número de columnas no coincide con los valores proporcionados.");
 
-        var request = context.Request;
-        var connection = context.Connection;
-        var hostEnvironment = context.RequestServices.GetService<IHostEnvironment>();
-
-        // 1. Intentar obtener de un header HTTP
-        var distributionFromHeader = context.Request.Headers["Distribucion"].FirstOrDefault();
-
-        // 2. Intentar obtener de los claims del usuario (si existe autenticación JWT)
-        var distributionFromClaim = context.User?.Claims?
-            .FirstOrDefault(c => c.Type == "distribution")?.Value;
-
-        // 3. Intentar extraer del subdominio (ejemplo: cliente1.api.com)
-        var host = context.Request.Host.Host;
-        var distributionFromSubdomain = !string.IsNullOrWhiteSpace(host) && host.Contains('.')
-            ? host.Split('.')[0]
-            : null;
-
-        // 4. Seleccionar la primera fuente válida o asignar "N/A"
-        var distribution = distributionFromHeader
-                           ?? distributionFromClaim
-                           ?? distributionFromSubdomain
-                           ?? "N/A";
-
-        // Preparar información extendida
-        string application = hostEnvironment?.ApplicationName ?? "Desconocido";
-        string env = hostEnvironment?.EnvironmentName ?? "Desconocido";
-        string contentRoot = hostEnvironment?.ContentRootPath ?? "Desconocido";
-        string executionId = context.TraceIdentifier ?? "Desconocido";
-        string clientIp = connection?.RemoteIpAddress?.ToString() ?? "Desconocido";
-        string userAgent = request.Headers.UserAgent.ToString() ?? "Desconocido";
-        string machineName = Environment.MachineName;
-        string os = Environment.OSVersion.ToString();
-        host = request.Host.ToString() ?? "Desconocido";
-
-        // Información adicional del contexto
-        var extras = new Dictionary<string, string>
-            {
-                { "Scheme", request.Scheme },
-                { "Protocol", request.Protocol },
-                { "Method", request.Method },
-                { "Path", request.Path },
-                { "Query", request.QueryString.ToString() },
-                { "ContentType", request.ContentType ?? "N/A" },
-                { "ContentLength", request.ContentLength?.ToString() ?? "N/A" },
-                { "ClientPort", connection?.RemotePort.ToString() ?? "Desconocido" },
-                { "LocalIp", connection?.LocalIpAddress?.ToString() ?? "Desconocido" },
-                { "LocalPort", connection?.LocalPort.ToString() ?? "Desconocido" },
-                { "ConnectionId", connection?.Id ?? "Desconocido" },
-                { "Referer", request.Headers.Referer.ToString() ?? "N/A" }
-            };
-
-        return LogFormatter.FormatEnvironmentInfo(
-                application: application,
-                env: env,
-                contentRoot: contentRoot,
-                executionId: executionId,
-                clientIp: clientIp,
-                userAgent: userAgent,
-                machineName: machineName,
-                os: os,
-                host: host,
-                distribution: distribution,
-                extras: extras
-        );
+        _rows.Add(values.Select(v => v.Value).ToList());
+        return this;
     }
 
     /// <summary>
-    /// Captura la información de la solicitud HTTP antes de que sea procesada por los controladores.
+    /// Agrega valores sin parámetros (SQL raw).
     /// </summary>
-    private static async Task<string> CaptureRequestInfoAsync(HttpContext context)
+    public InsertQueryBuilder ValuesRaw(params string[] rawValues)
     {
-        Console.WriteLine("[LOGGING] CaptureRequestInfoAsync");
-        context.Request.EnableBuffering(); // Permite leer el cuerpo de la petición sin afectar la ejecución
+        _valuesRaw.Add(rawValues.Cast<object>().ToList());
+        return this;
+    }
 
-        using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-        string body = await reader.ReadToEndAsync();
-        context.Request.Body.Position = 0; // Restablece la posición para que el controlador pueda leerlo
+    /// <summary>
+    /// Define un SELECT como origen del INSERT.
+    /// </summary>
+    public InsertQueryBuilder FromSelect(SelectQueryBuilder select)
+    {
+        _selectSource = select;
+        _valuesRaw.Clear();
+        return this;
+    }
 
-        // Extraer identificador para el nombre del log y guardarlo en context.Items
-        var customPart = LogFileNameExtractor.ExtractLogFileNameFromContext(context, body);
-        if (!string.IsNullOrWhiteSpace(customPart))
+    /// <summary>
+    /// Condición NOT EXISTS para INSERT ... SELECT.
+    /// </summary>
+    public InsertQueryBuilder WhereNotExists(Subquery subquery)
+    {
+        _whereClause = $"NOT EXISTS ({subquery.Sql})";
+        return this;
+    }
+
+    /// <summary>
+    /// Genera el SQL y los parámetros asociados.
+    /// </summary>
+    public QueryResult Build()
+    {
+        if (string.IsNullOrWhiteSpace(_tableName))
+            throw new InvalidOperationException("Debe especificar un nombre de tabla.");
+
+        if (_columns.Count == 0)
+            throw new InvalidOperationException("Debe especificar columnas para el INSERT.");
+
+        if (_selectSource != null && _rows.Count > 0)
+            throw new InvalidOperationException("No puede combinar VALUES con FROM SELECT.");
+
+        var sb = new StringBuilder();
+        var parameters = new List<object?>();
+
+        if (!string.IsNullOrWhiteSpace(_comment))
+            sb.AppendLine(_comment);
+
+        sb.Append("INSERT ");
+        if (_insertIgnore) sb.Append("IGNORE ");
+        sb.Append("INTO ");
+        if (!string.IsNullOrWhiteSpace(_library))
+            sb.Append($"{_library}.");
+        sb.Append(_tableName);
+        sb.Append(" (").Append(string.Join(", ", _columns)).Append(")");
+
+        if (_selectSource != null)
         {
-            context.Items["LogCustomPart"] = customPart;
-
-            Console.WriteLine($"CustomParts {customPart}");
+            sb.AppendLine().Append(_selectSource.Build().Sql);
+            if (!string.IsNullOrWhiteSpace(_whereClause))
+                sb.Append(" WHERE ").Append(_whereClause);
         }
         else
         {
-            Console.WriteLine("No encontro ningun valor o atributo [LogFileName]");
+            sb.Append(" VALUES ");
+            var valueLines = new List<string>();
+
+            foreach (var row in _rows)
+            {
+                var placeholders = new List<string>();
+                foreach (var val in row)
+                {
+                    placeholders.Add("?");
+                    parameters.Add(val);
+                }
+                valueLines.Add($"({string.Join(", ", placeholders)})");
+            }
+
+            foreach (var row in _valuesRaw)
+            {
+                valueLines.Add($"({string.Join(", ", row.Select(SqlHelper.FormatValue))})");
+            }
+
+            sb.Append(string.Join(", ", valueLines));
         }
 
-        return LogFormatter.FormatRequestInfo(context,
-            method: context.Request.Method,
-            path: context.Request.Path,
-            queryParams: context.Request.QueryString.ToString(),
-            body: body
-        );
-    }
-
-    /// <summary>
-    /// Captura la información de la respuesta HTTP antes de enviarla al cliente.
-    /// </summary>
-    private static async Task<string> CaptureResponseInfoAsync(HttpContext context)
-    {
-        context.Response.Body.Seek(0, SeekOrigin.Begin);
-        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8, leaveOpen: true);
-        string body = await reader.ReadToEndAsync();
-        context.Response.Body.Seek(0, SeekOrigin.Begin);
-
-        string formattedResponse;
-
-        // Usar el objeto guardado en context.Items si existe
-        if (context.Items.ContainsKey("ResponseObject"))
+        if (_onDuplicateUpdate.Count > 0)
         {
-            var responseObject = context.Items["ResponseObject"];
-            formattedResponse = LogFormatter.FormatResponseInfo(context,
-                statusCode: context.Response.StatusCode.ToString(),
-                headers: string.Join("; ", context.Response.Headers),
-                body: responseObject != null
-                    ? JsonSerializer.Serialize(responseObject, JsonHelper.PrettyPrintCamelCase)
-                    : "null"
-            );
-        }
-        else
-        {
-            // Si no se interceptó el ObjectResult, usar el cuerpo normal
-            formattedResponse = LogFormatter.FormatResponseInfo(context,
-                statusCode: context.Response.StatusCode.ToString(),
-                headers: string.Join("; ", context.Response.Headers),
-                body: body
-            );
+            sb.Append(" ON DUPLICATE KEY UPDATE ");
+            sb.Append(string.Join(", ", _onDuplicateUpdate.Select(kv =>
+                $"{kv.Key} = {SqlHelper.FormatValue(kv.Value)}")));
         }
 
-        return formattedResponse;
+        return new QueryResult
+        {
+            Sql = sb.ToString(),
+            Parameters = parameters
+        };
     }
 }
-
