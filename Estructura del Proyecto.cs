@@ -1,3 +1,44 @@
+namespace QueryBuilder.Enums
+{
+    /// <summary>
+    /// Dialecto/driver de base de datos para ajustar sintaxis y capacidades.
+    /// Db2i = IBM i (AS/400, DB2 for i).
+    /// </summary>
+    public enum SqlDialect
+    {
+        Db2i = 0,      // AS/400 (por defecto)
+        SqlServer = 1,
+        MySql = 2,
+        PostgreSql = 3,
+        Oracle = 4,
+        Generic = 9
+    }
+}
+
+using QueryBuilder.Builders;
+using QueryBuilder.Enums;
+
+namespace QueryBuilder.Core
+{
+    /// <summary>
+    /// Punto de entrada principal para construir consultas SQL.
+    /// </summary>
+    public static class QueryBuilder
+    {
+        /// <summary>
+        /// Inicia la construcción de una consulta SELECT (dialecto por defecto: DB2 for i).
+        /// </summary>
+        public static SelectQueryBuilder From(string tableName, string? library = null)
+            => new SelectQueryBuilder(tableName, library, SqlDialect.Db2i);
+
+        /// <summary>
+        /// Inicia la construcción de una consulta SELECT especificando el dialecto.
+        /// </summary>
+        public static SelectQueryBuilder From(string tableName, string? library, SqlDialect dialect)
+            => new SelectQueryBuilder(tableName, library, dialect);
+    }
+}
+
 using QueryBuilder.Enums;
 using QueryBuilder.Helpers;
 using QueryBuilder.Models;
@@ -8,713 +49,494 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
 
-namespace QueryBuilder.Builders;
-
-/// <summary>
-/// Generador de consultas SELECT compatible con AS400.
-/// Soporta DISTINCT, alias, JOINs, GROUP BY, HAVING, ORDER BY y funciones agregadas.
-/// </summary>
-public class SelectQueryBuilder
+namespace QueryBuilder.Builders
 {
-    internal string? WhereClause { get; set; }
-    internal string? HavingClause { get; set; }
-
-    private int? _offset;
-    private int? _fetch;
-    private readonly string? _tableName;
-    private readonly string? _library;
-    private string? _tableAlias;
-    private readonly List<(string Column, string? Alias)> _columns = [];
-    private readonly List<(string Column, SortDirection Direction)> _orderBy = [];
-    private readonly List<string> _groupBy = [];
-    private readonly List<JoinClause> _joins = [];
-    private readonly List<CommonTableExpression> _ctes = [];
-
-    private readonly Dictionary<string, string> _aliasMap = [];
-    private int? _limit;
-    private bool _distinct = false;
-    private readonly Subquery? _derivedTable;
-
     /// <summary>
-    /// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/> con una tabla derivada.
+    /// Generador de consultas SELECT compatible con AS400 (DB2 for i) y extensible a otros motores.
+    /// Ahora soporta parámetros (placeholders ?) también en SELECT.
     /// </summary>
-    /// <param name="derivedTable">Subconsulta que actúa como tabla.</param>
-    public SelectQueryBuilder(Subquery derivedTable)
+    public class SelectQueryBuilder
     {
-        _derivedTable = derivedTable;
-    }
+        internal string? WhereClause { get; set; }
+        internal string? HavingClause { get; set; }
 
-    /// <summary>
-    /// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/>.
-    /// </summary>
-    public SelectQueryBuilder(string tableName, string? library = null)
-    {
-        _tableName = tableName;
-        _library = library;
-    }
-    /// <summary>
-    /// Agrega una condición WHERE del tipo "CAMPO IN (...)".
-    /// </summary>
-    /// <param name="column">Nombre de la columna a comparar.</param>
-    /// <param name="values">Lista de valores a incluir.</param>
-    public SelectQueryBuilder WhereIn(string column, IEnumerable<object> values)
-    {
-        if (values is null || !values.Any()) return this;
+        private readonly SqlDialect _dialect;
+        private readonly List<object?> _parameters = new();
 
-        string formatted = string.Join(", ", values.Select(SqlHelper.FormatValue));
-        string clause = $"{column} IN ({formatted})";
+        private int? _offset;
+        private int? _fetch;
+        private readonly string? _tableName;
+        private readonly string? _library;
+        private string? _tableAlias;
 
-        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
-        return this;
-    }
+        private readonly List<(string Column, string? Alias)> _columns = new();
+        private readonly List<(string Column, SortDirection Direction)> _orderBy = new();
+        private readonly List<string> _groupBy = new();
+        private readonly List<JoinClause> _joins = new();
+        private readonly List<CommonTableExpression> _ctes = new();
 
-    /// <summary>
-    /// Agrega una condición WHERE del tipo "CAMPO NOT IN (...)".
-    /// </summary>
-    /// <param name="column">Nombre de la columna a comparar.</param>
-    /// <param name="values">Lista de valores a excluir.</param>
-    public SelectQueryBuilder WhereNotIn(string column, IEnumerable<object> values)
-    {
-        if (values is null || !values.Any()) return this;
+        private readonly Dictionary<string, string> _aliasMap = new();
+        private int? _limit;
+        private bool _distinct = false;
+        private readonly Subquery? _derivedTable;
 
-        string formatted = string.Join(", ", values.Select(SqlHelper.FormatValue));
-        string clause = $"{column} NOT IN ({formatted})";
-
-        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una condición WHERE del tipo "CAMPO BETWEEN VALOR1 AND VALOR2".
-    /// </summary>
-    /// <param name="column">Nombre de la columna a comparar.</param>
-    /// <param name="start">Valor inicial del rango.</param>
-    /// <param name="end">Valor final del rango.</param>
-    public SelectQueryBuilder WhereBetween(string column, object start, object end)
-    {
-        string formattedStart = SqlHelper.FormatValue(start);
-        string formattedEnd = SqlHelper.FormatValue(end);
-        string clause = $"{column} BETWEEN {formattedStart} AND {formattedEnd}";
-
-        WhereClause = string.IsNullOrWhiteSpace(WhereClause) ? clause : $"{WhereClause} AND {clause}";
-        return this;
-    }
-
-
-    /// <summary>
-    /// Agrega un JOIN con una subconsulta como tabla.
-    /// </summary>
-    /// <param name="subquery">Instancia de subconsulta a usar como tabla.</param>
-    /// <param name="alias">Alias de la tabla derivada.</param>
-    /// <param name="left">Columna izquierda para la condición ON.</param>
-    /// <param name="right">Columna derecha para la condición ON.</param>
-    /// <param name="joinType">Tipo de JOIN: INNER, LEFT, etc.</param>
-    public SelectQueryBuilder Join(Subquery subquery, string alias, string left, string right, string joinType = "INNER")
-    {
-        _joins.Add(new JoinClause
+        /// <summary>
+        /// Inicializa una nueva instancia con una tabla derivada (subconsulta).
+        /// </summary>
+        public SelectQueryBuilder(Subquery derivedTable, SqlDialect dialect = SqlDialect.Db2i)
         {
-            JoinType = joinType.ToUpperInvariant(),
-            TableName = $"({subquery.Sql})",
-            Alias = alias,
-            LeftColumn = left,
-            RightColumn = right
-        });
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una o más expresiones CTE a la consulta.
-    /// </summary>
-    /// <param name="ctes">CTEs a incluir en la cláusula WITH.</param>
-    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder With(params CommonTableExpression[] ctes)
-    {
-        if (ctes != null && ctes.Length > 0)
-            _ctes.AddRange(ctes);
-
-        return this;
-    }
-
-    /// <summary>
-    /// Indica que se desea una consulta SELECT DISTINCT.
-    /// </summary>
-    public SelectQueryBuilder Distinct()
-    {
-        _distinct = true;
-        return this;
-    }
-
-    /// <summary>
-    /// Define un alias para la tabla.
-    /// </summary>
-    public SelectQueryBuilder As(string alias)
-    {
-        _tableAlias = alias;
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una subconsulta como una columna seleccionada.
-    /// </summary>
-    /// <param name="subquery">Subconsulta construida previamente.</param>
-    /// <param name="alias">Alias de la columna resultante.</param>
-    public SelectQueryBuilder Select(Subquery subquery, string alias)
-    {
-        _columns.Add(($"({subquery.Sql})", alias));
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una expresión CASE WHEN como columna seleccionada, con un alias explícito.
-    /// </summary>
-    /// <param name="caseExpression">Expresión CASE generada con <see cref="CaseWhenBuilder"/>.</param>
-    /// <param name="alias">Alias para la columna resultante.</param>
-    public SelectQueryBuilder SelectCase(string caseExpression, string alias)
-    {
-        _columns.Add((caseExpression, alias));
-        _aliasMap[caseExpression] = alias;
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una o varias expresiones CASE WHEN al SELECT.
-    /// </summary>
-    /// <param name="caseColumns">
-    /// Tuplas donde el primer valor es la expresión CASE WHEN generada por <see cref="CaseWhenBuilder"/>,
-    /// y el segundo valor es el alias de la columna.
-    /// </param>
-    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder SelectCase(params (string ColumnSql, string? Alias)[] caseColumns)
-    {
-        foreach (var (column, alias) in caseColumns)
-        {
-            _columns.Add((column, alias));
-            if (!string.IsNullOrWhiteSpace(alias))
-                _aliasMap[column] = alias;
+            _derivedTable = derivedTable;
+            _dialect = dialect;
         }
 
-        return this;
-    }
-
-    /// <summary>
-    /// Define las columnas a seleccionar (sin alias explícito).
-    /// Si detecta funciones agregadas, genera alias automáticos como "SUM_CAMPO".
-    /// </summary>
-    /// <param name="columns">Nombres de columnas o funciones agregadas.</param>
-    public SelectQueryBuilder Select(params string[] columns)
-    {
-        foreach (var column in columns)
+        /// <summary>
+        /// Inicializa una nueva instancia de <see cref="SelectQueryBuilder"/>.
+        /// </summary>
+        public SelectQueryBuilder(string tableName, string? library = null, SqlDialect dialect = SqlDialect.Db2i)
         {
-            if (TryGenerateAlias(column, out var alias))
-                _columns.Add((column, alias));
-            else
-                _columns.Add((column, null));
+            _tableName = tableName;
+            _library = library;
+            _dialect = dialect;
         }
 
-        return this;
-    }
+        #region WHERE/HAVING helpers (parametrizados)
 
-    /// <summary>
-    /// Define columnas con alias.
-    /// </summary>
-    public SelectQueryBuilder Select(params (string Column, string Alias)[] columns)
-    {
-        foreach (var (column, alias) in columns)
+        /// <summary>
+        /// Agrega SQL crudo al WHERE (úsese sólo cuando no sea posible parametrizar).
+        /// </summary>
+        public SelectQueryBuilder WhereRaw(string sql)
         {
-            _columns.Add((column, alias));
-            _aliasMap[column] = alias;
-        }
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una condición WHERE con una función SQL directamente como string.
-    /// Ejemplo: "UPPER(NOMBRE) = 'PEDRO'"
-    /// </summary>
-    /// <param name="sqlFunctionCondition">Condición completa en SQL.</param>
-    public SelectQueryBuilder WhereFunction(string sqlFunctionCondition)
-    {
-        if (string.IsNullOrWhiteSpace(sqlFunctionCondition))
+            if (string.IsNullOrWhiteSpace(sql)) return this;
+            AppendWhere(sql);
             return this;
-
-        if (string.IsNullOrWhiteSpace(WhereClause))
-            WhereClause = sqlFunctionCondition;
-        else
-            WhereClause += $" AND {sqlFunctionCondition}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una condición WHERE en formato SQL crudo (string libre).
-    /// Ejemplo: "ESTADO = 'ACTIVO' OR TIPO = 'X'"
-    /// </summary>
-    /// <param name="rawCondition">Condición SQL sin procesar.</param>
-    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder WhereRaw(string rawCondition)
-    {
-        if (string.IsNullOrWhiteSpace(rawCondition))
-            return this;
-
-        if (string.IsNullOrWhiteSpace(WhereClause))
-            WhereClause = rawCondition;
-        else
-            WhereClause += $" AND {rawCondition}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una condición HAVING con una función SQL directamente como string.
-    /// Ejemplo: "SUM(CANTIDAD) > 10"
-    /// </summary>
-    /// <param name="sqlFunctionCondition">Condición completa en SQL.</param>
-    public SelectQueryBuilder HavingFunction(string sqlFunctionCondition)
-    {
-        if (string.IsNullOrWhiteSpace(sqlFunctionCondition))
-            return this;
-
-        if (string.IsNullOrWhiteSpace(HavingClause))
-            HavingClause = sqlFunctionCondition;
-        else
-            HavingClause += $" AND {sqlFunctionCondition}";
-
-        return this;
-    }
-
-
-    /// <summary>
-    /// Agrega una cláusula WHERE con una expresión CASE WHEN directamente como string.
-    /// Ej: "CASE WHEN TIPO = 'A' THEN 1 ELSE 0 END = 1"
-    /// </summary>
-    /// <param name="sqlCaseCondition">Condición CASE completa.</param>
-    public SelectQueryBuilder WhereCase(string sqlCaseCondition)
-    {
-        if (string.IsNullOrWhiteSpace(sqlCaseCondition))
-            return this;
-
-        if (string.IsNullOrWhiteSpace(WhereClause))
-            WhereClause = sqlCaseCondition;
-        else
-            WhereClause += $" AND {sqlCaseCondition}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula WHERE con una expresión CASE WHEN generada desde <see cref="CaseWhenBuilder"/>.
-    /// </summary>
-    /// <param name="caseBuilder">Instancia del builder de CASE.</param>
-    /// <param name="comparison">Condición adicional (por ejemplo: "= 1").</param>
-    public SelectQueryBuilder WhereCase(CaseWhenBuilder caseBuilder, string comparison)
-    {
-        if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison))
-            return this;
-
-        string expression = $"{caseBuilder.Build()} {comparison}";
-
-        if (string.IsNullOrWhiteSpace(WhereClause))
-            WhereClause = expression;
-        else
-            WhereClause += $" AND {expression}";
-
-        return this;
-    }
-
-
-    /// <summary>
-    /// Agrega una condición WHERE.
-    /// </summary>
-    public SelectQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
-    {
-        LambdaWhereTranslator.Translate(this, expression);
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula HAVING EXISTS con una subconsulta.
-    /// </summary>
-    /// <param name="subquery">Subconsulta que se evaluará con EXISTS.</param>
-    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder HavingExists(Subquery subquery)
-    {
-        if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
-            return this;
-
-        var clause = $"EXISTS ({subquery.Sql})";
-
-        if (string.IsNullOrWhiteSpace(HavingClause))
-            HavingClause = clause;
-        else
-            HavingClause += $" AND {clause}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula HAVING NOT EXISTS con una subconsulta.
-    /// </summary>
-    /// <param name="subquery">Subconsulta que se evaluará con NOT EXISTS.</param>
-    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder HavingNotExists(Subquery subquery)
-    {
-        if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql))
-            return this;
-
-        var clause = $"NOT EXISTS ({subquery.Sql})";
-
-        if (string.IsNullOrWhiteSpace(HavingClause))
-            HavingClause = clause;
-        else
-            HavingClause += $" AND {clause}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula HAVING con una expresión CASE WHEN directamente como string.
-    /// Ejemplo: "CASE WHEN SUM(CANTIDAD) > 10 THEN 1 ELSE 0 END = 1"
-    /// </summary>
-    /// <param name="sqlCaseCondition">Expresión CASE completa en SQL.</param>
-    public SelectQueryBuilder HavingCase(string sqlCaseCondition)
-    {
-        if (string.IsNullOrWhiteSpace(sqlCaseCondition))
-            return this;
-
-        if (string.IsNullOrWhiteSpace(HavingClause))
-            HavingClause = sqlCaseCondition;
-        else
-            HavingClause += $" AND {sqlCaseCondition}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula HAVING con una expresión CASE WHEN generada con <see cref="CaseWhenBuilder"/>.
-    /// </summary>
-    /// <param name="caseBuilder">Builder de CASE WHEN.</param>
-    /// <param name="comparison">Comparación adicional (ej: "= 1").</param>
-    public SelectQueryBuilder HavingCase(CaseWhenBuilder caseBuilder, string comparison)
-    {
-        if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison))
-            return this;
-
-        string expression = $"{caseBuilder.Build()} {comparison}";
-
-        if (string.IsNullOrWhiteSpace(HavingClause))
-            HavingClause = expression;
-        else
-            HavingClause += $" AND {expression}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una condición HAVING.
-    /// </summary>
-    public SelectQueryBuilder Having<T>(Expression<Func<T, bool>> expression)
-    {
-        LambdaHavingTranslator.Translate(this, expression);
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una condición EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
-    /// </summary>
-    /// <param name="subqueryBuilderAction">
-    /// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de EXISTS.
-    /// </param>
-    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder WhereExists(Action<SelectQueryBuilder> subqueryBuilderAction)
-    {
-        var subqueryBuilder = new SelectQueryBuilder("DUMMY"); // El nombre se sobreescribirá
-        subqueryBuilderAction(subqueryBuilder);
-        var subquerySql = subqueryBuilder.Build().Sql;
-
-        var existsClause = $"EXISTS ({subquerySql})";
-
-        if (string.IsNullOrWhiteSpace(WhereClause))
-            WhereClause = existsClause;
-        else
-            WhereClause += $" AND {existsClause}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una condición NOT EXISTS a la cláusula WHERE con una subconsulta generada dinámicamente.
-    /// </summary>
-    /// <param name="subqueryBuilderAction">
-    /// Acción que configura un nuevo <see cref="SelectQueryBuilder"/> para representar la subconsulta dentro de NOT EXISTS.
-    /// </param>
-    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder WhereNotExists(Action<SelectQueryBuilder> subqueryBuilderAction)
-    {
-        var subqueryBuilder = new SelectQueryBuilder("DUMMY");
-        subqueryBuilderAction(subqueryBuilder);
-        var subquerySql = subqueryBuilder.Build().Sql;
-
-        var notExistsClause = $"NOT EXISTS ({subquerySql})";
-
-        if (string.IsNullOrWhiteSpace(WhereClause))
-            WhereClause = notExistsClause;
-        else
-            WhereClause += $" AND {notExistsClause}";
-
-        return this;
-    }
-
-    /// <summary>
-    /// Establece las columnas para agrupar (GROUP BY).
-    /// </summary>
-    public SelectQueryBuilder GroupBy(params string[] columns)
-    {
-        _groupBy.AddRange(columns);
-        return this;
-    }
-
-    /// <summary>
-    /// Establece el límite de resultados (FETCH FIRST para AS400).
-    /// </summary>
-    public SelectQueryBuilder Limit(int rowCount)
-    {
-        _limit = rowCount;
-        return this;
-    }
-
-    /// <summary>
-    /// Ordena por una o varias columnas.
-    /// </summary>
-    public SelectQueryBuilder OrderBy(params (string Column, SortDirection Direction)[] columns)
-    {
-        _orderBy.AddRange(columns);
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una cláusula JOIN a la consulta SQL, permitiendo especificar la tabla con o sin librería.
-    /// </summary>
-    /// <param name="table">Nombre de la tabla a unir. Puede incluir la librería (ej. LIBRERIA.TABLA).</param>
-    /// <param name="library">Nombre de la librería si no se especifica en la tabla. Se ignora si <paramref name="table"/> ya incluye la librería.</param>
-    /// <param name="alias">Alias opcional para la tabla unida.</param>
-    /// <param name="left">Columna del lado izquierdo de la condición ON.</param>
-    /// <param name="right">Columna del lado derecho de la condición ON.</param>
-    /// <param name="joinType">Tipo de JOIN (INNER, LEFT, RIGHT, FULL).</param>
-    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder Join(string table, string? library, string alias, string left, string right, string joinType = "INNER")
-    {
-        if (string.IsNullOrWhiteSpace(table))
-            throw new ArgumentNullException(nameof(table));
-
-        if (string.IsNullOrWhiteSpace(left))
-            throw new ArgumentNullException(nameof(left));
-
-        if (string.IsNullOrWhiteSpace(right))
-            throw new ArgumentNullException(nameof(right));
-
-        string finalLibrary = library;
-        string finalTable = table;
-
-        // Si el nombre incluye un punto (.), asumimos que ya viene con la librería: LIBRERIA.TABLA
-        if (table.Contains('.'))
-        {
-            var parts = table.Split('.', 2, StringSplitOptions.TrimEntries);
-            finalLibrary = parts[0];
-            finalTable = parts[1];
         }
 
-        _joins.Add(new JoinClause
+        /// <summary>
+        /// Agrega condición parametrizada: COL = ? (y agrega el valor a la lista de parámetros).
+        /// </summary>
+        public SelectQueryBuilder WhereEq(string column, object? value)
         {
-            JoinType = joinType.ToUpperInvariant(),
-            TableName = finalTable,
-            Library = finalLibrary,
-            Alias = alias,
-            LeftColumn = left,
-            RightColumn = right
-        });
-
-        return this;
-    }
-
-
-    /// <summary>
-    /// Define el valor de desplazamiento de filas (OFFSET).
-    /// </summary>
-    /// <param name="offset">Cantidad de filas a omitir.</param>
-    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder Offset(int offset)
-    {
-        _offset = offset;
-        return this;
-    }
-
-    /// <summary>
-    /// Define la cantidad de filas a recuperar después del OFFSET (FETCH NEXT).
-    /// </summary>
-    /// <param name="rowCount">Cantidad de filas a recuperar.</param>
-    /// <returns>Instancia modificada de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder FetchNext(int rowCount)
-    {
-        _fetch = rowCount;
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega una expresión CASE WHEN al ORDER BY, con soporte para condiciones tipadas.
-    /// </summary>
-    /// <param name="caseWhen">Expresión CASE WHEN construida mediante <see cref="CaseWhenBuilder"/>.</param>
-    /// <param name="alias">Alias opcional para la expresión CASE (no se usa en ORDER BY pero puede ser útil si se reutiliza).</param>
-    /// <returns>Instancia actual de <see cref="SelectQueryBuilder"/>.</returns>
-    public SelectQueryBuilder OrderByCase(CaseWhenBuilder caseWhen, SortDirection direction = SortDirection.None, string? alias = null)
-    {
-        ArgumentNullException.ThrowIfNull(caseWhen);
-
-        var expression = caseWhen.Build();
-
-        // No se requiere alias en ORDER BY, pero lo soportamos si se quiere reutilizar
-        if (!string.IsNullOrWhiteSpace(alias))
-            expression += $" AS {alias}";
-
-        _orderBy.Add((caseWhen.Build(), direction)); // Se agrega sin alias para efecto de ordenamiento
-        return this;
-    }
-
-
-    /// <summary>
-    /// Construye y retorna el SQL.
-    /// </summary>
-    public QueryResult Build()
-    {
-        var sb = new StringBuilder();
-
-        // Si hay CTEs, agregarlas antes del SELECT
-        if (_ctes.Count > 0)
-        {
-            sb.Append("WITH ");
-            sb.Append(string.Join(", ", _ctes.Select(cte => cte.ToString())));
-            sb.AppendLine();
+            if (string.IsNullOrWhiteSpace(column)) return this;
+            AppendWhere($"{column} = ?");
+            _parameters.Add(value);
+            return this;
         }
 
-        sb.Append("SELECT ");
-        if (_distinct) sb.Append("DISTINCT ");
-
-        if (_columns.Count == 0)
-            sb.Append('*');
-        else
+        /// <summary>
+        /// Agrega condición parametrizada: LOWER(COL) LIKE LOWER(?) (útil para búsquedas case-insensitive).
+        /// </summary>
+        public SelectQueryBuilder WhereLike(string column, string pattern, bool lower = true)
         {
-            var colParts = _columns.Select(c =>
-                string.IsNullOrWhiteSpace(c.Alias)
-                    ? c.Column
-                    : $"{c.Column} AS {c.Alias}"
-            );
-            sb.Append(string.Join(", ", colParts));
+            if (string.IsNullOrWhiteSpace(column)) return this;
+
+            var lhs = lower ? $"LOWER({column})" : column;
+            var rhs = lower ? "LOWER(?)" : "?";
+
+            AppendWhere($"{lhs} LIKE {rhs}");
+            _parameters.Add(pattern);
+            return this;
         }
 
-        sb.Append(" FROM ");
-        if (_derivedTable != null)
+        /// <summary>
+        /// Agrega condición parametrizada: COL BETWEEN ? AND ?
+        /// </summary>
+        public SelectQueryBuilder WhereBetween(string column, object start, object end)
         {
-            sb.Append(_derivedTable.ToString());
-        }
-        else
-        {
-            if (!string.IsNullOrWhiteSpace(_library))
-                sb.Append($"{_library}.");
-            sb.Append(_tableName);
-            if (!string.IsNullOrWhiteSpace(_tableAlias))
-                sb.Append($" {_tableAlias}");
+            if (string.IsNullOrWhiteSpace(column)) return this;
+            AppendWhere($"{column} BETWEEN ? AND ?");
+            _parameters.Add(start);
+            _parameters.Add(end);
+            return this;
         }
 
-        if (!string.IsNullOrWhiteSpace(_tableAlias))
-            sb.Append($" {_tableAlias}");
-
-        foreach (var join in _joins)
+        /// <summary>
+        /// Agrega condición parametrizada: COL IN (?, ?, ?)
+        /// </summary>
+        public SelectQueryBuilder WhereIn(string column, IEnumerable<object?> values)
         {
-            sb.Append($" {join.JoinType} JOIN ");
-            if (!string.IsNullOrWhiteSpace(join.Library))
-                sb.Append($"{join.Library}.");
-            sb.Append($"{join.TableName} {join.Alias} ON {join.LeftColumn} = {join.RightColumn}");
+            var vals = values?.ToList() ?? [];
+            if (string.IsNullOrWhiteSpace(column) || vals.Count == 0) return this;
+
+            var ph = string.Join(", ", Enumerable.Repeat("?", vals.Count));
+            AppendWhere($"{column} IN ({ph})");
+            _parameters.AddRange(vals);
+            return this;
         }
 
-        if (!string.IsNullOrWhiteSpace(WhereClause))
-            sb.Append($" WHERE {WhereClause}");
-
-        if (_groupBy.Count > 0)
+        /// <summary>
+        /// Agrega condición parametrizada: COL NOT IN (?, ?, ?)
+        /// </summary>
+        public SelectQueryBuilder WhereNotIn(string column, IEnumerable<object?> values)
         {
-            sb.Append(" GROUP BY ");
-            var grouped = _groupBy.Select(col => _aliasMap.TryGetValue(col, out var alias) ? alias : col);
-            sb.Append(string.Join(", ", grouped));
+            var vals = values?.ToList() ?? [];
+            if (string.IsNullOrWhiteSpace(column) || vals.Count == 0) return this;
+
+            var ph = string.Join(", ", Enumerable.Repeat("?", vals.Count));
+            AppendWhere($"{column} NOT IN ({ph})");
+            _parameters.AddRange(vals);
+            return this;
         }
 
-        if (!string.IsNullOrWhiteSpace(HavingClause))
-            sb.Append($" HAVING {HavingClause}");
-
-        if (_orderBy.Count > 0)
+        /// <summary>
+        /// Agrega SQL crudo al HAVING (úsese sólo cuando no sea posible parametrizar).
+        /// </summary>
+        public SelectQueryBuilder HavingRaw(string sql)
         {
-            sb.Append(" ORDER BY ");
-            var orderParts = _orderBy.Select(order =>
+            if (string.IsNullOrWhiteSpace(sql)) return this;
+            AppendHaving(sql);
+            return this;
+        }
+
+        #endregion
+
+        #region API existente (se conserva)
+
+        public SelectQueryBuilder Distinct() { _distinct = true; return this; }
+        public SelectQueryBuilder As(string alias) { _tableAlias = alias; return this; }
+
+        public SelectQueryBuilder Select(Subquery subquery, string alias)
+        { _columns.Add(($"({subquery.Sql})", alias)); return this; }
+
+        public SelectQueryBuilder SelectCase(string caseExpression, string alias)
+        {
+            _columns.Add((caseExpression, alias));
+            _aliasMap[caseExpression] = alias;
+            return this;
+        }
+
+        public SelectQueryBuilder SelectCase(params (string ColumnSql, string? Alias)[] caseColumns)
+        {
+            foreach (var (column, alias) in caseColumns)
             {
-                var (col, dir) = order;
-                return dir switch
-                {
-                    SortDirection.Asc => $"{col} ASC",
-                    SortDirection.Desc => $"{col} DESC",
-                    SortDirection.None or _ => col // No se incluye ASC ni DESC
-                };
-            });
-            sb.Append(string.Join(", ", orderParts));
+                _columns.Add((column, alias));
+                if (!string.IsNullOrWhiteSpace(alias)) _aliasMap[column] = alias;
+            }
+            return this;
         }
 
-        if (_limit.HasValue)
-            sb.Append(GetLimitClause());
+        public SelectQueryBuilder Select(params string[] columns)
+        {
+            foreach (var column in columns)
+            {
+                if (TryGenerateAlias(column, out var alias))
+                    _columns.Add((column, alias));
+                else
+                    _columns.Add((column, null));
+            }
+            return this;
+        }
 
-        return new QueryResult { Sql = sb.ToString() };
-    }
+        public SelectQueryBuilder Select(params (string Column, string Alias)[] columns)
+        {
+            foreach (var (column, alias) in columns)
+            {
+                _columns.Add((column, alias));
+                _aliasMap[column] = alias;
+            }
+            return this;
+        }
 
-    /// <summary>
-    /// Genera un alias automático para funciones agregadas como SUM(CAMPO), COUNT(*), etc.
-    /// </summary>
-    /// <param name="column">Expresión de columna a analizar.</param>
-    /// <param name="alias">Alias generado si aplica.</param>
-    /// <returns>True si se generó un alias; false en caso contrario.</returns>
-    private static bool TryGenerateAlias(string column, out string alias)
-    {
-        alias = string.Empty;
+        /// <summary>
+        /// WHERE mediante expresión (se mantiene tal cual).
+        /// </summary>
+        public SelectQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
+        {
+            LambdaWhereTranslator.Translate(this, expression);
+            return this;
+        }
 
-        if (string.IsNullOrWhiteSpace(column) || !column.Contains('(') || !column.Contains(')'))
+        /// <summary>
+        /// HAVING mediante expresión (se mantiene tal cual).
+        /// </summary>
+        public SelectQueryBuilder Having<T>(Expression<Func<T, bool>> expression)
+        {
+            LambdaHavingTranslator.Translate(this, expression);
+            return this;
+        }
+
+        public SelectQueryBuilder HavingExists(Subquery subquery)
+        {
+            if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql)) return this;
+            AppendHaving($"EXISTS ({subquery.Sql})");
+            return this;
+        }
+
+        public SelectQueryBuilder HavingNotExists(Subquery subquery)
+        {
+            if (subquery == null || string.IsNullOrWhiteSpace(subquery.Sql)) return this;
+            AppendHaving($"NOT EXISTS ({subquery.Sql})");
+            return this;
+        }
+
+        public SelectQueryBuilder WhereCase(string sqlCaseCondition)
+        {
+            if (string.IsNullOrWhiteSpace(sqlCaseCondition)) return this;
+            AppendWhere(sqlCaseCondition);
+            return this;
+        }
+
+        public SelectQueryBuilder WhereCase(CaseWhenBuilder caseBuilder, string comparison)
+        {
+            if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison)) return this;
+            AppendWhere($"{caseBuilder.Build()} {comparison}");
+            return this;
+        }
+
+        public SelectQueryBuilder HavingCase(string sqlCaseCondition)
+        {
+            if (string.IsNullOrWhiteSpace(sqlCaseCondition)) return this;
+            AppendHaving(sqlCaseCondition);
+            return this;
+        }
+
+        public SelectQueryBuilder HavingCase(CaseWhenBuilder caseBuilder, string comparison)
+        {
+            if (caseBuilder is null || string.IsNullOrWhiteSpace(comparison)) return this;
+            AppendHaving($"{caseBuilder.Build()} {comparison}");
+            return this;
+        }
+
+        public SelectQueryBuilder WhereExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+        {
+            var subqueryBuilder = new SelectQueryBuilder("DUMMY", dialect: _dialect);
+            subqueryBuilderAction(subqueryBuilder);
+            var subquerySql = subqueryBuilder.Build().Sql;
+            AppendWhere($"EXISTS ({subquerySql})");
+            return this;
+        }
+
+        public SelectQueryBuilder WhereNotExists(Action<SelectQueryBuilder> subqueryBuilderAction)
+        {
+            var subqueryBuilder = new SelectQueryBuilder("DUMMY", dialect: _dialect);
+            subqueryBuilderAction(subqueryBuilder);
+            var subquerySql = subqueryBuilder.Build().Sql;
+            AppendWhere($"NOT EXISTS ({subquerySql})");
+            return this;
+        }
+
+        public SelectQueryBuilder GroupBy(params string[] columns)
+        { _groupBy.AddRange(columns); return this; }
+
+        public SelectQueryBuilder Limit(int rowCount)
+        { _limit = rowCount; return this; }
+
+        public SelectQueryBuilder OrderBy(params (string Column, SortDirection Direction)[] columns)
+        { _orderBy.AddRange(columns); return this; }
+
+        /// <summary>
+        /// JOIN estilo clásico (se conserva).
+        /// </summary>
+        public SelectQueryBuilder Join(string table, string? library, string alias, string left, string right, string joinType = "INNER")
+        {
+            _joins.Add(new JoinClause
+            {
+                JoinType = joinType.ToUpperInvariant(),
+                TableName = table,
+                Library = library,
+                Alias = alias,
+                LeftColumn = left,
+                RightColumn = right
+            });
+            return this;
+        }
+
+        /// <summary>
+        /// JOIN simplificado: JOIN {tableRef} ON {onCondition}. No rompe la API existente.
+        /// </summary>
+        /// <param name="table">Puede incluir esquema/alias: "LIB.TABLA" o "LIB.TABLA T".</param>
+        /// <param name="onCondition">Condición ON completa: "A.Col = B.Col".</param>
+        /// <param name="joinType">INNER, LEFT, etc.</param>
+        public SelectQueryBuilder Join(string table, string onCondition, string joinType = "INNER")
+        {
+            if (string.IsNullOrWhiteSpace(table))
+                throw new ArgumentNullException(nameof(table));
+            if (string.IsNullOrWhiteSpace(onCondition))
+                throw new ArgumentNullException(nameof(onCondition));
+
+            // Extrae left/right de "A = B" para reusar el JOIN existente
+            var split = onCondition.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (split.Length != 2)
+                throw new ArgumentException("La condición ON debe ser del tipo 'X = Y'.", nameof(onCondition));
+
+            string left = split[0];
+            string right = split[1];
+
+            // Derivar alias por el lado derecho (ej: "PQR01CLI.CLINRO" -> "PQR01CLI")
+            string alias = right.Split('.', StringSplitOptions.TrimEntries).FirstOrDefault() ?? table.Trim();
+
+            // Si el caller no incluyó esquema en 'table', úsalo desde _library si existe
+            string? library = null;
+            string tableName = table.Trim();
+            if (!tableName.Contains('.') && !string.IsNullOrWhiteSpace(_library))
+                library = _library;
+
+            return Join(tableName, library, alias, left, right, joinType);
+        }
+
+        public SelectQueryBuilder Offset(int offset) { _offset = offset; return this; }
+        public SelectQueryBuilder FetchNext(int rowCount) { _fetch = rowCount; return this; }
+
+        /// <summary>
+        /// Agrega CASE WHEN al ORDER BY. Si <see cref="SortDirection.None"/>, no imprime ASC/DESC.
+        /// </summary>
+        public SelectQueryBuilder OrderByCase(CaseWhenBuilder caseWhen, SortDirection direction = SortDirection.None, string? alias = null)
+        {
+            if (caseWhen == null) throw new ArgumentNullException(nameof(caseWhen));
+            var expression = caseWhen.Build();
+            if (!string.IsNullOrWhiteSpace(alias))
+                expression += $" AS {alias}";
+            _orderBy.Add((expression, direction));
+            return this;
+        }
+
+        #endregion
+
+        /// <summary>
+        /// Construye y retorna el SQL (y parámetros).
+        /// </summary>
+        public QueryResult Build()
+        {
+            var sb = new StringBuilder();
+
+            // WITH
+            if (_ctes.Count > 0)
+            {
+                sb.Append("WITH ");
+                sb.Append(string.Join(", ", _ctes.Select(cte => cte.ToString())));
+                sb.AppendLine();
+            }
+
+            // SELECT
+            sb.Append("SELECT ");
+            if (_distinct) sb.Append("DISTINCT ");
+
+            if (_columns.Count == 0)
+                sb.Append('*');
+            else
+            {
+                var colParts = _columns.Select(c =>
+                    string.IsNullOrWhiteSpace(c.Alias)
+                        ? c.Column
+                        : $"{c.Column} AS {c.Alias}");
+                sb.Append(string.Join(", ", colParts));
+            }
+
+            // FROM
+            sb.Append(" FROM ");
+            if (_derivedTable != null)
+            {
+                sb.Append(_derivedTable.ToString());
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(_library))
+                    sb.Append($"{_library}.");
+                sb.Append(_tableName);
+                if (!string.IsNullOrWhiteSpace(_tableAlias))
+                    sb.Append($" {_tableAlias}");
+            }
+
+            // JOINs
+            foreach (var join in _joins)
+            {
+                sb.Append($" {join.JoinType} JOIN ");
+                if (!string.IsNullOrWhiteSpace(join.Library))
+                    sb.Append($"{join.Library}.");
+                sb.Append($"{join.TableName}");
+                if (!string.IsNullOrWhiteSpace(join.Alias))
+                    sb.Append($" {join.Alias}");
+                sb.Append($" ON {join.LeftColumn} = {join.RightColumn}");
+            }
+
+            // WHERE
+            if (!string.IsNullOrWhiteSpace(WhereClause))
+                sb.Append($" WHERE {WhereClause}");
+
+            // GROUP BY
+            if (_groupBy.Count > 0)
+            {
+                sb.Append(" GROUP BY ");
+                var grouped = _groupBy.Select(col => _aliasMap.TryGetValue(col, out var alias) ? alias : col);
+                sb.Append(string.Join(", ", grouped));
+            }
+
+            // HAVING
+            if (!string.IsNullOrWhiteSpace(HavingClause))
+                sb.Append($" HAVING {HavingClause}");
+
+            // ORDER BY
+            if (_orderBy.Count > 0)
+            {
+                sb.Append(" ORDER BY ");
+                var ordered = _orderBy.Select(o =>
+                {
+                    var col = _aliasMap.TryGetValue(o.Column, out var alias) ? alias : o.Column;
+                    // Si la dirección es None, no imprimir ASC/DESC
+                    return o.Direction == SortDirection.None
+                        ? col
+                        : $"{col} {(o.Direction == SortDirection.Desc ? "DESC" : "ASC")}";
+                });
+                sb.Append(string.Join(", ", ordered));
+            }
+
+            // Paginación (DB2 for i usa OFFSET/FETCH a partir de ciertas versiones; si no, adaptar aquí por dialecto)
+            if (_offset.HasValue || _fetch.HasValue)
+            {
+                if (_offset.HasValue) sb.Append($" OFFSET {_offset.Value} ROWS");
+                if (_fetch.HasValue) sb.Append($" FETCH NEXT {_fetch.Value} ROWS ONLY");
+            }
+            else if (_limit.HasValue)
+            {
+                // Alternativa para compatibilidad
+                sb.Append($" FETCH FIRST {_limit.Value} ROWS ONLY");
+            }
+
+            return new QueryResult
+            {
+                Sql = sb.ToString(),
+                Parameters = _parameters
+            };
+        }
+
+        #region Internos
+
+        private void AppendWhere(string fragment)
+        {
+            if (string.IsNullOrWhiteSpace(WhereClause)) WhereClause = fragment;
+            else WhereClause += $" AND {fragment}";
+        }
+
+        private void AppendHaving(string fragment)
+        {
+            if (string.IsNullOrWhiteSpace(HavingClause)) HavingClause = fragment;
+            else HavingClause += $" AND {fragment}";
+        }
+
+        private static bool TryGenerateAlias(string column, out string? alias)
+        {
+            alias = null;
+            // Alias automático para agregados: SUM(CAMPO) -> SUM_CAMPO
+            var trimmed = column.Trim();
+            var start = trimmed.IndexOf('(');
+            var end = trimmed.IndexOf(')');
+            if (start > 0 && end > start)
+            {
+                var func = trimmed[..start].Trim().ToUpperInvariant();
+                var inner = trimmed.Substring(start + 1, end - start - 1).Trim();
+                if (!string.IsNullOrWhiteSpace(func) && !string.IsNullOrWhiteSpace(inner))
+                {
+                    alias = $"{func}_{inner.Replace('.', '_')}";
+                    return true;
+                }
+            }
             return false;
+        }
 
-        int start = column.IndexOf('(');
-        int end = column.IndexOf(')');
-
-        if (start < 1 || end <= start)
-            return false;
-
-        var function = column[..start].Trim().ToUpperInvariant();
-        var argument = column.Substring(start + 1, end - start - 1).Trim();
-
-        var validFunctions = new[] { "SUM", "COUNT", "AVG", "MIN", "MAX" };
-        if (!validFunctions.Contains(function))
-            return false;
-
-        if (string.IsNullOrWhiteSpace(argument))
-            return false;
-
-        alias = $"{function}_{argument.Replace("*", "ALL")}";
-        return true;
-    }
-
-    private string GetLimitClause()
-    {
-        if (_offset.HasValue && _fetch.HasValue)
-            return $" OFFSET {_offset.Value} ROWS FETCH NEXT {_fetch.Value} ROWS ONLY";
-        if (_fetch.HasValue)
-            return $" FETCH FIRST {_fetch.Value} ROWS ONLY";
-        return string.Empty;
+        #endregion
     }
 }
 
-
-
+using QueryBuilder.Enums;
 using QueryBuilder.Helpers;
 using QueryBuilder.Models;
 using System;
@@ -722,172 +544,177 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace QueryBuilder.Builders;
-
-/// <summary>
-/// Generador de sentencias INSERT compatibles con AS400 y otros motores.
-/// Utiliza parámetros seguros y garantiza la asignación correcta a los comandos.
-/// </summary>
-public class InsertQueryBuilder(string _tableName, string? _library = null)
+namespace QueryBuilder.Builders
 {
-    private readonly List<string> _columns = [];
-    private readonly List<List<object?>> _rows = [];
-    private readonly List<List<object>> _valuesRaw = [];
-    private SelectQueryBuilder? _selectSource;
-    private string? _comment;
-    private string? _whereClause;
-    private bool _insertIgnore = false;
-    private readonly Dictionary<string, object?> _onDuplicateUpdate = [];
-
     /// <summary>
-    /// Agrega un comentario SQL al inicio del INSERT para trazabilidad o debugging.
+    /// Generador de sentencias INSERT. Para DB2 for i usa placeholders (?) y parámetros seguros.
+    /// Opcionalmente soporta características específicas por dialecto (InsertIgnore/Upsert) en otros motores.
     /// </summary>
-    public InsertQueryBuilder WithComment(string comment)
+    public class InsertQueryBuilder
     {
-        if (!string.IsNullOrWhiteSpace(comment))
-            _comment = $"-- {comment}";
-        return this;
-    }
+        private readonly string _tableName;
+        private readonly string? _library;
+        private readonly SqlDialect _dialect;
 
-    /// <summary>
-    /// Indica que se debe usar INSERT IGNORE para omitir errores de duplicado.
-    /// </summary>
-    public InsertQueryBuilder InsertIgnore()
-    {
-        _insertIgnore = true;
-        return this;
-    }
+        private readonly List<string> _columns = new();
+        private readonly List<List<object?>> _rows = new();         // VALUES parametrizados
+        private readonly List<List<object>> _valuesRaw = new();      // VALUES raw (funciones)
+        private SelectQueryBuilder? _selectSource;
 
-    /// <summary>
-    /// Define columnas que deben actualizarse si hay conflicto de clave duplicada.
-    /// </summary>
-    public InsertQueryBuilder OnDuplicateKeyUpdate(string column, object? value)
-    {
-        _onDuplicateUpdate[column] = value;
-        return this;
-    }
+        private string? _comment;
+        private string? _whereClause;
+        private bool _insertIgnore = false;                          // No se emite en Db2i
+        private readonly Dictionary<string, object?> _onDuplicateUpdate = new(); // No se emite en Db2i
 
-    /// <summary>
-    /// Define múltiples columnas para actualizar en caso de duplicado.
-    /// </summary>
-    public InsertQueryBuilder OnDuplicateKeyUpdate(Dictionary<string, object?> updates)
-    {
-        foreach (var kvp in updates)
-            _onDuplicateUpdate[kvp.Key] = kvp.Value;
-        return this;
-    }
-
-    /// <summary>
-    /// Define las columnas y valores a insertar. El orden será tomado desde el primer uso.
-    /// </summary>
-    public InsertQueryBuilder Values(params (string Column, object? Value)[] values)
-    {
-        if (_columns.Count == 0)
-            _columns.AddRange(values.Select(v => v.Column));
-        else if (_columns.Count != values.Length)
-            throw new InvalidOperationException("El número de columnas no coincide con los valores proporcionados.");
-
-        _rows.Add(values.Select(v => v.Value).ToList());
-        return this;
-    }
-
-    /// <summary>
-    /// Agrega valores sin parámetros (SQL raw).
-    /// </summary>
-    public InsertQueryBuilder ValuesRaw(params string[] rawValues)
-    {
-        _valuesRaw.Add(rawValues.Cast<object>().ToList());
-        return this;
-    }
-
-    /// <summary>
-    /// Define un SELECT como origen del INSERT.
-    /// </summary>
-    public InsertQueryBuilder FromSelect(SelectQueryBuilder select)
-    {
-        _selectSource = select;
-        _valuesRaw.Clear();
-        return this;
-    }
-
-    /// <summary>
-    /// Condición NOT EXISTS para INSERT ... SELECT.
-    /// </summary>
-    public InsertQueryBuilder WhereNotExists(Subquery subquery)
-    {
-        _whereClause = $"NOT EXISTS ({subquery.Sql})";
-        return this;
-    }
-
-    /// <summary>
-    /// Genera el SQL y los parámetros asociados.
-    /// </summary>
-    public QueryResult Build()
-    {
-        if (string.IsNullOrWhiteSpace(_tableName))
-            throw new InvalidOperationException("Debe especificar un nombre de tabla.");
-
-        if (_columns.Count == 0)
-            throw new InvalidOperationException("Debe especificar columnas para el INSERT.");
-
-        if (_selectSource != null && _rows.Count > 0)
-            throw new InvalidOperationException("No puede combinar VALUES con FROM SELECT.");
-
-        var sb = new StringBuilder();
-        var parameters = new List<object?>();
-
-        if (!string.IsNullOrWhiteSpace(_comment))
-            sb.AppendLine(_comment);
-
-        sb.Append("INSERT ");
-        if (_insertIgnore) sb.Append("IGNORE ");
-        sb.Append("INTO ");
-        if (!string.IsNullOrWhiteSpace(_library))
-            sb.Append($"{_library}.");
-        sb.Append(_tableName);
-        sb.Append(" (").Append(string.Join(", ", _columns)).Append(")");
-
-        if (_selectSource != null)
+        /// <summary>
+        /// Crea un builder de INSERT.
+        /// </summary>
+        public InsertQueryBuilder(string tableName, string? library = null, SqlDialect dialect = SqlDialect.Db2i)
         {
-            sb.AppendLine().Append(_selectSource.Build().Sql);
-            if (!string.IsNullOrWhiteSpace(_whereClause))
-                sb.Append(" WHERE ").Append(_whereClause);
+            _tableName = tableName;
+            _library = library;
+            _dialect = dialect;
         }
-        else
-        {
-            sb.Append(" VALUES ");
-            var valueLines = new List<string>();
 
-            foreach (var row in _rows)
+        /// <summary>Comentario inicial (útil para trazabilidad).</summary>
+        public InsertQueryBuilder WithComment(string comment)
+        { if (!string.IsNullOrWhiteSpace(comment)) _comment = $"-- {comment}"; return this; }
+
+        /// <summary>INSERT IGNORE (habilitar sólo en motores compatibles, no DB2 for i).</summary>
+        public InsertQueryBuilder InsertIgnore()
+        { _insertIgnore = true; return this; }
+
+        /// <summary>Define actualización en conflicto (no DB2 for i).</summary>
+        public InsertQueryBuilder OnDuplicateKeyUpdate(string column, object? value)
+        { _onDuplicateUpdate[column] = value; return this; }
+
+        /// <summary>Define varias columnas para actualización en conflicto (no DB2 for i).</summary>
+        public InsertQueryBuilder OnDuplicateKeyUpdate(Dictionary<string, object?> updates)
+        {
+            foreach (var kvp in updates) _onDuplicateUpdate[kvp.Key] = kvp.Value;
+            return this;
+        }
+
+        /// <summary>Lista de columnas del INSERT.</summary>
+        public InsertQueryBuilder IntoColumns(params string[] columns)
+        { _columns.Clear(); _columns.AddRange(columns); return this; }
+
+        /// <summary>Agrega una fila de valores (parametrizados).</summary>
+        public InsertQueryBuilder Values(params (string Column, object? Value)[] values)
+        {
+            if (_columns.Count == 0)
+                _columns.AddRange(values.Select(v => v.Column));
+            else if (_columns.Count != values.Length)
+                throw new InvalidOperationException($"Se esperaban {_columns.Count} columnas, pero se recibieron {values.Length}.");
+
+            _rows.Add(values.Select(v => v.Value).ToList());
+            return this;
+        }
+
+        /// <summary>Agrega valores sin parámetros (por ejemplo funciones SQL).</summary>
+        public InsertQueryBuilder ValuesRaw(params string[] rawValues)
+        { _valuesRaw.Add(rawValues.Cast<object>().ToList()); return this; }
+
+        /// <summary>INSERT ... SELECT.</summary>
+        public InsertQueryBuilder FromSelect(SelectQueryBuilder select)
+        { _selectSource = select; _valuesRaw.Clear(); return this; }
+
+        /// <summary>Condición opcional (típico en INSERT ... SELECT).</summary>
+        public InsertQueryBuilder WhereNotExists(Subquery subquery)
+        { _whereClause = $"NOT EXISTS ({subquery.Sql})"; return this; }
+
+        /// <summary>
+        /// Construye y retorna el SQL y parámetros.
+        /// </summary>
+        public QueryResult Build()
+        {
+            if (string.IsNullOrWhiteSpace(_tableName))
+                throw new InvalidOperationException("Debe especificarse el nombre de la tabla para INSERT.");
+            if (_columns.Count == 0)
+                throw new InvalidOperationException("Debe especificar al menos una columna para el INSERT.");
+            if (_selectSource != null && _rows.Count > 0)
+                throw new InvalidOperationException("No se puede usar 'VALUES' y 'FROM SELECT' al mismo tiempo.");
+            if (_selectSource == null && _rows.Count == 0 && _valuesRaw.Count == 0)
+                throw new InvalidOperationException("Debe especificar al menos una fila de valores para el INSERT.");
+
+            // Validaciones
+            foreach (var fila in _rows)
             {
-                var placeholders = new List<string>();
-                foreach (var val in row)
+                if (fila.Count != _columns.Count)
+                    throw new InvalidOperationException($"El número de valores ({fila.Count}) no coincide con las columnas ({_columns.Count}).");
+            }
+            foreach (var fila in _valuesRaw)
+            {
+                if (fila.Count != _columns.Count)
+                    throw new InvalidOperationException($"El número de valores RAW ({fila.Count}) no coincide con las columnas ({_columns.Count}).");
+            }
+
+            var sb = new StringBuilder();
+            var parameters = new List<object?>();
+
+            if (!string.IsNullOrWhiteSpace(_comment))
+                sb.AppendLine(_comment);
+
+            // INSERT cabecera
+            sb.Append("INSERT ");
+            // En DB2 for i NO existe INSERT IGNORE; sólo habilitar para otros dialectos
+            if (_insertIgnore && _dialect == SqlDialect.MySql)
+                sb.Append("IGNORE ");
+
+            sb.Append("INTO ");
+            if (!string.IsNullOrWhiteSpace(_library))
+                sb.Append($"{_library}.");
+            sb.Append(_tableName);
+            sb.Append(" (").Append(string.Join(", ", _columns)).Append(')');
+
+            if (_selectSource != null)
+            {
+                sb.AppendLine().Append(_selectSource.Build().Sql);
+                if (!string.IsNullOrWhiteSpace(_whereClause))
+                    sb.Append(" WHERE ").Append(_whereClause);
+            }
+            else
+            {
+                sb.Append(" VALUES ");
+                var valueLines = new List<string>();
+
+                // Filas parametrizadas -> placeholders + lista de parámetros en orden
+                foreach (var row in _rows)
                 {
-                    placeholders.Add("?");
-                    parameters.Add(val);
+                    var placeholders = new List<string>();
+                    foreach (var val in row)
+                    {
+                        placeholders.Add("?");
+                        parameters.Add(val);
+                    }
+                    valueLines.Add($"({string.Join(", ", placeholders)})");
                 }
-                valueLines.Add($"({string.Join(", ", placeholders)})");
+
+                // Filas RAW (funciones)
+                foreach (var row in _valuesRaw)
+                    valueLines.Add($"({string.Join(", ", row.Select(SqlHelper.FormatValue))})");
+
+                sb.Append(string.Join(", ", valueLines));
             }
 
-            foreach (var row in _valuesRaw)
+            // UPSERT según dialecto (NO emitir en Db2i)
+            if (_onDuplicateUpdate.Count > 0)
             {
-                valueLines.Add($"({string.Join(", ", row.Select(SqlHelper.FormatValue))})");
+                if (_dialect == SqlDialect.MySql)
+                {
+                    sb.Append(" ON DUPLICATE KEY UPDATE ");
+                    sb.Append(string.Join(", ", _onDuplicateUpdate.Select(kv =>
+                        $"{kv.Key} = {SqlHelper.FormatValue(kv.Value)}")));
+                }
+                // Para otros dialectos (Postgres: ON CONFLICT, SQL Server/DB2: MERGE) implementar aquí cuando se requiera.
             }
 
-            sb.Append(string.Join(", ", valueLines));
+            return new QueryResult
+            {
+                Sql = sb.ToString(),
+                Parameters = parameters
+            };
         }
-
-        if (_onDuplicateUpdate.Count > 0)
-        {
-            sb.Append(" ON DUPLICATE KEY UPDATE ");
-            sb.Append(string.Join(", ", _onDuplicateUpdate.Select(kv =>
-                $"{kv.Key} = {SqlHelper.FormatValue(kv.Value)}")));
-        }
-
-        return new QueryResult
-        {
-            Sql = sb.ToString(),
-            Parameters = parameters
-        };
     }
 }
+
