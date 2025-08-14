@@ -1,10 +1,1 @@
-
-Me parece bien solo que cuando sea 
-
-var q = Query.From<IniciarSesionDto>("U")
-.Select(u=> u.email)
-
-
-No se use u=> u.email, sino que infiera de aca <IniciarSesionDto>("U"), que sera u.email?
-
-Es posible solo dimelo no cambien nada aun.
+npx ng update @angular/core@20 @angular/cli@20 @angular/material@20 @angular/cdk@20
