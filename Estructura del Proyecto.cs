@@ -1,26 +1,41 @@
-Entregame el codigo con los cambios
-
-import { ApplicationConfig, importProvidersFrom } from '@angular/core';
+// app.config.ts
+import { ApplicationConfig } from '@angular/core';
 import { provideRouter, withHashLocation } from '@angular/router';
-import { AuthInterceptor } from './core/services/auth.interceptor';
-import { AppRoutingModule, routes } from './app.routes';
+import { routes } from './app.routes';
+
 import { provideClientHydration } from '@angular/platform-browser';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { LocationStrategy, HashLocationStrategy } from '@angular/common';
 
-//Nuevo
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
+// ✅ HttpClient moderno (sin HttpClientModule)
+import {
+  provideHttpClient,
+  withFetch,
+  withInterceptorsFromDi, // toma interceptores registrados vía DI
+  HTTP_INTERCEPTORS
+} from '@angular/common/http';
+
+import { AuthInterceptor } from './core/services/auth.interceptor';
 
 export const appConfig: ApplicationConfig = {
-  providers: [provideRouter(routes, withHashLocation()),
-  provideClientHydration(),
-  provideAnimationsAsync(),
-  provideHttpClient(withFetch()),
-  importProvidersFrom(HttpClientModule, AppRoutingModule),
-  {
-    provide: HTTP_INTERCEPTORS,
-    useClass: AuthInterceptor,
-    multi: true,
-  },
-  { provide: LocationStrategy, useClass: HashLocationStrategy },]
+  providers: [
+    // Router standalone con hash (#)
+    provideRouter(routes, withHashLocation()),
+
+    // Hidratación/animaciones (opcional)
+    provideClientHydration(),
+    provideAnimationsAsync(),
+
+    // ✅ HttpClient (sin HttpClientModule) + uso de fetch + interceptores DI
+    provideHttpClient(
+      withFetch(),
+      withInterceptorsFromDi()
+    ),
+
+    // Interceptor basado en clase (se inyecta vía DI)
+    { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
+
+    // Estrategia de navegación con hash
+    { provide: LocationStrategy, useClass: HashLocationStrategy }
+  ]
 };
