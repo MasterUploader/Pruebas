@@ -7,7 +7,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { FormGroup, FormsModule, FormBuilder, Validators, ReactiveFormsModule } from '@angular/forms';
+import { FormGroup, FormsModule, FormBuilder, Validators, ReactiveFormsModule, AbstractControl } from '@angular/forms';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatDialogModule } from '@angular/material/dialog';
 import { AuthService } from '../../../../core/services/auth.service';
@@ -47,8 +47,17 @@ export class LoginComponent {
   ) {
     this.loginForm = this.fb.group({
       userName: ['', Validators.required],
-      password: ['', Validators.required],
+      password: ['', Validators.required]
     });
+  }
+
+  private clearServerError(ctrl: AbstractControl | null) {
+    if (!ctrl) return;
+    const errs = { ...(ctrl.errors || {}) };
+    if ('server' in errs) {
+      delete (errs as any)['server'];
+      ctrl.setErrors(Object.keys(errs).length ? errs : null);
+    }
   }
 
   togglePasswordVisibility(): void {
@@ -60,9 +69,13 @@ export class LoginComponent {
 
     const { userName, password } = this.loginForm.value;
 
-    // Encendemos overlay y deshabilitamos el form con la API de Forms (evita warnings)
-    this.isLoading = true;
+    // Limpia error de servidor anterior SOLO en el control de password
+    const pwdCtrl = this.loginForm.get('password');
+    this.clearServerError(pwdCtrl);
     this.errorMessage = '';
+
+    // Encendemos overlay y deshabilitamos el form correctamente (sin warnings)
+    this.isLoading = true;
     this.loginForm.disable({ emitEvent: false });
 
     this.authService.login(userName, password)
@@ -76,15 +89,21 @@ export class LoginComponent {
       .subscribe({
         next: _ => this.router.navigate(['/tarjetas']),
         error: (error: HttpErrorResponse) => {
-          // Mensaje robusto incluso si el 401 no trae body
+          // Mensaje robusto aunque el 401 no traiga body
           const msgFromApi =
             (error?.error && (error.error.codigo?.message || error.error.message)) ||
             (typeof error?.error === 'string' ? error.error : null);
 
           this.errorMessage = msgFromApi || 'Ocurrió un error durante el inicio de sesión';
 
-          // Opcional: notificación
-          // this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
+          // Marca error en el control de contraseña para que se muestre mat-error
+          const current = pwdCtrl?.errors || {};
+          pwdCtrl?.setErrors({ ...current, server: true });
+          pwdCtrl?.markAsTouched();
+          pwdCtrl?.markAsDirty();
+
+          // Snackbar visible nuevamente (opcional quitar si no lo quieres)
+          this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
         }
       });
   }
@@ -136,15 +155,18 @@ export class LoginComponent {
             (click)="togglePasswordVisibility()"
             [attr.aria-label]="hidePassword ? 'Mostrar contraseña' : 'Ocultar contraseña'"
             [attr.aria-pressed]="!hidePassword">
-            <mat-icon class="iconPass">{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
+            <mat-icon class="iconPass">
+              {{ hidePassword ? 'visibility_off' : 'visibility' }}
+            </mat-icon>
           </button>
 
+          <!-- error de validación local -->
           <mat-error *ngIf="loginForm.controls['password']?.hasError('required')">
             La contraseña es obligatoria.
           </mat-error>
 
-          <!-- ERROR GENERAL DE SERVIDOR, debajito del password (sin crear otro form-field) -->
-          <mat-error *ngIf="!loginForm.hasError('required') && errorMessage">
+          <!-- error del servidor (APARECE SIEMPRE cuando seteamos {server:true}) -->
+          <mat-error *ngIf="loginForm.controls['password']?.hasError('server')">
             {{ errorMessage }}
           </mat-error>
         </mat-form-field>
@@ -165,7 +187,7 @@ export class LoginComponent {
   <!-- Overlay flotante de CARGA -->
   @if (isLoading) {
     <div class="overlay" role="alert" aria-live="assertive">
-      <div class="overlay-content" role="dialog" aria-label="Cargando" inert>
+      <div class="overlay-content" role="dialog" aria-label="Cargando">
         <mat-progress-spinner mode="indeterminate" diameter="48"></mat-progress-spinner>
         <div class="overlay-text">Cargando…</div>
       </div>
@@ -173,58 +195,5 @@ export class LoginComponent {
   }
 </div>
 
-/* Fondo general */
-body { background-color: rgb(241, 239, 239); }
 
-/* Contenedor principal del login */
-.login-container { position: relative; }
-
-/* Tarjeta del formulario */
-.content-form {
-  position: absolute;
-  top: 270px;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  max-width: 400px;
-  width: 100%;
-  height: 400px;
-  background-color: #fff;
-  padding: 25px;
-  border-radius: 12px;
-  box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.349);
-}
-
-/* Mientras está cargando, bloquea interacciones sobre la tarjeta */
-.content-form.blocked { pointer-events: none; filter: grayscale(0.2); opacity: 0.95; }
-
-.content-title-login { display: flex; justify-content: center; align-items: center; width: 100%; padding: 30px 0; }
-.imgLogo { position: absolute; top: -60px; width: 110px; height: 100px; display: block; }
-.title-login { font-size: 1.5rem; font-weight: bold; }
-
-.form { height: 80%; display: flex; flex-direction: column; gap: 20px; }
-.inputPass { position: relative; display: flex; }
-
-.iconPass { position: absolute; top: -10px; right: 10px; width: 30px; height: 30px; border: none; }
-
-.full-width { width: 100%; border: none !important; background-color: #fff !important; }
-.form input { width: 100%; height: 30px !important; outline: none; }
-
-.loginNow {
-  background-color: #e4041c; color: #fff; padding: 13px 0; border-radius: 10px; border: none;
-  font-size: 1rem; font-weight: bold; cursor: pointer;
-}
-.loginNow:hover { box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.349); }
-
-/* ---------- OVERLAY ---------- */
-.overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35);
-  z-index: 9999; display: grid; place-items: center; backdrop-filter: blur(1px);
-}
-.overlay-content {
-  min-width: 240px; max-width: 90vw; padding: 20px 22px; border-radius: 12px; background: #fff;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.25); display: flex; align-items: center; gap: 14px;
-}
-.overlay-text { font-weight: 600; }
-
-/* No añadimos reglas para errores: ahora usan el form-field de contraseña y no crean cajas extras */
 
