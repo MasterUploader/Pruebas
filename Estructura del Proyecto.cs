@@ -1,13 +1,14 @@
 <h1 mat-dialog-title> Detalle Tarjeta</h1>
 <div mat-dialog-content id="contenidoImprimir">
   <div class="contenedor">
+    <!-- La imagen es el contenedor de referencia (position: relative) -->
     <div class="content-imagen-tarjeta">
       <img
         [src]="disenoSeleccionado === 'unaFila' ? '/assets/TarjetaDiseño2.png' : '/assets/Tarjeta3.PNG'"
         alt="imagen tarjeta"
         class="imagen-tarjeta no-imprimir">
 
-      <!-- DISEÑO 1 -->
+      <!-- ==================== DISEÑO 1 (una fila) ==================== -->
       <ng-container *ngIf="disenoSeleccionado === 'unaFila'">
         <div class="nombres-una-fila">
           <b>{{tarjeta.nombre}}</b>
@@ -17,7 +18,7 @@
         </div>
       </ng-container>
 
-      <!-- DISEÑO 2 -->
+      <!-- ==================== DISEÑO 2 (dos filas) ==================== -->
       <ng-container *ngIf="disenoSeleccionado === 'dosFilas'">
         <div class="nombres"><b>{{nombres}}</b></div>
         <div class="apellidos"><b>{{apellidos}}</b></div>
@@ -37,7 +38,7 @@
       </mat-select>
     </mat-form-field>
 
-    <!-- Campo Nombre: el matcher va en el INPUT -->
+    <!-- Campo Nombre: matcher en el INPUT -->
     <mat-form-field appearance="fill" class="nombre-input">
       <mat-label>Nombre:</mat-label>
       <input
@@ -49,9 +50,16 @@
         maxlength="26"
         required
         [errorStateMatcher]="nombreErrorMatcher">
-      <mat-hint align="end">{{nombreCharsCount}}/{{nombreMaxLength}}</mat-hint>
+      <!-- Cuando NO hay error, mostramos el contador estándar -->
+      <mat-hint align="end" *ngIf="!nombreError">{{nombreCharsCount}}/{{nombreMaxLength}}</mat-hint>
+      <!-- Cuando hay error, Material oculta el hint; mostramos el error -->
       <mat-error *ngIf="nombreError">{{ nombreError }}</mat-error>
     </mat-form-field>
+
+    <!-- Contador externo: se muestra SOLO cuando hay error, para no perder la referencia 13/26 -->
+    <div class="contador-externo" *ngIf="nombreError">
+      {{nombreCharsCount}}/{{nombreMaxLength}}
+    </div>
 
     <!-- Botón siempre habilitado; validación se hace al presionar -->
     <button mat-button class="imprimir-btn" (click)="imprimir(tarjeta)">Imprimir</button>
@@ -62,302 +70,93 @@
 </div>
 
 
-import { Component, Input, Output, OnInit, Inject, EventEmitter, ChangeDetectorRef, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormsModule, NgForm } from '@angular/forms';
-import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
-import { MatDialogModule, MatDialog } from '@angular/material/dialog';
-import { MatSelectModule } from '@angular/material/select';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
-import { ErrorStateMatcher } from '@angular/material/core';
-import { FormControl, FormGroupDirective } from '@angular/forms';
+/* ---------- Layout general ---------- */
+.modal { display:none; position:fixed; z-index:1; inset:0; overflow:auto; background-position:center; }
 
-import { DomSanitizer } from '@angular/platform-browser';
-import { Subscription } from 'rxjs';
-
-import { Tarjeta } from '../../../../core/models/tarjeta.model';
-import { ImpresionService } from '../../../../core/services/impresion.service';
-import { TarjetaService } from '../../../../core/services/tarjeta.service';
-import { AuthService } from '../../../../core/services/auth.service';
-import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-number.pipe';
-
-/**
- * ErrorStateMatcher personalizado:
- * Pone el input en estado de error cuando:
- *  - Hay un error externo (nombreError !== '')
- *  - O el control es inválido y fue tocado/ensuciado o el form enviado (comportamiento estándar)
- *
- * NOTA: la firma correcta usa FormControl | null y FormGroupDirective | NgForm | null
- */
-class NombreErrorStateMatcher implements ErrorStateMatcher {
-  constructor(private hasExternalError: () => boolean) {}
-
-  isErrorState(control: FormControl | null, form: FormGroupDirective | NgForm | null): boolean {
-    const submitted = !!form && form.submitted;
-    const invalidStandard = !!control && control.invalid && (control.touched || control.dirty || submitted);
-    const externalError = this.hasExternalError(); // debe devolver boolean, no null
-    return externalError || invalidStandard;
-  }
+.modal-content {
+  background:#fefefe; margin:15% auto; padding:20px; border:1px solid #888;
+  width:400px; height:600px; background-repeat:no-repeat; background-size:cover;
 }
 
-@Component({
-  selector: 'app-modal-tarjeta',
-  standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    MatDialogModule,
-    MatSelectModule,
-    MatFormFieldModule,
-    MatInputModule,
-    MatSnackBarModule,
-    MaskAccountNumberPipe
-  ],
-  templateUrl: './modal-tarjeta.component.html',
-  styleUrl: './modal-tarjeta.component.css'
-})
-export class ModalTarjetaComponent implements OnInit, OnDestroy {
+.contenedor{
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
 
-  private readonly subscription: Subscription = new Subscription();
-  private imprime: boolean;
+/* La imagen de la tarjeta es el marco de referencia */
+.content-imagen-tarjeta {
+  position: relative;                 /* clave: los textos se posicionan vs esta caja */
+  width: 207.87404194px;
+  height: 321.25988299px;
+  display: block;
+}
 
-  @Output() nombreCambiado = new EventEmitter<string>();
+@media print { .no-imprimir{ display:none; } }
 
-  @Input() datosTarjeta: Tarjeta = {
-    nombre: '',
-    numero: '',
-    fechaEmision: '',
-    fechaVencimiento: '',
-    motivo: '',
-    numeroCuenta: ''
-  };
+.imagen-tarjeta { width:100%; height:100%; object-fit:contain; display:block; }
 
-  nombreCompleto: string = '';
-  nombres: string = '';
-  apellidos: string = '';
+/* ---------- DISEÑO 1 (una fila) centrado, como ya tenías ---------- */
+.nombres-una-fila {
+  position: absolute;
+  top: 60%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 6pt;
+  color: white;
+  text-align: center;
+  max-width: 90%;
+  white-space: nowrap; overflow:hidden; text-overflow:ellipsis;
+}
 
-  numeroCuenta: string = '';
-  usuarioICBS: string = '';
-  nombreMandar: string = '';
+.cuenta-una-fila{
+  position: absolute;
+  top: 67%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 7pt;
+  text-align: center;
+  max-width: 80%;
+  color: white;
+  white-space: nowrap; overflow:hidden; text-overflow:ellipsis;
+}
 
-  disenoSeleccionado: string = 'unaFila';
+/* ---------- DISEÑO 2 (dos filas) ---------- */
+.nombres, .apellidos, .cuenta {
+  position: absolute;
+  right: 6%;            /* margen desde el borde derecho de la imagen */
+  max-width: 82%;       /* área útil horizontal (evita pegarse al borde izquierdo) */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;    /* “nace” a la derecha y se corre a la izquierda */
+}
 
-  maxCaracteresFila: number = 16;
+.nombres   { top: 53%; font-size: 6pt; color: white; }
+.apellidos { top: 58%; font-size: 6pt; color: white; }
+.cuenta    { top: 65%; font-size: 7pt; color: white; }
 
-  // Validación / UI
-  nombreError: string = '';
-  nombreCharsCount: number = 0;
-  nombreMaxLength: number = 26;
+/* ---------- Footer y acciones ---------- */
+.modal-footer { padding:10px; display:flex; flex-direction:column; justify-content:space-around; height:100px; }
 
-  // Matcher que fuerza el estado de error cuando existe nombreError
-  nombreErrorMatcher = new NombreErrorStateMatcher(() => this.nombreError.trim().length > 0);
+.mat-dialog-actions { align-items:center; justify-content:space-between; display:flex; flex-wrap:wrap; }
 
-  constructor(
-    private readonly authService: AuthService,
-    private readonly dialog: MatDialog,
-    public dialogRef: MatDialogRef<ModalTarjetaComponent>,
-    private readonly sanitizer: DomSanitizer,
-    private readonly impresionService: ImpresionService,
-    private readonly tarjetaService: TarjetaService,
-    private readonly cdr: ChangeDetectorRef,
-    private readonly snackBar: MatSnackBar,
-    @Inject(MAT_DIALOG_DATA) public tarjeta: Tarjeta
-  ) {
-    this.actualizarNombre(tarjeta.nombre);
-    this.nombreCompleto = tarjeta.nombre;
-    this.imprime = false;
+.action-buttons .flex-container { display:flex; justify-content:space-between; align-items:center; width:100%; }
 
-    this.nombreCharsCount = (this.tarjeta.nombre || '').length;
-    this.aplicarValidaciones(this.tarjeta.nombre);
-  }
+.nombre-input { flex-grow:1; margin-right:20px; width:100%; text-transform:uppercase; }
 
-  ngOnInit(): void {
-    this.subscription.add(this.authService.sessionActive$.subscribe(isActive => {
-      if (isActive) {
-        this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData.usuarioICBS!;
+.spacer { flex:1; }
 
-        this.actualizarNombre(this.tarjeta.nombre);
+.imprimir-btn { background:#4CAF50; color:#fff; } .imprimir-btn:hover { background:#45a049; }
+.cerrar-btn { background:#f44336; color:#fff; } .cerrar-btn:hover { background:#da190b; }
 
-        this.cdr.detectChanges();
-        this.cdr.markForCheck();
-      } else {
-        this.authService.logout();
-      }
-    }));
-  }
-
-  ngOnDestroy(): void {
-    this.subscription.unsubscribe();
-  }
-
-  imprimir(datosParaImprimir: Tarjeta): void {
-    this.aplicarValidaciones(this.tarjeta.nombre);
-
-    if (this.nombreError) {
-      this.mostrarNotificacionError(this.nombreError);
-      return;
-    }
-
-    let impresionExitosa = false;
-
-    this.subscription.add(this.authService.sessionActive$.subscribe(isActive => {
-      if (isActive) {
-        this.tarjetaService.validaImpresion(this.tarjeta.numero).subscribe({
-          next: (respuesta) => {
-            this.imprime = respuesta.imprime;
-          }
-        });
-
-        if (!this.imprime) {
-          const tipoDiseño = this.disenoSeleccionado === 'unaFila';
-
-          impresionExitosa = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseño);
-          if (impresionExitosa) {
-            this.tarjetaService
-              .guardaEstadoImpresion(this.tarjeta.numero, this.usuarioICBS, this.tarjeta.nombre.toUpperCase())
-              .subscribe({
-                next: () => {
-                  this.cerrarModal();
-                  window.location.reload();
-                },
-                error: (error) => {
-                  console.log('error', error);
-                }
-              });
-          }
-        } else {
-          this.cerrarModal();
-        }
-
-      } else {
-        this.authService.logout();
-      }
-    }));
-  }
-
-  cerrarModal(): void {
-    this.dialogRef.close();
-  }
-
-  emitirNombreCambiado(): void {
-    this.nombreMandar = this.tarjeta.nombre.toUpperCase();
-    this.nombreCambiado.emit(this.nombreMandar);
-  }
-
-  dividirYActualizarNombre(nombreCompleto: string) {
-    this.actualizarNombre(nombreCompleto);
-    this.emitirNombreCambiado();
-  }
-
-  private dividirNombreCompleto(nombreCompleto: string): void {
-    const cadena = (nombreCompleto || '').toUpperCase().trim();
-    if (!cadena) {
-      this.nombres = '';
-      this.apellidos = '';
-      return;
-    }
-
-    const partes = cadena.split(' ').filter(p => p.length > 0);
-
-    if (partes.length === 1) {
-      this.nombres = partes[0];
-      this.apellidos = '';
-    } else if (partes.length === 2) {
-      this.nombres = partes[0];
-      this.apellidos = partes[1];
-    } else if (partes.length === 3) {
-      this.nombres = `${partes[0]} ${partes[1]}`;
-      this.apellidos = partes[2];
-    } else {
-      this.nombres = `${partes[0]} ${partes[1]}`;
-      this.apellidos = partes.slice(2).join(' ');
-    }
-
-    if (this.nombres.length > this.maxCaracteresFila) {
-      this.nombres = this.nombres.slice(0, this.maxCaracteresFila);
-    }
-    if (this.apellidos.length > this.maxCaracteresFila) {
-      this.apellidos = this.apellidos.slice(0, this.maxCaracteresFila);
-    }
-  }
-
-  actualizarNombre(nombre: string) {
-    let nombreActualizado = (nombre || '').toUpperCase();
-
-    nombreActualizado = this.validarNombre(nombreActualizado);
-
-    this.tarjeta.nombre = nombreActualizado;
-
-    if (this.disenoSeleccionado === 'dosFilas') {
-      this.dividirNombreCompleto(nombreActualizado);
-    }
-
-    this.nombreCharsCount = nombreActualizado.length;
-    this.aplicarValidaciones(nombreActualizado);
-
-    this.emitirNombreCambiado();
-  }
-
-  validarNombre(nombre: string): string {
-    let nombreValido = nombre.replace(/[^A-Z\s]/g, '');
-    nombreValido = nombreValido.replace(/\s+/g, ' ');
-    return nombreValido;
-  }
-
-  prevenirNumeroCaracteres(event: KeyboardEvent) {
-    const regex = /^[a-zA-Z\s]*$/;
-    if (!regex.test(event.key)) {
-      event.preventDefault();
-    }
-  }
-
-  cambiarDiseno() {
-    this.actualizarNombre(this.tarjeta.nombre);
-  }
-
-  validarEntrada(event: Event): void {
-    const input = (event.target as HTMLInputElement);
-    let valor = (input.value || '').toUpperCase();
-
-    valor = valor.replace(/[^A-ZÑ\s]/g, '').replace(/\s{2,}/g, ' ');
-
-    input.value = valor;
-    this.tarjeta.nombre = valor;
-
-    if (this.disenoSeleccionado === 'dosFilas') {
-      this.dividirNombreCompleto(valor);
-    }
-
-    this.nombreCharsCount = valor.length;
-    this.aplicarValidaciones(valor);
-
-    this.emitirNombreCambiado();
-  }
-
-  private aplicarValidaciones(valor: string): void {
-    const limpio = (valor || '').trim();
-    const palabras = limpio.length === 0 ? [] : limpio.split(' ').filter(p => p.length > 0);
-
-    this.nombreError = '';
-
-    if (limpio.length === 0) {
-      this.nombreError = 'El nombre no puede estar vacío.';
-      return;
-    }
-
-    if (palabras.length < 2) {
-      this.nombreError = 'Debe ingresar al menos nombre y apellido (mínimo 2 palabras).';
-      return;
-    }
-  }
-
-  private mostrarNotificacionError(mensaje: string): void {
-    this.snackBar.open(mensaje, 'Cerrar', {
-      duration: 3500,
-      horizontalPosition: 'right',
-      verticalPosition: 'top'
-    });
-  }
+/* ---------- Contador externo cuando hay error ---------- */
+.contador-externo {
+  width: 100%;
+  text-align: right;
+  margin-top: -8px;       /* acércalo al form-field; ajusta si lo prefieres */
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: rgba(0,0,0,0.6); /* mismo tono del mat-hint */
 }
