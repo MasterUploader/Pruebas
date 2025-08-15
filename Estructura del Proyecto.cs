@@ -1,7 +1,7 @@
 import { Component, Input, Output, OnInit, Inject, EventEmitter, ChangeDetectorRef, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatInputModule } from '@angular/material/input';
-import { FormsModule } from '@angular/forms';
+import { FormsModule, NgModel } from '@angular/forms';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
@@ -24,9 +24,9 @@ import { Subscription } from 'rxjs';
 })
 export class ModalTarjetaComponent implements OnInit, OnDestroy {
 
-  // ===== Constantes de validación =====
+  // === Reglas de validación ===
   private readonly MAX_NAME_LEN = 40; // total
-  private readonly MAX_LINE = 20;     // por línea (diseño de dos filas)
+  private readonly MAX_LINE = 20;     // por línea (solo diseño 2)
 
   private subscription: Subscription = new Subscription();
   private imprime: boolean;
@@ -41,18 +41,18 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     numeroCuenta: ''
   };
 
-  nombreCompleto: string = '';
-  nombres: string = '';     // línea 1 (diseño 2)
-  apellidos: string = '';   // línea 2 (diseño 2)
-  numeroCuenta: string = '';
-  usuarioICBS: string = '';
-  nombreMandar: string = '';
-  disenoSeleccionado: string = 'dosFilas';
+  nombreCompleto = '';
+  nombres = '';     // línea 1 (diseño 2)
+  apellidos = '';   // línea 2 (diseño 2)
+  numeroCuenta = '';
+  usuarioICBS = '';
+  nombreMandar = '';
+  disenoSeleccionado: 'unaFila' | 'dosFilas' = 'dosFilas';
 
-  /** Bandera para habilitar el botón Imprimir (flujo original). */
+  /** Controla el [disabled] del botón imprimir. */
   nombreValidoParaImprimir = false;
 
-  /** Mensaje único para mostrar debajo del campo cuando hay error. */
+  /** Texto del único mat-error. */
   nombreError: string | null = null;
 
   constructor(
@@ -73,24 +73,21 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.subscription.add(this.authService.sessionActive$.subscribe(isActive => {
-      if (isActive) {
-        this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData.usuarioICBS ?? '';
-        this.actualizarNombre(this.tarjeta.nombre); // recalcula líneas
-        // Inicializa validación para el estado actual del campo
-        this.nombreValidoParaImprimir = this.validarYSetErrores(this.tarjeta.nombre);
-        this.cdr.detectChanges();
-        this.cdr.markForCheck();
-      } else {
-        this.authService.logout();
-      }
+      if (!isActive) { this.authService.logout(); return; }
+
+      this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData.usuarioICBS ?? '';
+      this.actualizarNombre(this.tarjeta.nombre);
+      // Valida estado inicial
+      this.nombreValidoParaImprimir = this.validarYSetErrores(this.tarjeta.nombre);
+      this.cdr.detectChanges();
+      this.cdr.markForCheck();
     }));
   }
 
   ngOnDestroy(): void { this.subscription.unsubscribe(); }
 
-  // ===== Impresión (flujo original, con guardas de validación) =====
+  // ======= Impresión (con guardas de validación) =======
   imprimir(datosParaImprimir: Tarjeta): void {
-    // 1) Guardar de validación: no avanzar si hay errores
     if (!this.validarYSetErrores(this.tarjeta.nombre)) {
       this.snackBar.open('No puedes imprimir: corrige el nombre.', 'Cerrar', { duration: 3500, verticalPosition: 'top' });
       return;
@@ -99,32 +96,28 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     let impresionExitosa = false;
 
     this.subscription.add(this.authService.sessionActive$.subscribe(isActive => {
-      if (isActive) {
-        this.tarjetaService.validaImpresion(this.tarjeta.numero).subscribe({
-          next: (respuesta) => { this.imprime = !!respuesta.imprime; }
-        });
+      if (!isActive) { this.authService.logout(); return; }
 
-        if (!this.imprime) {
-          const tipoDiseño = this.disenoSeleccionado === 'unaFila'; // true=una fila, false=dos filas
-          impresionExitosa = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseño);
-          if (impresionExitosa) {
-            this.tarjetaService.guardaEstadoImpresion(
-              this.tarjeta.numero,
-              this.usuarioICBS,
-              this.tarjeta.nombre.toUpperCase()
-            ).subscribe({
-              next: () => {
-                this.cerrarModal();
-                window.location.reload();
-              },
-              error: (error) => { console.log('error', error); }
-            });
-          }
-        } else {
-          this.cerrarModal();
+      this.tarjetaService.validaImpresion(this.tarjeta.numero).subscribe({
+        next: (r) => { this.imprime = !!r.imprime; }
+      });
+
+      if (!this.imprime) {
+        const tipoDiseño = this.disenoSeleccionado === 'unaFila'; // true=una fila, false=dos
+        impresionExitosa = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseño);
+
+        if (impresionExitosa) {
+          this.tarjetaService.guardaEstadoImpresion(
+            this.tarjeta.numero,
+            this.usuarioICBS,
+            this.tarjeta.nombre.toUpperCase()
+          ).subscribe({
+            next: () => { this.cerrarModal(); window.location.reload(); },
+            error: (e) => console.log('error', e)
+          });
         }
       } else {
-        this.authService.logout();
+        this.cerrarModal();
       }
     }));
   }
@@ -141,10 +134,7 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.emitirNombreCambiado();
   }
 
-  /**
-   * Divide en 2 líneas SIN cortar palabras.
-   * Cada línea admite máximo 20 caracteres.
-   */
+  /** Construye 2 líneas sin cortar palabras, máx 20 c/u. */
   private computeTwoLines(full: string): { line1: string; line2: string } {
     const tokens = (full ?? '').split(' ').filter(Boolean);
     let l1 = '', l2 = '';
@@ -154,8 +144,7 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
       } else if (!l2.length || (l2.length + 1 + t.length) <= this.MAX_LINE) {
         l2 = l2 ? `${l2} ${t}` : t;
       } else {
-        // Si no cabe en ninguna línea, se omite (mismo criterio que tenías).
-        break;
+        break; // descarta si no cabe en ninguna
       }
     }
     return { line1: l1, line2: l2 };
@@ -169,69 +158,95 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
   }
 
   actualizarNombre(nombre: string) {
-    let nombreActualizado = (nombre ?? '').toUpperCase();
-    nombreActualizado = this.validarNombre(nombreActualizado);
-    // límite total 40
-    if (nombreActualizado.length > this.MAX_NAME_LEN) {
-      nombreActualizado = nombreActualizado.slice(0, this.MAX_NAME_LEN).trim();
-    }
-    this.tarjeta.nombre = nombreActualizado;
+    let n = (nombre ?? '').toUpperCase();
+    n = this.validarNombre(n);
+    if (n.length > this.MAX_NAME_LEN) n = n.slice(0, this.MAX_NAME_LEN).trim();
+    this.tarjeta.nombre = n;
 
     if (this.disenoSeleccionado === 'dosFilas') {
-      this.dividirNombreCompleto(nombreActualizado);
+      this.dividirNombreCompleto(n);
     }
     this.emitirNombreCambiado();
   }
 
-  /**
-   * Sanitiza: solo letras (incluye Ñ y acentos) y un solo espacio.
-   */
+  /** Sanea: solo letras (incluye Ñ/acentos), un solo espacio, sin espacios al final. */
   validarNombre(nombre: string): string {
-    let nombreValido = nombre.replace(/[^A-ZÑÁÉÍÓÚÜ\s]/g, ''); // Elimina no permitidos
-    nombreValido = nombreValido.replace(/\s+/g, ' ').trim();    // Colapsa espacios
-    return nombreValido;
+    let v = nombre.replace(/[^A-ZÑÁÉÍÓÚÜ\s]/g, ''); // elimina caracteres no permitidos
+    v = v.replace(/\s+/g, ' ').trim();               // un solo espacio y sin finales
+    return v;
   }
 
+  /** Bloquea teclas: solo letras/espacio y evita espacios dobles o al inicio/fin. */
   prevenirNumeroCaracteres(event: KeyboardEvent) {
-    const regex = /^[a-zA-ZñÑáéíóúÁÉÍÓÚüÜ\s]*$/;
-    if (!regex.test(event.key)) { event.preventDefault(); }
+    const key = event.key;
+    const input = event.target as HTMLInputElement;
+
+    // letras con acentos y Ñ
+    const isLetter = /^[a-zA-ZñÑáéíóúÁÉÍÓÚüÜ]$/.test(key);
+    const isSpace = key === ' ';
+
+    if (!isLetter && !isSpace) { event.preventDefault(); return; }
+
+    if (isSpace) {
+      const start = input.selectionStart ?? 0;
+      const end = input.selectionEnd ?? 0;
+      const val = input.value;
+
+      // No espacio al inicio, ni doble espacio, ni pegar contra otro espacio
+      const left = start > 0 ? val[start - 1] : '';
+      const right = end < val.length ? val[end] : '';
+      if (start === 0 || left === ' ' || right === ' ') {
+        event.preventDefault();
+        return;
+      }
+    }
   }
 
   cambiarDiseno() { this.actualizarNombre(this.tarjeta.nombre); }
 
   /**
-   * Entrada en tiempo real:
-   * - Mayúsculas, sanitiza, recorta a 40.
-   * - Recalcula dos líneas (si aplica).
-   * - Actualiza bandera [disabled] y mensaje de error.
+   * Input en tiempo real:
+   * - Mayúsculas, limpia, ≤ 40.
+   * - Recalcula 2 líneas (si aplica).
+   * - Actualiza errores/estado del botón y, opcionalmente, el NgModel.
    */
-  validarEntrada(event: Event): void {
+  validarEntrada(event: Event, nombreNgModel?: NgModel): void {
     const input = (event.target as HTMLInputElement);
     let valor = (input.value ?? '').toUpperCase();
+
+    // Solo letras/espacios, colapsa espacios y sin trailing
     valor = valor.replace(/[^A-ZÑÁÉÍÓÚÜ\s]/g, '').replace(/\s{2,}/g, ' ').trim();
     if (valor.length > this.MAX_NAME_LEN) valor = valor.slice(0, this.MAX_NAME_LEN).trim();
 
     input.value = valor;
     this.tarjeta.nombre = valor;
 
-    // Recalcula nombres/apellidos si es diseño de dos filas
-    if (this.disenoSeleccionado === 'dosFilas') {
-      this.dividirNombreCompleto(valor);
-    }
+    if (this.disenoSeleccionado === 'dosFilas') this.dividirNombreCompleto(valor);
     this.emitirNombreCambiado();
 
-    // Valida y setea mensaje + habilita/deshabilita imprimir
-    this.nombreValidoParaImprimir = this.validarYSetErrores(valor);
+    const esValido = this.validarYSetErrores(valor);
+    this.nombreValidoParaImprimir = esValido;
+
+    // Marca el NgModel como válido/ inválido para que <mat-error> se muestre
+    if (nombreNgModel) {
+      if (esValido) {
+        nombreNgModel.control.setErrors(null);
+      } else {
+        nombreNgModel.control.setErrors({ custom: true });
+      }
+      nombreNgModel.control.markAsTouched();
+      nombreNgModel.control.markAsDirty();
+      nombreNgModel.control.updateValueAndValidity({ emitEvent: false });
+    }
   }
 
   /**
-   * Reglas:
+   * Reglas y mensaje:
    *  - obligatorio
    *  - mínimo 2 palabras
    *  - total ≤ 40
    *  - ninguna palabra > 20
-   *  - si es diseño de dos filas: cada línea ≤ 20
-   * Retorna true si todo OK (permite imprimir).
+   *  - si diseño 2: cada línea ≤ 20
    */
   private validarYSetErrores(valor: string): boolean {
     const v = (valor ?? '').trim();
@@ -242,7 +257,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
 
     if (v.length > this.MAX_NAME_LEN) { this.nombreError = 'Máximo 40 caracteres.'; return false; }
 
-    // Palabra demasiado larga para la línea
     if (words.some(w => w.length > this.MAX_LINE)) {
       this.nombreError = 'Ninguna palabra puede exceder 20 caracteres.';
       return false;
@@ -262,46 +276,35 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
 }
 
 
-
-
 <h1 mat-dialog-title> Detalle Tarjeta</h1>
 <div mat-dialog-content id="contenidoImprimir">
   <div class="contenedor">
     <div class="content-imagen-tarjeta">
-      <img
-        [src]="disenoSeleccionado === 'unaFila' ? '/assets/TarjetaDiseño2.png' : '/assets/Tarjeta3.PNG'"
-        alt="imagen tarjeta"
-        class="imagen-tarjeta no-imprimir">
+      <img [src]="disenoSeleccionado === 'unaFila' ? '/assets/TarjetaDiseño2.png' : '/assets/Tarjeta3.PNG'"
+           alt="imagen tarjeta"
+           class="imagen-tarjeta no-imprimir">
     </div>
 
-    <!-- Diseño para una fila -->
+    <!-- Diseño para una fila-->
     <div *ngIf="disenoSeleccionado === 'unaFila'" class="nombre-completo">
       <div class="nombres-una-fila">
         <b>{{ tarjeta.nombre }}</b>
       </div>
-      <!-- Numero de Cuenta -->
-      <div class="cuenta-una-fila">
-        <b>{{ tarjeta.numeroCuenta | maskAccountNumber }}</b>
-      </div>
+      <!-- Numero de Cuenta-->
+      <div class="cuenta-una-fila"><b>{{ tarjeta.numeroCuenta | maskAccountNumber }}</b></div>
     </div>
 
-    <!-- Diseño para dos filas -->
+    <!-- Diseño para dos filas-->
     <div *ngIf="disenoSeleccionado === 'dosFilas'" class="nombre-completo">
-      <div class="nombres">
-        <b>{{ nombres }}</b>
-      </div>
-      <div class="apellidos">
-        <b>{{ apellidos }}</b>
-      </div>
-      <!-- Numero de Cuenta -->
-      <div class="cuenta">
-        <b>{{ tarjeta.numeroCuenta | maskAccountNumber }}</b>
-      </div>
+      <div class="nombres"><b>{{ nombres }}</b></div>
+      <div class="apellidos"><b>{{ apellidos }}</b></div>
+      <!-- Numero de Cuenta-->
+      <div class="cuenta"><b>{{ tarjeta.numeroCuenta | maskAccountNumber }}</b></div>
     </div>
   </div>
 
   <div mat-dialog-actions class="action-buttons">
-    <!-- Selector de Diseño de Tarjeta -->
+    <!--Selector de Diseño de Tarjeta-->
     <mat-form-field appearance="fill" class="diseño-input">
       <mat-label>Diseño</mat-label>
       <mat-select [(value)]="disenoSeleccionado" (selectionChange)="cambiarDiseno()">
@@ -310,7 +313,7 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
       </mat-select>
     </mat-form-field>
 
-    <!-- Campo de nombre (se mantiene template-driven) -->
+    <!-- Campo de nombre -->
     <mat-form-field appearance="fill" class="nombre-input">
       <mat-label>Nombre:</mat-label>
       <input
@@ -318,28 +321,26 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
         matInput
         [(ngModel)]="tarjeta.nombre"
         name="nombreTarjeta"
-        (input)="validarEntrada($event)"
+        #nombreNgModel="ngModel"
+        (input)="validarEntrada($event, nombreNgModel)"
         (keypress)="prevenirNumeroCaracteres($event)"
         maxlength="40"
         autocomplete="off">
       <mat-hint align="end">{{ (tarjeta.nombre?.length || 0) }}/40</mat-hint>
 
-      <!-- Único mensaje de error (bloquea el flujo de impresión) -->
-      <mat-error *ngIf="!!nombreError">{{ nombreError }}</mat-error>
+      <!-- Error visible cuando el NgModel queda inválido -->
+      <mat-error *ngIf="nombreNgModel.invalid">{{ nombreError }}</mat-error>
     </mat-form-field>
 
-    <button
-      mat-button
-      class="imprimir-btn"
-      (click)="imprimir(tarjeta)"
-      [disabled]="!nombreValidoParaImprimir">
+    <button mat-button class="imprimir-btn"
+            (click)="imprimir(tarjeta)"
+            [disabled]="!nombreValidoParaImprimir">
       Imprimir
     </button>
-
     <span class="spacer"></span>
-
-    <button mat-button class="cerrar-btn" (click)="cerrarModal()" [mat-dialog-close]="true">
-      Cerrar
-    </button>
+    <button mat-button class="cerrar-btn" (click)="cerrarModal()" [mat-dialog-close]="true">Cerrar</button>
   </div>
 </div>
+
+
+
