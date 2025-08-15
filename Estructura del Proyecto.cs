@@ -3,11 +3,14 @@
  * -----------------------------------------------------------------------------
  * Angular 20 (standalone) + Material Table/Sort + Reactive Forms.
  *
- * COMPORTAMIENTO ACTUAL (no cambia):
+ * COMPORTAMIENTO ACTUAL (con mejora solicitada):
  *  - Carga tarjetas por agencias (desde sesión/form).
  *  - Filtro por número (formato campo:valor).
  *  - Abre modal al click en una fila.
  *  - "Eliminar" remueve en UI y registra impresión en backend (flujo heredado).
+ *  - ✅ NUEVO: Mientras escribes en el modal, el nombre se refleja en la tabla
+ *    en tiempo real (solo UI). Si cierras sin imprimir, los cambios se ven en
+ *    la grilla hasta que refresques; el backend no cambia.
  *
  * MEJORAS:
  *  - ChangeDetectionStrategy.OnPush para mejor rendimiento.
@@ -67,7 +70,6 @@ import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-num
   ],
   templateUrl: './consulta-tarjeta.component.html',
   styleUrl: './consulta-tarjeta.component.css',
-  // ✅ Estrategia de detección de cambios optimizada
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
@@ -289,7 +291,8 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 
   /**
    * Abre el modal de impresión para la fila seleccionada.
-   * (No actualiza grilla al cerrar: se mantiene comportamiento actual.)
+   * - ✅ Suscribe a `nombreCambiado` del modal para actualizar la grilla EN VIVO.
+   * - No actualiza la grilla al cerrar (se mantiene comportamiento actual).
    */
   public abrirModal(row: Tarjeta): void {
     this.tarjetaSeleccionada = row;
@@ -300,12 +303,37 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
       disableClose: true
     });
 
-    // Preparado para el futuro: afterClosed() sin acción por ahora
+    // 👉 Suscripción a cambios de nombre en tiempo real desde el modal
+    const cmp = ref.componentInstance;
+    if (cmp?.nombreCambiado) {
+      const subNombre = cmp.nombreCambiado.subscribe((nuevoNombre: string) => {
+        this.updateRowName(row.numero, nuevoNombre); // solo UI
+      });
+      // Desuscribir al cerrar el modal
+      const closeSub = ref.afterClosed().pipe(take(1)).subscribe(() => subNombre.unsubscribe());
+      this.subscription.add(subNombre);
+      this.subscription.add(closeSub);
+    }
+
+    // (Listo para uso futuro si quieres manejar el resultado del modal)
     this.subscription.add(ref.afterClosed().pipe(take(1)).subscribe());
   }
 
   /**
+   * Actualiza el nombre de la fila en la tabla (solo UI).
+   * Con OnPush, reasignamos el array para disparar render.
+   */
+  private updateRowName(numero: string, nuevoNombre: string): void {
+    const nueva = this.dataSource.data.map(r =>
+      r.numero === numero ? { ...r, nombre: (nuevoNombre ?? '').toUpperCase() } : r
+    );
+    this.dataSource.data = nueva;  // reasignación => OnPush detecta cambio
+    this.cdr.markForCheck();
+  }
+
+  /**
    * Evento opcional emitido por el modal; mantiene compatibilidad.
+   * (No es necesario si ya usamos la suscripción anterior en abrirModal).
    */
   public onNombreCambiado(nuevoNombre: string): void {
     this.tarjetaSeleccionada.nombre = nuevoNombre;
@@ -354,140 +382,3 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     });
   }
 }
-
-
-
-
-<!--
-  Formulario de agencias (imprime / apertura)
-  - Validación reactiva: requerido, solo números, máx. 3.
-  - Enter en inputs dispara actualizarTabla().
--->
-<form [formGroup]="formularioAgencias" (ngSubmit)="actualizarTabla()">
-  <div class="agencia-info">
-
-    <div class="fila">
-      <span class="titulo">Agencia Imprime:</span>
-
-      <mat-form-field appearance="fill" class="campo-corto">
-        <mat-label>Código</mat-label>
-        <input matInput placeholder="Código " formControlName="codigoAgenciaImprime" (keyup.enter)="actualizarTabla()">
-
-        @if (hasFormControlError('codigoAgenciaImprime', 'required')) {
-          <mat-error>Este campo es requerido.</mat-error>
-        }
-        @if (hasFormControlError('codigoAgenciaImprime', 'pattern')) {
-          <mat-error>Solo números son permitidos.</mat-error>
-        }
-        @if (hasFormControlError('codigoAgenciaImprime', 'maxlength')) {
-          <mat-error>Máximo 3 dígitos.</mat-error>
-        }
-      </mat-form-field>
-
-      <span class="nombre-agencia">
-        {{ getDetalleTarjetasImprimirResponseDto?.agencia?.agenciaImprimeNombre }}
-      </span>
-    </div>
-
-    <div class="fila">
-      <span class="titulo">Agencia Apertura:</span>
-
-      <mat-form-field appearance="fill" class="campo-corto">
-        <mat-label>Código</mat-label>
-        <input matInput placeholder="Código" formControlName="codigoAgenciaApertura" (keyup.enter)="actualizarTabla()">
-
-        @if (hasFormControlError('codigoAgenciaApertura', 'required')) {
-          <mat-error>Este campo es requerido.</mat-error>
-        }
-        @if (hasFormControlError('codigoAgenciaApertura', 'pattern')) {
-          <mat-error>Solo números son permitidos.</mat-error>
-        }
-        @if (hasFormControlError('codigoAgenciaApertura', 'maxlength')) {
-          <mat-error>Máximo 3 dígitos.</mat-error>
-        }
-      </mat-form-field>
-
-      <span class="nombre-agencia">
-        {{ getDetalleTarjetasImprimirResponseDto?.agencia?.agenciaAperturaNombre }}
-      </span>
-    </div>
-
-  </div>
-</form>
-
-<!-- Encabezado -->
-<div class="contenedor-titulo">
-  <mat-card>
-    <mat-card-header>
-      <mat-card-title>Detalle Tarjetas Por Imprimir</mat-card-title>
-    </mat-card-header>
-  </mat-card>
-</div>
-
-<!-- Filtro y botón refrescar -->
-<div class="filtro-tabla">
-  <mat-form-field appearance="fill">
-    <mat-label>Filtro por No. Tarjeta</mat-label>
-    <input matInput (input)="applyFilterFromInput($event, 'numero')" placeholder="Escribe para filtrar">
-  </mat-form-field>
-
-  <button mat-button (click)="recargarDatos()">
-    <mat-icon>refresh</mat-icon>
-    Refrescar
-  </button>
-</div>
-
-<!-- Tabla -->
-<div class="table-container">
-  <mat-table [dataSource]="dataSource" matSort class="mat-elevation-z8">
-
-    <!-- No. de Tarjeta -->
-    <ng-container matColumnDef="numero">
-      <mat-header-cell *matHeaderCellDef>No. de Tarjeta</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">
-        {{ tarjetas.numero | maskCardNumber }}
-      </mat-cell>
-    </ng-container>
-
-    <!-- Nombre en Tarjeta -->
-    <ng-container matColumnDef="nombre">
-      <mat-header-cell *matHeaderCellDef>Nombre en Tarjeta</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">
-        {{ tarjetas.nombre | uppercase }}
-      </mat-cell>
-    </ng-container>
-
-    <!-- Motivo -->
-    <ng-container matColumnDef="motivo">
-      <mat-header-cell *matHeaderCellDef>Motivo</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">
-        {{ tarjetas.motivo }}
-      </mat-cell>
-    </ng-container>
-
-    <!-- Número de Cuenta -->
-    <ng-container matColumnDef="numeroCuenta">
-      <mat-header-cell *matHeaderCellDef>Número de Cuenta</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">
-        {{ tarjetas.numeroCuenta | maskAccountNumber }}
-      </mat-cell>
-    </ng-container>
-
-    <!-- Eliminar -->
-    <ng-container matColumnDef="eliminar">
-      <mat-header-cell *matHeaderCellDef>Eliminar</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">
-        <!-- El click no abre el modal porque se hace stopPropagation en TS -->
-        <mat-icon class="matIcon" (click)="eliminarTarjeta($event, tarjetas.numero)">delete</mat-icon>
-      </mat-cell>
-    </ng-container>
-
-    <!-- Filas -->
-    <mat-header-row *matHeaderRowDef="displayedColumns"></mat-header-row>
-    <mat-row
-      *matRowDef="let row; columns: displayedColumns;"
-      (click)="abrirModal(row)">
-    </mat-row>
-
-  </mat-table>
-</div>
