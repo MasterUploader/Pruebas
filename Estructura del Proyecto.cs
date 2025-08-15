@@ -1,49 +1,89 @@
-<h1 mat-dialog-title> Detalle Tarjeta</h1>
+/* ====== Contenedor base ====== */
+.contenedor{
+  position: relative;           /* <-- Anchor para el overlay */
+  width: 100%;
+  max-width: 520px;             /* ajusta si tu tarjeta es más ancha */
+  margin: 0 auto;
+}
 
-<form [formGroup]="form">
-  <div mat-dialog-content id="contenidoImprimir">
-    <div class="contenedor">
-      <div class="content-imagen-tarjeta">
-        <!-- Siempre 2 filas -->
-        <img src="/assets/Tarjeta3.PNG" alt=" tarjeta" class="imagen-tarjeta no-imprimir">
-      </div>
+/* ====== Imagen de la tarjeta ====== */
+.content-imagen-tarjeta{
+  position: relative;
+  z-index: 1;                   /* debajo del overlay */
+}
 
-      <!-- Siempre dos filas -->
-      <div class="nombre-completo">
-        <div class="nombres">
-          <b>{{ nombres }}</b>
-        </div>
-        <div class="apellidos">
-          <b>{{ apellidos }}</b>
-        </div>
-        <!-- Número de Cuenta -->
-        <div class="cuenta"><b>{{ tarjeta.numeroCuenta | maskAccountNumber }}</b></div>
-      </div>
-    </div>
+.imagen-tarjeta{
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+}
 
-    <div mat-dialog-actions class="action-buttons">
-      <!-- Nombre en tarjeta (reactivo) -->
-      <mat-form-field appearance="fill" class="nombre-input">
-        <mat-label>Nombre:</mat-label>
-        <input
-          placeholder="NOMBRE EN TARJETA"
-          matInput
-          formControlName="nombre"
-          (input)="form.get('nombre')?.setValue((form.get('nombre')?.value || '').toUpperCase(), { emitEvent: true })"
-          maxlength="40"
-          autocomplete="off" />
+/* ====== Overlay de texto (nombres / apellidos / cuenta) ====== */
+.nombre-completo{
+  position: absolute;
+  left: 10%;                    /* ajusta según tu arte */
+  right: 10%;
+  bottom: 18%;                  /* coloca el bloque cerca de la parte baja */
+  z-index: 2;                   /* encima de la imagen */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;         /* evita robar clics al mover el mouse */
+}
 
-        <mat-hint align="end">{{ (form.get('nombre')?.value?.length || 0) }}/40</mat-hint>
+/* Estilos del texto (ajusta tamaños a tu gusto/arte) */
+.nombre-completo .nombres,
+.nombre-completo .apellidos{
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.1;
+  letter-spacing: 0.8px;
+  color: #000;                  /* si tu arte es oscuro, cambia a #fff */
+  text-transform: uppercase;
+  /* Para mejorar contraste sobre fondos ocupados */
+  text-shadow: 0 0 1px rgba(255,255,255,.6);
+}
 
-        @if (nombreError) {
-          <mat-error>{{ nombreError }}</mat-error>
-        }
-      </mat-form-field>
+.nombre-completo .cuenta{
+  margin-top: 8px;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #000;                  /* cambia a #fff si el fondo es oscuro */
+  text-shadow: 0 0 1px rgba(255,255,255,.6);
+}
 
-      <!-- Botones -->
-      <button mat-button class="imprimir-btn" (click)="imprimir(tarjeta)">Imprimir</button>
-      <span class="spacer"></span>
-      <button mat-button class="cerrar-btn" (click)="cerrarModal()" [mat-dialog-close]="true">Cerrar</button>
-    </div>
-  </div>
-</form>
+/* ====== Barra de acciones / campo ====== */
+.action-buttons{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.action-buttons .spacer{ flex: 1 1 auto; }
+.nombre-input{ width: 100%; }
+
+/* ====== Impresión ====== */
+@media print{
+  /* Oculta la imagen para imprimir solo el texto en la tarjeta física */
+  .no-imprimir{ display: none !important; }
+
+  /* Quita márgenes/sombras del diálogo al imprimir */
+  .mat-dialog-container{
+    box-shadow: none !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  /* Asegura buena reproducción de color del texto */
+  body{
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Mantén el overlay en su sitio al imprimir */
+  .contenedor{ position: relative !important; }
+  .nombre-completo{ position: absolute !important; }
+}
