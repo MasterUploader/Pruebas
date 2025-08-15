@@ -1,18 +1,30 @@
 import { Component, Input, Output, OnInit, Inject, EventEmitter, ChangeDetectorRef, OnDestroy } from '@angular/core';
-import { MatInputModule } from '@angular/material/input';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators, ValidatorFn, AbstractControl, ValidationErrors } from '@angular/forms';
-import { MatSnackBar } from '@angular/material/snack-bar';
 import { MAT_DIALOG_DATA, MatDialogRef, MatDialogModule } from '@angular/material/dialog';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
+import { MatButtonModule } from '@angular/material/button';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { Subscription, take } from 'rxjs';
+
 import { Tarjeta } from '../../../../core/models/tarjeta.model';
 import { ImpresionService } from '../../../../core/services/impresion.service';
 import { TarjetaService } from '../../../../core/services/tarjeta.service';
 import { AuthService } from '../../../../core/services/auth.service';
 import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-number.pipe';
-import { Subscription, take } from 'rxjs';
 
 @Component({
   selector: 'app-modal-tarjeta',
-  imports: [MatDialogModule, MatInputModule, ReactiveFormsModule, MaskAccountNumberPipe],
+  // Este componente usa "imports" (estilo standalone) para sus templates
+  imports: [
+    MatDialogModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatButtonModule,
+    MatSnackBarModule,
+    ReactiveFormsModule,
+    MaskAccountNumberPipe
+  ],
   templateUrl: './modal-tarjeta.component.html',
   styleUrl: './modal-tarjeta.component.css'
 })
@@ -31,10 +43,10 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     numeroCuenta: ''
   };
 
-  // Solo un FormGroup (nombre). El diseño es fijo: 2 filas
+  // Form reactivo (diseño fijo: 2 filas)
   form!: FormGroup;
 
-  // Para la vista (línea 1 y 2)
+  // Vista (dos líneas)
   nombres: string = '';
   apellidos: string = '';
   usuarioICBS: string = '';
@@ -67,7 +79,7 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     );
 
     // FormGroup con reglas:
-    // - required
+    // - requerido
     // - solo letras/espacios en MAYÚSCULAS
     // - máximo 40
     // - al menos dos palabras (dos nombres)
@@ -108,12 +120,12 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
 
   // ====== Validadores y helpers ======
 
-  /** Valida que existan al menos dos palabras (separadas por espacio). */
+  /** Valida que existan al menos dos palabras; si está vacío, permite que 'required' sea el que dispare. */
   private minTwoWords(): ValidatorFn {
     return (control: AbstractControl): ValidationErrors | null => {
-      const raw = (control.value ?? '').toString().trim().replace(/\s+/g, ' ');
-      const cleaned = this.normalizarNombre(raw);
-      const words = cleaned.split(' ').filter(w => w.length > 0);
+      const raw = (control.value ?? '').toString().trim();
+      if (!raw) return null; // deja que 'required' maneje vacío
+      const words = this.normalizarNombre(raw).split(/\s+/).filter(Boolean);
       return words.length >= 2 ? null : { twoWords: true };
     };
   }
@@ -125,7 +137,7 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     return out;
   }
 
-  /** Calcula 2 líneas (máx 20 c/u) sin cortar palabras. */
+  /** Calcula 2 líneas (máx 20 c/u) sin cortar palabras; si no cabe, prioriza no cortar. */
   private computeTwoLines(full: string): { line1: string; line2: string } {
     const MAX = 20;
     const tokens = (full ?? '').split(' ').filter(Boolean);
@@ -135,16 +147,16 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
 
     for (const t of tokens) {
       // Intenta agregar a línea 1
-      if (line1.length === 0 ? t.length <= MAX : (line1.length + 1 + t.length) <= MAX) {
+      if ((line1.length === 0 && t.length <= MAX) || (line1.length > 0 && (line1.length + 1 + t.length) <= MAX)) {
         line1 = line1.length ? `${line1} ${t}` : t;
         continue;
       }
       // Intenta agregar a línea 2
-      if (line2.length === 0 ? t.length <= MAX : (line2.length + 1 + t.length) <= MAX) {
+      if ((line2.length === 0 && t.length <= MAX) || (line2.length > 0 && (line2.length + 1 + t.length) <= MAX)) {
         line2 = line2.length ? `${line2} ${t}` : t;
         continue;
       }
-      // Si ya no cabe (caso raro por maxLength 40), lo agregamos a la 2 (puede exceder)
+      // Caso límite: excedería 20 en la línea 2 → lo agregamos completo (sin cortar)
       line2 = line2.length ? `${line2} ${t}` : t;
     }
 
@@ -164,6 +176,17 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.nombreCambiado.emit(this.nombreMandar);
   }
 
+  /** Mensaje único de error para el mat-error. */
+  get nombreError(): string | null {
+    const c = this.form.get('nombre');
+    if (!c || !c.touched) return null;
+    if (c.hasError('required'))  return 'El nombre es obligatorio.';
+    if (c.hasError('twoWords'))  return 'Debe ingresar al menos dos nombres.';
+    if (c.hasError('maxlength')) return 'El nombre no puede exceder 40 caracteres.';
+    if (c.hasError('pattern'))   return 'Solo se permiten letras y espacios en mayúsculas.';
+    return null;
+  }
+
   // ====== Acción principal ======
 
   imprimir(datosParaImprimir: Tarjeta): void {
@@ -172,14 +195,12 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
       nombreCtrl.markAsTouched();
       nombreCtrl.updateValueAndValidity();
 
-      const msg =
-        nombreCtrl.hasError('required')  ? 'No puedes imprimir porque el nombre está vacío.' :
-        nombreCtrl.hasError('twoWords')  ? 'Debe ingresar al menos dos nombres.' :
-        nombreCtrl.hasError('maxlength') ? 'El nombre no puede exceder 40 caracteres.' :
-        nombreCtrl.hasError('pattern')   ? 'Solo se permiten letras y espacios en mayúsculas.' :
-        'El nombre no es válido.';
-
-      this.snackBar.open(msg, 'Cerrar', { duration: 3500 });
+      const msg = this.nombreError ?? 'El nombre no es válido.';
+      this.snackBar.open(msg, 'Cerrar', {
+        duration: 3500,
+        verticalPosition: 'top',
+        horizontalPosition: 'center'
+      });
       return;
     }
 
@@ -196,7 +217,7 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
             this.imprime = !!respuesta.imprime;
 
             if (!this.imprime) {
-              // Siempre 2 filas -> false (en tu ImpresionService: true = 1 fila, false = 2 filas)
+              // Siempre 2 filas → false (en tu servicio: true=1 fila, false=2 filas)
               const tipoDiseno = false;
 
               const ok = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseno);
@@ -253,11 +274,12 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     </div>
 
     <div mat-dialog-actions class="action-buttons">
+
       <!-- Nombre en tarjeta (reactivo) -->
       <mat-form-field appearance="fill" class="nombre-input">
         <mat-label>Nombre:</mat-label>
         <input
-          placeholder="Nombre en Tarjeta"
+          placeholder="NOMBRE EN TARJETA"
           matInput
           formControlName="nombre"
           (input)="form.get('nombre')?.setValue((form.get('nombre')?.value || '').toUpperCase(), { emitEvent: true })"
@@ -266,17 +288,8 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
 
         <mat-hint align="end">{{ (form.get('nombre')?.value?.length || 0) }}/40</mat-hint>
 
-        @if (form.get('nombre')?.hasError('required') && form.get('nombre')?.touched) {
-          <mat-error>El nombre es obligatorio.</mat-error>
-        }
-        @if (form.get('nombre')?.hasError('twoWords') && form.get('nombre')?.touched) {
-          <mat-error>Debe ingresar al menos dos nombres.</mat-error>
-        }
-        @if (form.get('nombre')?.hasError('maxlength') && form.get('nombre')?.touched) {
-          <mat-error>El nombre no puede exceder 40 caracteres.</mat-error>
-        }
-        @if (form.get('nombre')?.hasError('pattern') && form.get('nombre')?.touched) {
-          <mat-error>Solo letras y espacios en mayúsculas.</mat-error>
+        @if (nombreError) {
+          <mat-error>{{ nombreError }}</mat-error>
         }
       </mat-form-field>
 
