@@ -31,6 +31,16 @@
  *  - Mantiene OnPush, filtros, modal y actualización de nombre en vivo (solo UI).
  * -----------------------------------------------------------------------------
  */
+/**
+ * ConsultaTarjetaComponent (OnPush)
+ * -----------------------------------------------------------------------------
+ * - Overlay "Cargando..." con mat-progress-spinner para:
+ *   1) carga automática inicial, 2) Enter en los campos, 3) botón Refrescar.
+ * - Snackbar (ventana flotante) cuando el API no devuelve datos.
+ * - Mantiene: OnPush, filtro, solo 3 dígitos en agencias, nombre en vivo desde modal,
+ *   flujo heredado de eliminar (UI + guardaEstadoImpresion).
+ * -----------------------------------------------------------------------------
+ */
 
 import {
   Component,
@@ -52,12 +62,14 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatSortModule, MatSort } from '@angular/material/sort';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 
 // Forms
 import { ReactiveFormsModule, FormGroup, FormBuilder, Validators, FormControl } from '@angular/forms';
 
 // RxJS
-import { Subscription, take } from 'rxjs';
+import { Subscription, take, finalize } from 'rxjs';
 
 // Servicios / modelos
 import { TarjetaService } from '../../../../core/services/tarjeta.service';
@@ -66,7 +78,7 @@ import { GetDetalleTarjetasImprimirResponseDto } from '../../../../core/models/g
 import { ModalTarjetaComponent } from '../modal-tarjeta/modal-tarjeta.component';
 import { AuthService } from '../../../../core/services/auth.service';
 
-// Pipes standalone usados en el template
+// Pipes standalone
 import { MaskCardNumberPipe } from '../../../../shared/pipes/mask-card-number.pipe';
 import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-number.pipe';
 
@@ -76,6 +88,7 @@ import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-num
     CommonModule, MatCardModule, MatDialogModule, MatTableModule,
     MatFormFieldModule, ReactiveFormsModule, MatInputModule,
     MatIconModule, MatSortModule, MatMenuModule, MatButtonModule,
+    MatProgressSpinnerModule, MatSnackBarModule,
     MaskCardNumberPipe, MaskAccountNumberPipe
   ],
   templateUrl: './consulta-tarjeta.component.html',
@@ -108,8 +121,11 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     motivo: '', numeroCuenta: ''
   };
 
-  /** Mensaje cuando el servicio no devuelve data. */
+  /** Mensaje en banner cuando no hay data (se mantiene) */
   public noDataMessage: string | null = null;
+
+  /** Overlay de carga */
+  public isLoading = false;
 
   public getDetalleTarjetasImprimirResponseDto!: GetDetalleTarjetasImprimirResponseDto;
 
@@ -120,7 +136,8 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     private readonly datosTarjetaServices: TarjetaService,
     private readonly dialog: MatDialog,
     private readonly cdr: ChangeDetectorRef,
-    private readonly fb: FormBuilder
+    private readonly fb: FormBuilder,
+    private readonly snackBar: MatSnackBar
   ) {
     this.configurarFiltros();
   }
@@ -139,7 +156,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
       })
     });
 
-    // Valores desde la sesión + consulta inicial
+    // Valores desde la sesión + consulta inicial (con overlay)
     this.withActiveSession(() => {
       const ad = this.authService.currentUserValue?.activeDirectoryData;
       this.usuarioICBS = ad?.usuarioICBS ?? '';
@@ -148,9 +165,8 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
       const codigoAgenciaApertura = ad?.agenciaAperturaCodigo ?? '';
 
       this.formularioAgencias.patchValue({ codigoAgenciaImprime, codigoAgenciaApertura });
-      // Limpiar mensaje previo
       this.noDataMessage = null;
-      this.consultarMicroservicio(codigoAgenciaImprime, codigoAgenciaApertura);
+      this.consultarMicroservicio(codigoAgenciaImprime, codigoAgenciaApertura, /*showLoading=*/true);
       this.setSort();
     });
   }
@@ -182,6 +198,20 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
   }
 
+  private setLoading(flag: boolean): void {
+    this.isLoading = flag;
+    this.cdr.markForCheck();
+  }
+
+  private showSnack(message: string): void {
+    this.snackBar.dismiss();
+    this.snackBar.open(message, 'Cerrar', {
+      duration: 4000,
+      verticalPosition: 'top',
+      horizontalPosition: 'center'
+    });
+  }
+
   // ───────── Filtro de tabla ─────────
   private configurarFiltros(): void {
     this.dataSource.filterPredicate = (data: Tarjeta, raw: string): boolean => {
@@ -207,26 +237,42 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
   }
 
   // ───────── Consultas / Acciones ─────────
-  private consultarMicroservicio(codigoAgenciaImprime: string, codigoAgenciaApertura: string): void {
+  /**
+   * Consulta el microservicio con BIN + códigos. Muestra overlay si `showLoading` es true.
+   */
+  private consultarMicroservicio(
+    codigoAgenciaImprime: string,
+    codigoAgenciaApertura: string,
+    showLoading = true
+  ): void {
+    if (showLoading) this.setLoading(true);
+
     this.datosTarjetaServices
       .obtenerDatosTarjeta(this.BIN, codigoAgenciaImprime, codigoAgenciaApertura)
-      .pipe(take(1))
+      .pipe(
+        take(1),
+        finalize(() => { if (showLoading) this.setLoading(false); })
+      )
       .subscribe({
         next: (response) => {
           this.dataSource.data = response.tarjetas;
 
-          // Mensaje cuando no hay data
           const sinTarjetas = !response?.tarjetas?.length;
           this.noDataMessage = sinTarjetas
             ? `No hay datos para esa Agencia de apertura ${codigoAgenciaApertura} y Agencia de impresión ${codigoAgenciaImprime}.`
             : null;
+
+          // Ventana flotante si no hay data
+          if (sinTarjetas) {
+            this.showSnack(this.noDataMessage!);
+          }
 
           this.setAgenciasFromResponse(response);
           this.cdr.markForCheck();
         },
         error: (error) => {
           console.error('Error al consultar el microservicio', error);
-          // Si hubo error, no sobreescribimos noDataMessage con un falso positivo
+          this.showSnack('Ocurrió un error al consultar los datos. Intenta nuevamente.');
         }
       });
   }
@@ -239,13 +285,13 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     this.withActiveSession(() => {
       const agenciaImprimeCodigo  = this.formularioAgencias.get('codigoAgenciaImprime')?.value ?? '';
       const agenciaAperturaCodigo = this.formularioAgencias.get('codigoAgenciaApertura')?.value ?? '';
-      this.noDataMessage = null; // limpiar antes de consultar
-      this.consultarMicroservicio(agenciaImprimeCodigo, agenciaAperturaCodigo);
+      this.noDataMessage = null;
+      this.consultarMicroservicio(agenciaImprimeCodigo, agenciaAperturaCodigo, /*showLoading=*/true);
     });
   }
 
   public recargarDatos(): void {
-    this.actualizarTabla();
+    this.actualizarTabla(); // también muestra overlay
   }
 
   // ───────── Modal / nombre en vivo ─────────
@@ -295,8 +341,6 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
   }
 
   // ───────── Solo 3 dígitos: handlers de input ─────────
-
-  /** Permite teclas de control (borrar, flechas, tab, combinaciones Ctrl/Cmd). */
   private isControlKey(e: KeyboardEvent): boolean {
     const k = e.key;
     const ctrl = e.ctrlKey || e.metaKey;
@@ -307,38 +351,21 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     );
   }
 
-  /**
-   * keydown: bloquea cualquier char que no sea dígito y evita exceder 3.
-   * Considera selección: si hay texto seleccionado, permite reemplazarlo.
-   */
   public onKeyDownDigits(e: KeyboardEvent, controlName: 'codigoAgenciaImprime' | 'codigoAgenciaApertura'): void {
     if (this.isControlKey(e)) return;
-
     const input = e.target as HTMLInputElement;
     const key = e.key;
 
-    // Bloquear si no es dígito 0-9
-    if (!/^\d$/.test(key)) {
-      e.preventDefault();
-      return;
-    }
+    if (!/^\d$/.test(key)) { e.preventDefault(); return; }
 
-    // Longitud resultante tras reemplazar la selección
     const selStart = input.selectionStart ?? input.value.length;
     const selEnd = input.selectionEnd ?? input.value.length;
     const selected = Math.max(0, selEnd - selStart);
     const currentLen = (input.value ?? '').length;
-    const resultingLen = currentLen - selected + 1; // +1 por el dígito tecleado
-
-    if (resultingLen > this.MAX_DIGITS) {
-      e.preventDefault();
-      return;
-    }
+    const resultingLen = currentLen - selected + 1;
+    if (resultingLen > this.MAX_DIGITS) { e.preventDefault(); }
   }
 
-  /**
-   * paste: sanea a dígitos y recorta a 3 según la selección actual.
-   */
   public onPasteDigits(e: ClipboardEvent, controlName: 'codigoAgenciaImprime' | 'codigoAgenciaApertura'): void {
     e.preventDefault();
     const input = e.target as HTMLInputElement;
@@ -357,9 +384,6 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
   }
 
-  /**
-   * input: red de seguridad. Limpia no-dígitos y recorta a 3 si algo se coló.
-   */
   public onInputSanitize(controlName: 'codigoAgenciaImprime' | 'codigoAgenciaApertura'): void {
     const ctrl = this.formularioAgencias.get(controlName);
     const raw = String(ctrl?.value ?? '');
@@ -395,12 +419,26 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 }
 
 
-
+<!-- Overlay de cargando (aparece en las 3 vías de consulta) -->
+@if (isLoading) {
+  <div class="loading-overlay" style="
+    position: fixed; inset: 0; background: rgba(0,0,0,.35);
+    display: grid; place-items: center; z-index: 1000;">
+    <div style="
+      background: #fff; padding: 24px 28px; border-radius: 12px;
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);">
+      <mat-progress-spinner mode="indeterminate" [diameter]="56"></mat-progress-spinner>
+      <div style="font-weight:600;">Cargando…</div>
+    </div>
+  </div>
+}
 
 <!--
   Campos de agencia:
   - Hint 3/3 y validaciones.
   - Solo 3 dígitos: handlers (keydown/paste/input) + maxlength + inputmode.
+  - Enter envia la consulta ⇒ muestra overlay automáticamente.
 -->
 <form [formGroup]="formularioAgencias" (ngSubmit)="actualizarTabla()">
   <div class="agencia-info">
@@ -482,7 +520,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
   </div>
 </form>
 
-<!-- Mensaje cuando no hay data -->
+<!-- Banner cuando no hay data (además del snackbar flotante) -->
 @if (noDataMessage) {
   <div class="alerta-sin-datos" style="margin: 8px 0; display:flex; align-items:center; gap:8px; color:#b00020;">
     <mat-icon color="warn">error</mat-icon>
@@ -499,7 +537,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
   </mat-card>
 </div>
 
-<!-- Filtro y botón refrescar -->
+<!-- Filtro y botón refrescar (también muestra overlay en la consulta) -->
 <div class="filtro-tabla">
   <mat-form-field appearance="fill">
     <mat-label>Filtro por No. Tarjeta</mat-label>
