@@ -359,6 +359,12 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 
 
 
+
+
+
+
+
+
 /**
  * ModalTarjetaComponent (OnPush)
  * -----------------------------------------------------------------------------
@@ -527,6 +533,9 @@ export class ModalTarjetaComponent {
     this.dialogRef.close({ printed: true });
   }
 }
+
+
+
 
 
 
