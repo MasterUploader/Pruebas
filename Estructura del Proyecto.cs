@@ -1,175 +1,14 @@
-<!-- Overlay de CARGANDO -->
-@if (isLoading) {
-  <div class="loading-overlay" style="position: fixed; inset: 0; background: rgba(0,0,0,.35);
-       display: grid; place-items: center; z-index: 1000;">
-    <div style="background: #fff; padding: 24px 28px; border-radius: 12px;
-         display: flex; flex-direction: column; align-items: center; gap: 12px;
-         box-shadow: 0 10px 30px rgba(0,0,0,.25);">
-      <mat-progress-spinner mode="indeterminate" [diameter]="56"></mat-progress-spinner>
-      <div style="font-weight:600;">Cargando…</div>
-    </div>
-  </div>
-}
-
-<!-- Form de agencias: hints, validación y handlers de 3 dígitos -->
-<form [formGroup]="formularioAgencias" (ngSubmit)="actualizarTabla()">
-  <div class="agencia-info">
-
-    <div class="fila">
-      <span class="titulo">Agencia Imprime:</span>
-
-      <mat-form-field appearance="fill" class="campo-corto">
-        <mat-label>Código</mat-label>
-        <input
-          matInput placeholder="Código" formControlName="codigoAgenciaImprime"
-          autocomplete="off" inputmode="numeric" pattern="[0-9]*" maxlength="3"
-          (keydown)="onKeyDownDigits($event, 'codigoAgenciaImprime')"
-          (paste)="onPasteDigits($event, 'codigoAgenciaImprime')"
-          (input)="onInputSanitize('codigoAgenciaImprime')"
-          (keyup.enter)="actualizarTabla()"
-        />
-        <mat-hint align="end">{{ (formularioAgencias.get('codigoAgenciaImprime')?.value?.length || 0) }}/3</mat-hint>
-
-        @if (hasFormControlError('codigoAgenciaImprime', 'required')) { <mat-error>Este campo es requerido.</mat-error> }
-        @if (hasFormControlError('codigoAgenciaImprime', 'pattern'))  { <mat-error>Solo números son permitidos.</mat-error> }
-        @if (hasFormControlError('codigoAgenciaImprime', 'maxlength')){ <mat-error>Máximo 3 dígitos.</mat-error> }
-      </mat-form-field>
-
-      <span class="nombre-agencia">
-        {{ getDetalleTarjetasImprimirResponseDto?.agencia?.agenciaImprimeNombre }}
-      </span>
-    </div>
-
-    <div class="fila">
-      <span class="titulo">Agencia Apertura:</span>
-
-      <mat-form-field appearance="fill" class="campo-corto">
-        <mat-label>Código</mat-label>
-        <input
-          matInput placeholder="Código" formControlName="codigoAgenciaApertura"
-          autocomplete="off" inputmode="numeric" pattern="[0-9]*" maxlength="3"
-          (keydown)="onKeyDownDigits($event, 'codigoAgenciaApertura')"
-          (paste)="onPasteDigits($event, 'codigoAgenciaApertura')"
-          (input)="onInputSanitize('codigoAgenciaApertura')"
-          (keyup.enter)="actualizarTabla()"
-        />
-        <mat-hint align="end">{{ (formularioAgencias.get('codigoAgenciaApertura')?.value?.length || 0) }}/3</mat-hint>
-
-        @if (hasFormControlError('codigoAgenciaApertura', 'required')) { <mat-error>Este campo es requerido.</mat-error> }
-        @if (hasFormControlError('codigoAgenciaApertura', 'pattern'))  { <mat-error>Solo números son permitidos.</mat-error> }
-        @if (hasFormControlError('codigoAgenciaApertura', 'maxlength')){ <mat-error>Máximo 3 dígitos.</mat-error> }
-      </mat-form-field>
-
-      <span class="nombre-agencia">
-        {{ getDetalleTarjetasImprimirResponseDto?.agencia?.agenciaAperturaNombre }}
-      </span>
-    </div>
-
-  </div>
-</form>
-
-<!-- Banner adicional cuando no hay data -->
-@if (noDataMessage) {
-  <div class="alerta-sin-datos" style="margin: 8px 0; display:flex; align-items:center; gap:8px; color:#b00020;">
-    <mat-icon color="warn">error</mat-icon>
-    <span>{{ noDataMessage }}</span>
-  </div>
-}
-
-<!-- Encabezado -->
-<div class="contenedor-titulo">
-  <mat-card>
-    <mat-card-header>
-      <mat-card-title>Detalle Tarjetas Por Imprimir</mat-card-title>
-    </mat-card-header>
-  </mat-card>
-</div>
-
-<!-- Filtro y botón refrescar -->
-<div class="filtro-tabla">
-  <mat-form-field appearance="fill">
-    <mat-label>Filtro por No. Tarjeta</mat-label>
-    <input matInput (input)="applyFilterFromInput($event, 'numero')" placeholder="Escribe para filtrar" />
-  </mat-form-field>
-
-  <button mat-button (click)="recargarDatos()">
-    <mat-icon>refresh</mat-icon>
-    Refrescar
-  </button>
-</div>
-
-<!-- Tabla -->
-<div class="table-container">
-  <mat-table [dataSource]="dataSource" matSort class="mat-elevation-z8">
-
-    <ng-container matColumnDef="numero">
-      <mat-header-cell *matHeaderCellDef>No. de Tarjeta</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">{{ tarjetas.numero | maskCardNumber }}</mat-cell>
-    </ng-container>
-
-    <ng-container matColumnDef="nombre">
-      <mat-header-cell *matHeaderCellDef>Nombre en Tarjeta</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">{{ tarjetas.nombre | uppercase }}</mat-cell>
-    </ng-container>
-
-    <ng-container matColumnDef="motivo">
-      <mat-header-cell *matHeaderCellDef>Motivo</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">{{ tarjetas.motivo }}</mat-cell>
-    </ng-container>
-
-    <ng-container matColumnDef="numeroCuenta">
-      <mat-header-cell *matHeaderCellDef>Número de Cuenta</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">{{ tarjetas.numeroCuenta | maskAccountNumber }}</mat-cell>
-    </ng-container>
-
-    <!-- Botón Eliminar accesible -->
-    <ng-container matColumnDef="eliminar">
-      <mat-header-cell *matHeaderCellDef>Eliminar</mat-header-cell>
-      <mat-cell *matCellDef="let tarjetas">
-        <button
-          mat-icon-button
-          type="button"
-          aria-label="Eliminar"
-          (click)="eliminarTarjeta($event, tarjetas.numero)">
-          <mat-icon>delete</mat-icon>
-        </button>
-      </mat-cell>
-    </ng-container>
-
-    <mat-header-row *matHeaderRowDef="displayedColumns"></mat-header-row>
-
-    <!-- Fila accesible por teclado: Enter/Espacio abre modal -->
-    <mat-row
-      *matRowDef="let row; columns: displayedColumns;"
-      (click)="abrirModal(row)"
-      (keydown.enter)="onRowKeyOpen($event, row)"
-      (keydown.space)="onRowKeyOpen($event, row)"
-      tabindex="0"
-      [attr.aria-label]="'Abrir modal de la tarjeta ' + (row?.numero || '')">
-    </mat-row>
-
-  </mat-table>
-</div>
-
-
-
 /**
  * ConsultaTarjetaComponent (OnPush)
  * -----------------------------------------------------------------------------
- * - Overlay de carga (spinner) para las 3 vías de consulta.
- * - Snackbar cuando el API no devuelve datos.
- * - Validación de agencias: solo 3 dígitos (keydown/paste/input).
- * - Accesibilidad: fila abre modal con Enter/Espacio; botón Eliminar es <button>.
- * - Actualización en vivo del nombre desde el modal (solo UI).
+ * NUEVO: snackbar de ÉXITO cuando se marca la tarjeta como impresa (icono eliminar).
+ * Se conservan: overlay de carga, snackbar "sin datos", validación 3 dígitos,
+ * accesibilidad, filtro, actualización en vivo del nombre desde el modal.
  * -----------------------------------------------------------------------------
  */
 
 import {
-  Component,
-  OnInit,
-  ChangeDetectorRef,
-  ViewChild,
-  OnDestroy,
+  Component, OnInit, ChangeDetectorRef, ViewChild, OnDestroy,
   ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -219,33 +58,33 @@ import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-num
 })
 export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 
-  // ───────── Configuración / Constantes ─────────
+  // ===== Configuración =====
   private readonly BIN = '411052';
   private readonly MAX_DIGITS = 3;
   private readonly ONLY_DIGITS_RE = /^\d+$/;
 
-  // ───────── Material Table ─────────
+  // ===== Table / Sort =====
   @ViewChild(MatSort, { static: true }) sort!: MatSort;
   public readonly dataSource = new MatTableDataSource<Tarjeta>([]);
   public readonly displayedColumns: ReadonlyArray<string> =
     ['numero', 'nombre', 'motivo', 'numeroCuenta', 'eliminar'];
 
-  // ───────── Form ─────────
+  // ===== Form =====
   public formularioAgencias!: FormGroup<{
     codigoAgenciaImprime: FormControl<string>;
     codigoAgenciaApertura: FormControl<string>;
   }>;
 
-  // ───────── Estado UI ─────────
+  // ===== Estado UI =====
   public activateFilter = '';
   public usuarioICBS = '';
   public tarjetaSeleccionada: Tarjeta = {
     nombre: '', numero: '', fechaEmision: '', fechaVencimiento: '',
     motivo: '', numeroCuenta: ''
   };
-  /** Banner adicional cuando no hay data (además del snackbar). */
+  /** Banner bajo el formulario cuando no hay data. */
   public noDataMessage: string | null = null;
-  /** Overlay de carga. */
+  /** Overlay de “Cargando…”. */
   public isLoading = false;
 
   public getDetalleTarjetasImprimirResponseDto!: GetDetalleTarjetasImprimirResponseDto;
@@ -261,7 +100,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     private readonly snackBar: MatSnackBar
   ) { this.configurarFiltros(); }
 
-  // ───────── Ciclo de vida ─────────
+  // ===== Ciclo de vida =====
   ngOnInit(): void {
     // Form con validación: requerido + solo dígitos + máx 3
     this.formularioAgencias = this.fb.group({
@@ -275,7 +114,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
       })
     });
 
-    // Valores desde la sesión + consulta inicial (con overlay)
+    // Carga inicial (con spinner)
     this.withActiveSession(() => {
       const ad = this.authService.currentUserValue?.activeDirectoryData;
       this.usuarioICBS = ad?.usuarioICBS ?? '';
@@ -292,7 +131,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void { this.subscription.unsubscribe(); }
 
-  // ───────── Helpers infra ─────────
+  // ===== Infra =====
   private withActiveSession(action: () => void): void {
     this.subscription.add(
       this.authService.sessionActive$.pipe(take(1)).subscribe(isActive => {
@@ -315,6 +154,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 
   private setLoading(flag: boolean): void { this.isLoading = flag; this.cdr.markForCheck(); }
 
+  /** Snackbar genérico (info/error). */
   private showSnack(message: string): void {
     this.snackBar.dismiss();
     this.snackBar.open(message, 'Cerrar', {
@@ -322,7 +162,12 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     });
   }
 
-  // ───────── Filtro de tabla ─────────
+  /** Snackbar de éxito (visual igual; separo método por claridad). */
+  private showSnackOk(message: string): void {
+    this.showSnack(message);
+  }
+
+  // ===== Filtro tabla =====
   private configurarFiltros(): void {
     this.dataSource.filterPredicate = (data: Tarjeta, raw: string): boolean => {
       if (!raw) return true;
@@ -343,7 +188,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     this.dataSource.filter = this.activateFilter;
   }
 
-  // ───────── Consultas ─────────
+  // ===== Consultas =====
   private consultarMicroservicio(codigoAgenciaImprime: string, codigoAgenciaApertura: string, showLoading = true): void {
     if (showLoading) this.setLoading(true);
 
@@ -363,8 +208,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
           this.setAgenciasFromResponse(response);
           this.cdr.markForCheck();
         },
-        error: (error) => {
-          console.error('Error al consultar el microservicio', error);
+        error: () => {
           this.showSnack('Ocurrió un error al consultar los datos. Intenta nuevamente.');
         }
       });
@@ -385,7 +229,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 
   public recargarDatos(): void { this.actualizarTabla(); }
 
-  // ───────── Modal / nombre en vivo ─────────
+  // ===== Modal / nombre en vivo =====
   public abrirModal(row: Tarjeta): void {
     this.tarjetaSeleccionada = row;
 
@@ -393,7 +237,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
       data: row, width: '720px', disableClose: true
     });
 
-    // Reflejar nombre en la grilla mientras se escribe en el modal (solo UI)
+    // Reflejar nombre en grilla mientras se escribe en el modal (solo UI)
     const cmp = ref.componentInstance;
     if (cmp?.nombreCambiado) {
       const subNombre = cmp.nombreCambiado.subscribe((nuevoNombre: string) =>
@@ -407,9 +251,9 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     this.subscription.add(ref.afterClosed().pipe(take(1)).subscribe());
   }
 
-  /** Accesibilidad: abrir modal con teclado (Enter/Espacio) desde la fila. */
+  /** Accesibilidad: Enter/Espacio abren el modal desde la fila. */
   public onRowKeyOpen(e: Event, row: Tarjeta): void {
-    e.preventDefault();      // evita scroll cuando se usa Space
+    e.preventDefault(); // evita scroll con Space
     this.abrirModal(row);
   }
 
@@ -421,12 +265,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
   }
 
-  public onNombreCambiado(nuevoNombre: string): void {
-    this.tarjetaSeleccionada.nombre = nuevoNombre;
-    this.cdr.markForCheck();
-  }
-
-  // ───────── Validación visual de form ─────────
+  // ===== Validación visual de form =====
   public hasFormControlError(
     controlName: keyof ConsultaTarjetaComponent['formularioAgencias']['controls'],
     errorName: string
@@ -435,7 +274,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     return !!control && control.touched && control.hasError(errorName);
   }
 
-  // ───────── Solo 3 dígitos: handlers ─────────
+  // ===== Solo 3 dígitos: handlers =====
   private isControlKey(e: KeyboardEvent): boolean {
     const k = e.key; const ctrl = e.ctrlKey || e.metaKey;
     return (k === 'Backspace' || k === 'Delete' || k === 'ArrowLeft' || k === 'ArrowRight' ||
@@ -481,10 +320,11 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     if (clean !== raw) { ctrl?.setValue(clean, { emitEvent: false }); this.cdr.markForCheck(); }
   }
 
-  // ───────── Eliminar (click o teclado en <button>) ─────────
+  // ===== Eliminar (marcar impresa) =====
   public eliminarTarjeta(event: Event, numeroTarjeta: string): void {
     event.stopPropagation();
-    // Calcula el nombre una sola vez, evitando optional chaining innecesario.
+
+    // Calcula el nombre una sola vez
     const seleccionado = this.tarjetaSeleccionada.nombre;
     const encontrado = this.dataSource.data.find(x => x.numero === numeroTarjeta)?.nombre;
     const nombreParaRegistrar = (seleccionado || encontrado || '').toUpperCase();
@@ -494,14 +334,241 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
       this.dataSource.data = this.dataSource.data.filter(item => item.numero !== numeroTarjeta);
       this.cdr.markForCheck();
 
-      // Registrar estado de impresión
+      // Registrar como impresa en backend
       this.datosTarjetaServices
         .guardaEstadoImpresion(numeroTarjeta, this.usuarioICBS, nombreParaRegistrar)
         .pipe(take(1))
         .subscribe({
-          next: () => { /* sin acciones extra: flujo actual */ },
-          error: (error) => console.error('Error al registrar impresión', error)
+          // ✅ Snackbar de ÉXITO
+          next: () => this.showSnackOk('Tarjeta marcada como impresa.'),
+          // (mantenemos el snack de error genérico si falla)
+          error: () => this.showSnack('No se pudo registrar la impresión. Intenta de nuevo.')
         });
     });
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ModalTarjetaComponent (OnPush)
+ * -----------------------------------------------------------------------------
+ * NUEVO: snackbar de ÉXITO cuando la impresión se envía (validaciones OK).
+ * Sigue permitiendo hacer click en "Imprimir" aunque esté inválido; en ese caso,
+ * NO imprime y muestra mensajes de error + snackbar de validación.
+ * Validaciones:
+ *  - requerido
+ *  - mínimo 2 palabras (cualquier tamaño)
+ *  - solo letras y espacios en MAYÚSCULAS
+ *  - máximo 40 caracteres, dividido en 2 líneas (20 y 20 máx) sin cortar palabras
+ * Comunicación con el padre:
+ *  - Emite `nombreCambiado` en cada cambio para reflejarlo en la grilla al vuelo.
+ * -----------------------------------------------------------------------------
+ */
+
+import {
+  Component, Inject, ChangeDetectionStrategy, ChangeDetectorRef, EventEmitter, Output
+} from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
+import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators, AbstractControl, ValidationErrors } from '@angular/forms';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
+import { MatButtonModule } from '@angular/material/button';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+
+// Modelo mínimo que usa el modal (coincide con la fila)
+export interface TarjetaLite {
+  nombre: string;
+  numero: string;
+  fechaEmision?: string;
+  fechaVencimiento?: string;
+  motivo?: string;
+  numeroCuenta?: string;
+}
+
+@Component({
+  selector: 'app-modal-tarjeta',
+  standalone: true,
+  imports: [
+    CommonModule, MatDialogModule, ReactiveFormsModule,
+    MatFormFieldModule, MatInputModule, MatButtonModule, MatSnackBarModule
+  ],
+  templateUrl: './modal-tarjeta.component.html',
+  styleUrl: './modal-tarjeta.component.css',
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class ModalTarjetaComponent {
+
+  // ===== Form reactivo =====
+  public form!: FormGroup<{ nombre: FormControl<string> }>;
+
+  // Límite total y por línea
+  private readonly MAX_NAME_LEN = 40;
+  private readonly MAX_LINE = 20;
+
+  // Para mostrar (por si el template los usa)
+  public line1 = '';
+  public line2 = '';
+
+  /** Emite el nombre en mayúsculas mientras el usuario escribe (padre lo usa para refrescar UI). */
+  @Output() nombreCambiado = new EventEmitter<string>();
+
+  constructor(
+    @Inject(MAT_DIALOG_DATA) public readonly data: TarjetaLite,
+    private readonly dialogRef: MatDialogRef<ModalTarjetaComponent>,
+    private readonly fb: FormBuilder,
+    private readonly cdr: ChangeDetectorRef,
+    private readonly snackBar: MatSnackBar
+  ) {
+    // Inicializa el form con el nombre existente en MAYÚSCULAS
+    const inicio = (data?.nombre ?? '').toUpperCase();
+    this.form = this.fb.group({
+      nombre: this.fb.control(inicio, {
+        nonNullable: true,
+        validators: [
+          Validators.required,
+          this.minTwoWords(),
+          Validators.maxLength(this.MAX_NAME_LEN),
+          Validators.pattern(/^[A-ZÑÁÉÍÓÚÜ\s]+$/) // solo letras mayúsculas y espacios
+        ]
+      })
+    });
+
+    // Emite al padre en cada cambio y calcula las dos líneas
+    this.form.get('nombre')!.valueChanges.subscribe((val) => {
+      const v = (val ?? '').toUpperCase();
+      this.nombreCambiado.emit(v);
+      const { line1, line2 } = this.computeTwoLines(v);
+      this.line1 = line1; this.line2 = line2;
+      this.cdr.markForCheck();
+    });
+
+    // Calcula líneas iniciales
+    const init = this.computeTwoLines(inicio);
+    this.line1 = init.line1; this.line2 = init.line2;
+  }
+
+  // ===== Validadores y helpers =====
+
+  /** Al menos 2 palabras (si está vacío, deja que 'required' dispare). */
+  private minTwoWords() {
+    return (control: AbstractControl): ValidationErrors | null => {
+      const raw = String(control.value ?? '').trim();
+      if (!raw) return null; // required se encarga
+      const words = raw.split(/\s+/).filter(Boolean);
+      return words.length >= 2 ? null : { twoWords: true };
+    };
+  }
+
+  /** Calcula 2 líneas (máx. 20 c/u) sin cortar palabras; si no cabe, prioriza no cortar. */
+  private computeTwoLines(full: string): { line1: string; line2: string } {
+    const tokens = (full ?? '').split(' ').filter(Boolean);
+    let l1 = '', l2 = '';
+    for (const t of tokens) {
+      if (!l1.length || (l1.length + 1 + t.length) <= this.MAX_LINE) {
+        l1 = l1 ? `${l1} ${t}` : t;
+      } else if (!l2.length || (l2.length + 1 + t.length) <= this.MAX_LINE) {
+        l2 = l2 ? `${l2} ${t}` : t;
+      } else {
+        // Si tampoco cabe en la 2da, lo dejamos fuera (regla original)
+        break;
+      }
+    }
+    return { line1: l1, line2: l2 };
+  }
+
+  // ===== Acciones =====
+
+  /** Cierra el modal sin cambios. */
+  public cerrarModal(): void {
+    this.dialogRef.close(); // comportamiento actual
+  }
+
+  /**
+   * Imprime:
+   * - Permite click siempre, pero si es inválido: NO imprime, muestra errores y snackbar.
+   * - Si es válido: actualiza líneas, llama `window.print()` y muestra snackbar de ÉXITO.
+   *   Luego cierra el modal (se mantiene tu comportamiento actual).
+   */
+  public imprimirTarjeta(): void {
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      // Mensaje de validación (si está vacío, el 'required' dispara en el template)
+      this.snackBar.open('No puedes imprimir: corrige los errores del nombre.', 'Cerrar', {
+        duration: 4000, verticalPosition: 'top', horizontalPosition: 'center'
+      });
+      return;
+    }
+
+    const nombre = this.form.get('nombre')!.value.toUpperCase();
+    const { line1, line2 } = this.computeTwoLines(nombre);
+    this.line1 = line1; this.line2 = line2;
+    this.cdr.markForCheck();
+
+    // Aquí iría tu lógica real de impresión; se mantiene `window.print()`
+    window.print();
+
+    // ✅ Snackbar de ÉXITO
+    this.snackBar.open('Impresión enviada a la impresora.', 'Cerrar', {
+      duration: 3500, verticalPosition: 'top', horizontalPosition: 'center'
+    });
+
+    // Cerrar el modal (mantiene el flujo que ya usas)
+    this.dialogRef.close({ printed: true });
+  }
+}
+
+
+
+
+
+
+<!--
+  Campo de "Nombre en tarjeta"
+  - Muestra los mat-error cuando: requerido, dos palabras, patrón, maxlength.
+  - El botón "Imprimir" siempre se puede presionar; si el form es inválido,
+    NO imprime y se muestra snackbar + errores.
+-->
+<div class="modal-wrapper">
+  <h3>Impresión de tarjeta</h3>
+
+  <mat-form-field appearance="fill" class="w-100">
+    <mat-label>Nombre en tarjeta</mat-label>
+    <input matInput [formControl]="form.get('nombre')" placeholder="NOMBRE EN TARJETA" />
+    <!-- Errores -->
+    <mat-error *ngIf="form.get('nombre')?.hasError('required')">
+      El nombre es obligatorio.
+    </mat-error>
+    <mat-error *ngIf="form.get('nombre')?.hasError('twoWords')">
+      Ingresa al menos dos nombres.
+    </mat-error>
+    <mat-error *ngIf="form.get('nombre')?.hasError('pattern')">
+      Solo letras y espacios en MAYÚSCULAS.
+    </mat-error>
+    <mat-error *ngIf="form.get('nombre')?.hasError('maxlength')">
+      Máximo 40 caracteres.
+    </mat-error>
+  </mat-form-field>
+
+  <!-- Vista previa simple de las dos líneas (opcional) -->
+  <div class="preview">
+    <div>{{ line1 }}</div>
+    <div>{{ line2 }}</div>
+  </div>
+
+  <!-- Botones -->
+  <div class="actions">
+    <button mat-button color="primary" (click)="imprimirTarjeta()">Imprimir</button>
+    <button mat-button color="warn" (click)="cerrarModal()">Cerrar</button>
+  </div>
+</div>
