@@ -1,144 +1,114 @@
-<!--
-  Vista del modal de impresión de tarjeta.
-  - Siempre imprime en 2 filas.
-  - El input usa Reactive Forms; el botón siempre está habilitado,
-    pero la acción "imprimir" valida y frena si es inválido.
--->
-
-<h1 mat-dialog-title>Detalle Tarjeta</h1>
-
-<form [formGroup]="form">
-  <div mat-dialog-content id="contenidoImprimir">
-    <div class="contenedor">
-
-      <!-- Imagen base de la tarjeta (diseño fijo de 2 filas) -->
-      <div class="content-imagen-tarjeta">
-        <img src="/assets/Tarjeta3.PNG" alt=" tarjeta" class="imagen-tarjeta no-imprimir">
-      </div>
-
-      <!-- Overlay: dos líneas de nombre y número de cuenta enmascarado -->
-      <div class="nombre-completo">
-        <div class="nombres">
-          <b>{{ nombres }}</b>
-        </div>
-        <div class="apellidos">
-          <b>{{ apellidos }}</b>
-        </div>
-
-        <!-- Número de Cuenta enmascarado con MaskAccountNumberPipe -->
-        <div class="cuenta">
-          <b>{{ tarjeta.numeroCuenta | maskAccountNumber }}</b>
-        </div>
-      </div>
-    </div>
-
-    <div mat-dialog-actions class="action-buttons">
-      <!-- Campo de nombre (reactivo) -->
-      <mat-form-field appearance="fill" class="nombre-input">
-        <mat-label>Nombre:</mat-label>
-        <input
-          placeholder="NOMBRE EN TARJETA"
-          matInput
-          formControlName="nombre"
-          (input)="form.get('nombre')?.setValue((form.get('nombre')?.value || '').toUpperCase(), { emitEvent: true })"
-          maxlength="40"
-          autocomplete="off" />
-
-        <!-- Contador de caracteres -->
-        <mat-hint align="end">{{ (form.get('nombre')?.value?.length || 0) }}/40</mat-hint>
-
-        <!-- Único mensaje de error, priorizado en TS -->
-        @if (nombreError) {
-          <mat-error>{{ nombreError }}</mat-error>
-        }
-      </mat-form-field>
-
-      <!-- Botones de acción -->
-      <button mat-button class="imprimir-btn" (click)="imprimir(tarjeta)">Imprimir</button>
-      <span class="spacer"></span>
-      <button mat-button class="cerrar-btn" (click)="cerrarModal()" [mat-dialog-close]="true">Cerrar</button>
-    </div>
-  </div>
-</form>
-
-
 /**
- * ModalTarjetaComponent
+ * ConsultaTarjetaComponent (OnPush)
  * -----------------------------------------------------------------------------
- * - Angular 20, Reactive Forms.
- * - Reglas solicitadas:
- *    • Máximo 40 caracteres para el nombre.
- *    • Siempre se imprime en 2 filas (hasta 20 caracteres por fila), sin cortar
- *      palabras; si no cabe una palabra, se coloca completa en la segunda fila.
- *    • Validación: mínimo 2 palabras (dos nombres), sin importar tamaño.
- *    • Solo mayúsculas, letras y espacios (Ñ incluida).
- *    • El botón "Imprimir" siempre es clickeable, pero se frena con un único
- *      mensaje de error si el dato es inválido.
- * - Calidad:
- *    • Se redujo complejidad cognitiva con helpers y early-returns.
- *    • Miembros inyectados marcados como readonly para Sonar.
- *    • Optional chaining para evitar null checks verbosos.
- * - Flujo:
- *    • Valida: si inválido → snackbar y no continúa.
- *    • Verifica sesión → valida bandera de impresión → imprime → registra estado.
- *    • Al guardar, cierra el modal y recarga (mantiene tu comportamiento actual).
+ * Angular 20 (standalone) + Material Table/Sort + Reactive Forms.
+ *
+ * COMPORTAMIENTO ACTUAL (no cambia):
+ *  - Carga tarjetas por agencias (desde sesión/form).
+ *  - Filtro por número (formato campo:valor).
+ *  - Abre modal al click en una fila.
+ *  - "Eliminar" remueve en UI y registra impresión en backend (flujo heredado).
+ *
+ * MEJORAS:
+ *  - ChangeDetectionStrategy.OnPush para mejor rendimiento.
+ *  - Uso de `cdr.markForCheck()` tras reasignaciones que afectan la vista.
+ *  - `readonly`, optional chaining, helpers para reducir complejidad (Sonar).
+ *  - Predicado de filtro centralizado; constantes para “magic numbers”.
+ *  - Unsubscribe centralizado con `Subscription`.
  * -----------------------------------------------------------------------------
  */
 
-import { Component, Input, Output, OnInit, Inject, EventEmitter, ChangeDetectorRef, OnDestroy } from '@angular/core';
-import { ReactiveFormsModule, FormBuilder, FormGroup, Validators, ValidatorFn, AbstractControl, ValidationErrors } from '@angular/forms';
-import { MAT_DIALOG_DATA, MatDialogRef, MatDialogModule } from '@angular/material/dialog';
+import {
+  Component,
+  OnInit,
+  ChangeDetectorRef,
+  ViewChild,
+  OnDestroy,
+  ChangeDetectionStrategy
+} from '@angular/core';
+import { CommonModule } from '@angular/common';
+
+// Angular Material
+import { MatDialogModule, MatDialog } from '@angular/material/dialog';
+import { MatTableDataSource, MatTableModule } from '@angular/material/table';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatSortModule, MatSort } from '@angular/material/sort';
+import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+
+// Forms
+import { ReactiveFormsModule, FormGroup, FormBuilder, Validators, FormControl } from '@angular/forms';
+
+// RxJS
 import { Subscription, take } from 'rxjs';
 
-import { Tarjeta } from '../../../../core/models/tarjeta.model';
-import { ImpresionService } from '../../../../core/services/impresion.service';
+// Servicios / modelos (rutas correctas desde modules/)
 import { TarjetaService } from '../../../../core/services/tarjeta.service';
+import { Tarjeta } from '../../../../core/models/tarjeta.model';
+import { GetDetalleTarjetasImprimirResponseDto } from '../../../../core/models/getDetalleTarjetasImprimir.model';
+import { ModalTarjetaComponent } from '../modal-tarjeta/modal-tarjeta.component';
 import { AuthService } from '../../../../core/services/auth.service';
+
+// Pipes standalone usados en el template
+import { MaskCardNumberPipe } from '../../../../shared/pipes/mask-card-number.pipe';
 import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-number.pipe';
 
 @Component({
-  selector: 'app-modal-tarjeta',
-  // Este componente usa "imports" al estilo standalone para todo lo que necesita.
+  selector: 'app-consulta-tarjeta',
+  // Standalone: importa lo que usa el template
   imports: [
-    MatDialogModule,
-    MatFormFieldModule,
-    MatInputModule,
-    MatButtonModule,
-    MatSnackBarModule,
-    ReactiveFormsModule,
-    MaskAccountNumberPipe    // Pipe standalone para enmascarar número de cuenta en la vista
+    CommonModule, MatCardModule, MatDialogModule, MatTableModule,
+    MatFormFieldModule, ReactiveFormsModule, MatInputModule,
+    MatIconModule, MatSortModule, MatMenuModule, MatButtonModule,
+    MaskCardNumberPipe, MaskAccountNumberPipe
   ],
-  templateUrl: './modal-tarjeta.component.html',
-  styleUrl: './modal-tarjeta.component.css'
+  templateUrl: './consulta-tarjeta.component.html',
+  styleUrl: './consulta-tarjeta.component.css',
+  // ✅ Estrategia de detección de cambios optimizada
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class ModalTarjetaComponent implements OnInit, OnDestroy {
+export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Constantes de formato de impresión
+  // Constantes de configuración
   // ────────────────────────────────────────────────────────────────────────────
-  /** Longitud máxima permitida para el nombre en el input. */
-  private readonly MAX_NAME_LEN = 40;
-  /** Longitud máxima de cada línea visible en la tarjeta. */
-  private readonly MAX_LINE = 20;
-
-  /** Bolsa de suscripciones del componente (readonly para Sonar). */
-  private readonly subscription: Subscription = new Subscription();
-
-  /** Bandera que devuelve el backend para indicar si ya se imprimió previamente. */
-  private imprime = false;
+  /** BIN usado por el microservicio (mantiene valor actual del proyecto). */
+  private readonly BIN = '411052';
+  /** Máximo de dígitos para los códigos de agencia. */
+  private readonly MAX_DIGITS = 3;
+  /** Patrón “solo números”. */
+  private readonly ONLY_DIGITS = /^\d+$/;
 
   // ────────────────────────────────────────────────────────────────────────────
-  // API del componente
+  // Angular Material Table / Sort
   // ────────────────────────────────────────────────────────────────────────────
-  /** Notifica al padre cuando cambia el nombre (para usos externos si se requiere). */
-  @Output() nombreCambiado = new EventEmitter<string>();
+  @ViewChild(MatSort, { static: true }) sort!: MatSort;
 
-  /** Datos de la tarjeta recibidos (fallback si no se usa MAT_DIALOG_DATA). */
-  @Input() datosTarjeta: Tarjeta = {
+  /** DataSource tipado; con OnPush, reasignar `data` dispara el render. */
+  public readonly dataSource = new MatTableDataSource<Tarjeta>([]);
+
+  /** Columnas visibles en la tabla. */
+  public readonly displayedColumns: ReadonlyArray<string> = [
+    'numero', 'nombre', 'motivo', 'numeroCuenta', 'eliminar'
+  ];
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Formulario reactivo
+  // ────────────────────────────────────────────────────────────────────────────
+  public formularioAgencias!: FormGroup<{
+    codigoAgenciaImprime: FormControl<string>;
+    codigoAgenciaApertura: FormControl<string>;
+  }>;
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Estado de vista / sesión
+  // ────────────────────────────────────────────────────────────────────────────
+  public activateFilter = '';   // filtro activo (campo:valor)
+  public usuarioICBS = '';      // usuario logueado
+  public tarjetaSeleccionada: Tarjeta = {
     nombre: '',
     numero: '',
     fechaEmision: '',
@@ -147,296 +117,377 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     numeroCuenta: ''
   };
 
-  /** Formulario reactivo principal (solo el campo "nombre"). */
-  form!: FormGroup;
+  /** Respuesta completa para encabezados de agencias. */
+  public getDetalleTarjetasImprimirResponseDto!: GetDetalleTarjetasImprimirResponseDto;
+
+  /** Bolsa de suscripciones (unsubscribe en OnDestroy). */
+  private readonly subscription = new Subscription();
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Estado de la vista (lo que se renderiza sobre la imagen de la tarjeta)
-  // ────────────────────────────────────────────────────────────────────────────
-  /** Línea 1 del nombre impreso. */
-  nombres: string = '';
-  /** Línea 2 del nombre impreso. */
-  apellidos: string = '';
-  /** Usuario que realiza la impresión (desde sesión). */
-  usuarioICBS: string = '';
-  /** Último nombre normalizado emitido hacia el padre. */
-  nombreMandar: string = '';
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Inyección de dependencias (readonly cuando no se reasignan)
+  // Constructor
   // ────────────────────────────────────────────────────────────────────────────
   constructor(
-    private readonly fb: FormBuilder,
     private readonly authService: AuthService,
-    private readonly snackBar: MatSnackBar,
-    public  readonly dialogRef: MatDialogRef<ModalTarjetaComponent>,
-    private readonly impresionService: ImpresionService,
-    private readonly tarjetaService: TarjetaService,
+    private readonly datosTarjetaServices: TarjetaService,
+    private readonly dialog: MatDialog,
     private readonly cdr: ChangeDetectorRef,
-    @Inject(MAT_DIALOG_DATA) public tarjeta: Tarjeta    // Datos del row seleccionado
-  ) {}
+    private readonly fb: FormBuilder
+  ) {
+    // Configura el predicado del filtro una vez
+    this.configurarFiltros();
+  }
 
   // ────────────────────────────────────────────────────────────────────────────
   // Ciclo de vida
   // ────────────────────────────────────────────────────────────────────────────
   ngOnInit(): void {
-    // Suscríbete al estado de sesión y reacciona a cambios.
-    this.subscription.add(
-      this.authService.sessionActive$.subscribe(isActive => this.handleSessionChange(isActive))
-    );
+    // 1) Formulario con validaciones
+    this.formularioAgencias = this.fb.group({
+      codigoAgenciaImprime: this.fb.control('', {
+        nonNullable: true,
+        validators: [Validators.required, Validators.pattern(this.ONLY_DIGITS), Validators.maxLength(this.MAX_DIGITS)]
+      }),
+      codigoAgenciaApertura: this.fb.control('', {
+        nonNullable: true,
+        validators: [Validators.required, Validators.pattern(this.ONLY_DIGITS), Validators.maxLength(this.MAX_DIGITS)]
+      })
+    });
 
-    // Construye formulario y enlaza sus cambios.
-    this.buildForm();
-    this.bindForm();
+    // 2) Cargar valores de sesión y consultar
+    this.withActiveSession(() => {
+      const ad = this.authService.currentUserValue?.activeDirectoryData;
+      this.usuarioICBS = ad?.usuarioICBS ?? '';
 
-    // Normaliza y pinta el nombre inicial.
-    this.bootstrapName();
+      const codigoAgenciaImprime  = ad?.agenciaImprimeCodigo ?? '';
+      const codigoAgenciaApertura = ad?.agenciaAperturaCodigo ?? '';
+
+      // Rellenar formulario y consultar
+      this.formularioAgencias.patchValue({ codigoAgenciaImprime, codigoAgenciaApertura });
+      this.consultarMicroservicio(codigoAgenciaImprime, codigoAgenciaApertura);
+
+      // Sort listo (static:true)
+      this.setSort();
+    });
   }
 
   ngOnDestroy(): void {
-    // Evita fugas de memoria.
     this.subscription.unsubscribe();
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Inicialización y enlaces
+  // Helpers infra / reutilizables
   // ────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Reacciona a cambios de sesión.
-   * - Si está inactiva: cierra sesión.
-   * - Si está activa: actualiza usuario y fuerza detección de cambios.
+   * Ejecuta `action` si la sesión está activa. Reduce duplicación y complejidad.
    */
-  private handleSessionChange(isActive: boolean): void {
-    if (!isActive) {
-      this.authService.logout();
-      return;
-    }
-    this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData?.usuarioICBS ?? '';
-    this.actualizarNombre((this.tarjeta?.nombre ?? '').toUpperCase());
-    this.cdr.detectChanges();
-    this.cdr.markForCheck();
-  }
-
-  /** Construye el FormGroup con las reglas de validación. */
-  private buildForm(): void {
-    this.form = this.fb.group({
-      nombre: [
-        (this.tarjeta?.nombre ?? '').toUpperCase(),
-        [
-          Validators.required,               // obligatorio
-          Validators.pattern(/^[A-ZÑ ]+$/),  // solo mayúsculas, letras y espacios
-          Validators.maxLength(this.MAX_NAME_LEN), // 40 máx
-          this.minTwoWords()                 // mínimo dos palabras
-        ]
-      ]
-    });
-  }
-
-  /**
-   * Enlaza los cambios del control 'nombre':
-   * - Fuerza MAYÚSCULAS.
-   * - Limpia caracteres no permitidos.
-   * - Recalcula las dos líneas que se imprimen.
-   */
-  private bindForm(): void {
-    const nombreCtrl = this.form.get('nombre')!;
+  private withActiveSession(action: () => void): void {
     this.subscription.add(
-      nombreCtrl.valueChanges.subscribe((v: string) => {
-        const up = (v ?? '').toUpperCase();
-        if (v !== up) {
-          // Reescribe en mayúsculas sin disparar loop
-          nombreCtrl.setValue(up, { emitEvent: false });
-        }
-        // Limpia y refleja en el modelo interno
-        this.tarjeta.nombre = this.normalizarNombre(up);
-        // Recalcula las líneas de impresión
-        this.actualizarNombre(this.tarjeta.nombre);
+      this.authService.sessionActive$.pipe(take(1)).subscribe(isActive => {
+        if (!isActive) { this.authService.logout(); return; }
+        action();
       })
     );
   }
 
-  /** Normaliza y representa el nombre inicial. */
-  private bootstrapName(): void {
-    const inicial = (this.tarjeta?.nombre ?? '').toUpperCase();
-    this.tarjeta.nombre = this.normalizarNombre(inicial);
-    this.actualizarNombre(this.tarjeta.nombre);
+  /** Enlaza el MatSort con el DataSource. */
+  private setSort(): void {
+    this.dataSource.sort = this.sort;
+  }
+
+  /**
+   * Copia nombres/códigos de agencia desde la respuesta para encabezados y form.
+   * Con OnPush, marcamos para verificar la vista.
+   */
+  private setAgenciasFromResponse(resp: GetDetalleTarjetasImprimirResponseDto): void {
+    this.getDetalleTarjetasImprimirResponseDto = resp;
+    this.formularioAgencias.patchValue({
+      codigoAgenciaApertura: resp.agencia.agenciaAperturaCodigo,
+      codigoAgenciaImprime: resp.agencia.agenciaImprimeCodigo
+    });
+    this.cdr.markForCheck(); // asegura render con OnPush
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Validadores y utilitarios (baja complejidad cognitiva)
+  // Filtro de la tabla
   // ────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Validador: exige al menos 2 palabras.
-   * Si el campo está vacío, NO marca error aquí para que sea 'required' quien lo haga.
+   * Predicado de filtro: acepta cadenas `campo:valor`. Ej.: "numero:1234".
+   * Limita a los campos visibles en la grilla.
    */
-  private minTwoWords(): ValidatorFn {
-    return (control: AbstractControl): ValidationErrors | null => {
-      const raw = (control.value ?? '').toString().trim();
-      if (!raw) return null; // vacío lo maneja 'required'
-      const words = this.normalizarNombre(raw).split(/\s+/).filter(Boolean);
-      return words.length >= 2 ? null : { twoWords: true };
+  private configurarFiltros(): void {
+    this.dataSource.filterPredicate = (data: Tarjeta, raw: string): boolean => {
+      if (!raw) return true;
+
+      const [field, ...rest] = raw.split(':');
+      const term = rest.join(':').toLowerCase().trim();
+      if (!field || !term) return true;
+
+      const map: Record<string, string | undefined> = {
+        numero: data.numero,
+        nombre: data.nombre,
+        motivo: data.motivo,
+        numeroCuenta: data.numeroCuenta
+      };
+
+      const value = (map[field] ?? '').toString().toLowerCase();
+      return value.includes(term);
     };
   }
 
-  /** Limpia: mayúsculas, elimina no permitidos, colapsa espacios. */
-  private normalizarNombre(nombre: string): string {
-    let out = (nombre ?? '').toUpperCase().replace(/[^A-ZÑ\s]/g, '');
-    return out.replace(/\s+/g, ' ').trim();
-  }
-
-  /** Separa el texto en tokens (palabras) ignorando vacíos. */
-  private tokenize(full: string): string[] {
-    return (full ?? '').split(' ').filter(Boolean);
-  }
-
-  /** Indica si un token cabe en 'line' respetando el máximo. */
-  private canFit(line: string, token: string, max: number = this.MAX_LINE): boolean {
-    return line.length === 0 ? token.length <= max : (line.length + 1 + token.length) <= max;
-  }
-
-  /** Concatena un token a la línea agregando espacio si corresponde. */
-  private concatLine(line: string, token: string): string {
-    return line.length ? `${line} ${token}` : token;
-  }
-
   /**
-   * Calcula 2 líneas (máx 20 c/u) sin cortar palabras.
-   * Si una palabra no cabe en la línea 2, se agrega completa (no se corta),
-   * pudiendo exceder el máximo en casos extremos (raro por maxlength=40).
+   * Handler de input para aplicar filtro.
+   * Con OnPush, eventos de UI ya disparan CD, no se requiere markForCheck.
    */
-  private computeTwoLines(full: string): { line1: string; line2: string } {
-    const tokens = this.tokenize(full);
-    let line1 = '';
-    let line2 = '';
-
-    for (const t of tokens) {
-      if (this.canFit(line1, t)) { line1 = this.concatLine(line1, t); continue; }
-      if (this.canFit(line2, t)) { line2 = this.concatLine(line2, t); continue; }
-      // Fallback: no cortar
-      line2 = this.concatLine(line2, t);
-    }
-    return { line1, line2 };
-  }
-
-  /** Recalcula líneas visibles y emite cambio. */
-  private actualizarNombre(nombre: string): void {
-    const limpio = this.normalizarNombre(nombre);
-    const { line1, line2 } = this.computeTwoLines(limpio);
-    this.nombres = line1;
-    this.apellidos = line2;
-    this.emitirNombreCambiado();
-  }
-
-  /** Emite el nombre normalizado hacia el padre (si lo desean escuchar). */
-  private emitirNombreCambiado(): void {
-    this.nombreMandar = (this.tarjeta?.nombre ?? '').toUpperCase();
-    this.nombreCambiado.emit(this.nombreMandar);
-  }
-
-  /**
-   * Devuelve un único mensaje de error (priorizado) para evitar superposición
-   * de múltiples <mat-error> en el template.
-   */
-  get nombreError(): string | null {
-    const c = this.form.get('nombre');
-    if (!(c?.touched)) return null;
-
-    const messages: Record<string, string> = {
-      required: 'El nombre es obligatorio.',
-      twoWords: 'Debe ingresar al menos dos nombres.',
-      maxlength: `El nombre no puede exceder ${this.MAX_NAME_LEN} caracteres.`,
-      pattern: 'Solo se permiten letras y espacios en mayúsculas.'
-    };
-
-    for (const key of Object.keys(messages)) {
-      if (c.hasError(key)) return messages[key];
-    }
-    return null;
+  public applyFilterFromInput(evt: Event, field: 'numero' | 'nombre' | 'motivo' | 'numeroCuenta'): void {
+    const value = (evt.target as HTMLInputElement)?.value ?? '';
+    this.activateFilter = `${field}:${value.trim().toLowerCase()}`;
+    this.dataSource.filter = this.activateFilter;
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Flujo principal
+  // Consultas / Acciones
   // ────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Acción de imprimir:
-   * 1) Bloquea si el formulario es inválido (muestra snackbar).
-   * 2) Verifica sesión activa.
-   * 3) Consulta si se puede imprimir; si sí → imprime y registra.
-   * 4) Al guardar, cierra y recarga (manteniendo UX actual).
+   * Invoca al microservicio con BIN + códigos de agencia y carga la grilla.
+   * Reasignamos `data` (dispara render con OnPush) y marcamos verificación.
    */
-  imprimir(datosParaImprimir: Tarjeta): void {
-    const nombreCtrl = this.form.get('nombre')!;
-    if (this.blockIfInvalid(nombreCtrl)) return;
-
-    this.ensureSessionActive(() => {
-      this.checkImpresionAndPrint(datosParaImprimir);
-    });
-  }
-
-  /** Si el control es inválido, lo marca, muestra snackbar y retorna true. */
-  private blockIfInvalid(ctrl: AbstractControl): boolean {
-    if (ctrl.valid) return false;
-    ctrl.markAsTouched();
-    ctrl.updateValueAndValidity();
-    this.showSnack(this.nombreError ?? 'El nombre no es válido.');
-    return true;
-  }
-
-  /** Verifica sesión activa antes de continuar con el flujo. */
-  private ensureSessionActive(onActive: () => void): void {
-    this.authService.sessionActive$.pipe(take(1)).subscribe(isActive => {
-      if (!isActive) { this.authService.logout(); return; }
-      onActive();
-    });
-  }
-
-  /**
-   * Consulta si ya estaba impresa. Si no lo está, ejecuta flujo de impresión+registro.
-   * Si el backend marca que ya está impresa, simplemente cierra el modal.
-   */
-  private checkImpresionAndPrint(datosParaImprimir: Tarjeta): void {
-    this.tarjetaService.validaImpresion(this.tarjeta.numero).pipe(take(1)).subscribe({
-      next: (r) => {
-        this.imprime = !!r.imprime;
-        if (this.imprime) { this.cerrarModal(); return; }
-        this.performPrintAndRegister(datosParaImprimir);
-      },
-      error: (e) => console.error('Error en validaImpresion', e)
-    });
-  }
-
-  /**
-   * Imprime (en 2 filas) y registra el estado de impresión en el backend.
-   * Al finalizar, cierra el modal y recarga la página (comportamiento original).
-   */
-  private performPrintAndRegister(datosParaImprimir: Tarjeta): void {
-    const tipoDiseno = false; // true = 1 fila, false = 2 filas → aquí SIEMPRE 2 filas
-    const ok = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseno);
-    if (!ok) return;
-
-    this.tarjetaService
-      .guardaEstadoImpresion(this.tarjeta.numero, this.usuarioICBS, (this.tarjeta.nombre ?? '').toUpperCase())
+  private consultarMicroservicio(codigoAgenciaImprime: string, codigoAgenciaApertura: string): void {
+    this.datosTarjetaServices
+      .obtenerDatosTarjeta(this.BIN, codigoAgenciaImprime, codigoAgenciaApertura)
       .pipe(take(1))
       .subscribe({
-        next: () => { this.cerrarModal(); window.location.reload(); },
-        error: (e) => console.error('Error al guardar estado de impresión', e)
+        next: (response) => {
+          this.dataSource.data = response.tarjetas; // reasignación => OnPush renderiza
+          this.setAgenciasFromResponse(response);
+          this.cdr.markForCheck(); // doble seguridad por Material
+        },
+        error: (error) => console.error('Error al consultar el microservicio', error)
       });
   }
 
-  /** Muestra un snackbar en la parte superior centrado. */
-  private showSnack(message: string): void {
-    this.snackBar.open(message, 'Cerrar', {
-      duration: 3500,
-      verticalPosition: 'top',
-      horizontalPosition: 'center'
+  /** Dispara la consulta con los códigos del formulario (validado). */
+  public actualizarTabla(): void {
+    if (this.formularioAgencias.invalid) {
+      this.formularioAgencias.markAllAsTouched(); // muestra errores en template
+      return;
+    }
+
+    this.withActiveSession(() => {
+      const agenciaImprimeCodigo  = this.formularioAgencias.get('codigoAgenciaImprime')?.value ?? '';
+      const agenciaAperturaCodigo = this.formularioAgencias.get('codigoAgenciaApertura')?.value ?? '';
+      this.consultarMicroservicio(agenciaImprimeCodigo, agenciaAperturaCodigo);
     });
   }
 
-  /** Cierra el modal (sin valor de retorno adicional). */
-  cerrarModal(): void {
-    this.dialogRef.close();
+  /** Botón "Refrescar". */
+  public recargarDatos(): void {
+    this.actualizarTabla();
+  }
+
+  /**
+   * Abre el modal de impresión para la fila seleccionada.
+   * (No actualiza grilla al cerrar: se mantiene comportamiento actual.)
+   */
+  public abrirModal(row: Tarjeta): void {
+    this.tarjetaSeleccionada = row;
+
+    const ref = this.dialog.open(ModalTarjetaComponent, {
+      data: row,
+      width: '720px',
+      disableClose: true
+    });
+
+    // Preparado para el futuro: afterClosed() sin acción por ahora
+    this.subscription.add(ref.afterClosed().pipe(take(1)).subscribe());
+  }
+
+  /**
+   * Evento opcional emitido por el modal; mantiene compatibilidad.
+   */
+  public onNombreCambiado(nuevoNombre: string): void {
+    this.tarjetaSeleccionada.nombre = nuevoNombre;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Utilidad para mostrar errores en los mat-form-field con @if en el template.
+   */
+  public hasFormControlError(
+    controlName: keyof ConsultaTarjetaComponent['formularioAgencias']['controls'],
+    errorName: string
+  ): boolean {
+    const control = this.formularioAgencias.get(controlName as string);
+    return !!control && control.touched && control.hasError(errorName);
+  }
+
+  /**
+   * Click en el icono "delete":
+   *  - Remueve la fila en memoria (reasignación => OnPush renderiza).
+   *  - Llama a guardaEstadoImpresion en backend (flujo heredado).
+   */
+  public eliminarTarjeta(event: MouseEvent, numeroTarjeta: string): void {
+    event.stopPropagation();
+
+    this.withActiveSession(() => {
+      // Reasignación del array => OnPush detecta el cambio
+      this.dataSource.data = this.dataSource.data.filter(item => item.numero !== numeroTarjeta);
+      this.cdr.markForCheck();
+
+      const nombreParaRegistrar =
+        this.tarjetaSeleccionada?.nombre?.toUpperCase?.() ||
+        this.dataSource.data.find(x => x.numero === numeroTarjeta)?.nombre?.toUpperCase?.() ||
+        '';
+
+      this.datosTarjetaServices
+        .guardaEstadoImpresion(numeroTarjeta, this.usuarioICBS, nombreParaRegistrar)
+        .pipe(take(1))
+        .subscribe({
+          next: () => {
+            // Si quieres forzar un refresh completo:
+            // this.actualizarTabla();
+          },
+          error: (error) => console.error('Error al registrar impresión', error)
+        });
+    });
   }
 }
+
+
+
+
+<!--
+  Formulario de agencias (imprime / apertura)
+  - Validación reactiva: requerido, solo números, máx. 3.
+  - Enter en inputs dispara actualizarTabla().
+-->
+<form [formGroup]="formularioAgencias" (ngSubmit)="actualizarTabla()">
+  <div class="agencia-info">
+
+    <div class="fila">
+      <span class="titulo">Agencia Imprime:</span>
+
+      <mat-form-field appearance="fill" class="campo-corto">
+        <mat-label>Código</mat-label>
+        <input matInput placeholder="Código " formControlName="codigoAgenciaImprime" (keyup.enter)="actualizarTabla()">
+
+        @if (hasFormControlError('codigoAgenciaImprime', 'required')) {
+          <mat-error>Este campo es requerido.</mat-error>
+        }
+        @if (hasFormControlError('codigoAgenciaImprime', 'pattern')) {
+          <mat-error>Solo números son permitidos.</mat-error>
+        }
+        @if (hasFormControlError('codigoAgenciaImprime', 'maxlength')) {
+          <mat-error>Máximo 3 dígitos.</mat-error>
+        }
+      </mat-form-field>
+
+      <span class="nombre-agencia">
+        {{ getDetalleTarjetasImprimirResponseDto?.agencia?.agenciaImprimeNombre }}
+      </span>
+    </div>
+
+    <div class="fila">
+      <span class="titulo">Agencia Apertura:</span>
+
+      <mat-form-field appearance="fill" class="campo-corto">
+        <mat-label>Código</mat-label>
+        <input matInput placeholder="Código" formControlName="codigoAgenciaApertura" (keyup.enter)="actualizarTabla()">
+
+        @if (hasFormControlError('codigoAgenciaApertura', 'required')) {
+          <mat-error>Este campo es requerido.</mat-error>
+        }
+        @if (hasFormControlError('codigoAgenciaApertura', 'pattern')) {
+          <mat-error>Solo números son permitidos.</mat-error>
+        }
+        @if (hasFormControlError('codigoAgenciaApertura', 'maxlength')) {
+          <mat-error>Máximo 3 dígitos.</mat-error>
+        }
+      </mat-form-field>
+
+      <span class="nombre-agencia">
+        {{ getDetalleTarjetasImprimirResponseDto?.agencia?.agenciaAperturaNombre }}
+      </span>
+    </div>
+
+  </div>
+</form>
+
+<!-- Encabezado -->
+<div class="contenedor-titulo">
+  <mat-card>
+    <mat-card-header>
+      <mat-card-title>Detalle Tarjetas Por Imprimir</mat-card-title>
+    </mat-card-header>
+  </mat-card>
+</div>
+
+<!-- Filtro y botón refrescar -->
+<div class="filtro-tabla">
+  <mat-form-field appearance="fill">
+    <mat-label>Filtro por No. Tarjeta</mat-label>
+    <input matInput (input)="applyFilterFromInput($event, 'numero')" placeholder="Escribe para filtrar">
+  </mat-form-field>
+
+  <button mat-button (click)="recargarDatos()">
+    <mat-icon>refresh</mat-icon>
+    Refrescar
+  </button>
+</div>
+
+<!-- Tabla -->
+<div class="table-container">
+  <mat-table [dataSource]="dataSource" matSort class="mat-elevation-z8">
+
+    <!-- No. de Tarjeta -->
+    <ng-container matColumnDef="numero">
+      <mat-header-cell *matHeaderCellDef>No. de Tarjeta</mat-header-cell>
+      <mat-cell *matCellDef="let tarjetas">
+        {{ tarjetas.numero | maskCardNumber }}
+      </mat-cell>
+    </ng-container>
+
+    <!-- Nombre en Tarjeta -->
+    <ng-container matColumnDef="nombre">
+      <mat-header-cell *matHeaderCellDef>Nombre en Tarjeta</mat-header-cell>
+      <mat-cell *matCellDef="let tarjetas">
+        {{ tarjetas.nombre | uppercase }}
+      </mat-cell>
+    </ng-container>
+
+    <!-- Motivo -->
+    <ng-container matColumnDef="motivo">
+      <mat-header-cell *matHeaderCellDef>Motivo</mat-header-cell>
+      <mat-cell *matCellDef="let tarjetas">
+        {{ tarjetas.motivo }}
+      </mat-cell>
+    </ng-container>
+
+    <!-- Número de Cuenta -->
+    <ng-container matColumnDef="numeroCuenta">
+      <mat-header-cell *matHeaderCellDef>Número de Cuenta</mat-header-cell>
+      <mat-cell *matCellDef="let tarjetas">
+        {{ tarjetas.numeroCuenta | maskAccountNumber }}
+      </mat-cell>
+    </ng-container>
+
+    <!-- Eliminar -->
+    <ng-container matColumnDef="eliminar">
+      <mat-header-cell *matHeaderCellDef>Eliminar</mat-header-cell>
+      <mat-cell *matCellDef="let tarjetas">
+        <!-- El click no abre el modal porque se hace stopPropagation en TS -->
+        <mat-icon class="matIcon" (click)="eliminarTarjeta($event, tarjetas.numero)">delete</mat-icon>
+      </mat-cell>
+    </ng-container>
+
+    <!-- Filas -->
+    <mat-header-row *matHeaderRowDef="displayedColumns"></mat-header-row>
+    <mat-row
+      *matRowDef="let row; columns: displayedColumns;"
+      (click)="abrirModal(row)">
+    </mat-row>
+
+  </mat-table>
+</div>
