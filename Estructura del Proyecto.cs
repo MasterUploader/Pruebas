@@ -1,15 +1,84 @@
+Vamos a empezar modificando el componente Tarjeta-Modal, partiremos de la versión que más adelante, se debe de mantener las funcionalidades actuales, es decir no debemos cambiar codigo regx de forma innecesaria, ademas considera que el valor que viaja de nombreenTarjeta tiene 26 caracteres siempre, y que para el diseño 1 se mantiene 1 en una sola fila tal cual aparece, pero para el diseño 2 se debe dividir en 2 filas mitad y mitad, si viene 1 nombre 1 apellido, y en cada fila, si vienen 3, 2 arriba y uno abajo, tomando a consideración que cada fila no puede tener más de 32 cacteres.
+
+
+  Codigo HTML
+
+  <h1 mat-dialog-title> Detalle Tarjeta</h1>
+<div mat-dialog-content id="contenidoImprimir">
+  <div class="contenedor">
+    <div class="content-imagen-tarjeta">
+      <img [src]="disenoSeleccionado === 'unaFila' ? '/assets/TarjetaDiseño2.png' : '/assets/Tarjeta3.PNG'"
+        alt="imagen tarjeta" class="imagen-tarjeta no-imprimir">
+    </div>
+    <!-- Diseño para una fila-->
+    <div *ngIf="disenoSeleccionado === 'unaFila'" class="nombre-completo">
+      <div class="nombres-una-fila">
+        <b>{{tarjeta.nombre}}</b>
+      </div>
+
+      <!-- Numero de Cuenta-->
+      <div class="cuenta-una-fila"><b>{{tarjeta.numeroCuenta | maskAccountNumber}}</b></div>
+    </div>
+
+    <!-- Diseño para dos filas-->
+    <div *ngIf="disenoSeleccionado === 'dosFilas'" class="nombre-completo">
+      <div class="nombres">
+        <b>{{nombres}}</b>
+      </div>
+      <div class="apellidos">
+        <b>{{apellidos}}</b>
+      </div>
+
+      <!-- Numero de Cuenta-->
+      <div class="cuenta"><b>{{tarjeta.numeroCuenta | maskAccountNumber}}</b></div>
+    </div>
+
+
+  </div>
+
+  <div mat-dialog-actions class="action-buttons">
+
+    <!--Selector de Diseño de Tarjeta-->
+    <mat-form-field appearance="fill" class="diseño-input">
+      <mat-label>Diseño</mat-label>
+      <mat-select [(value)]="disenoSeleccionado" (selectionChange)="cambiarDiseno()">
+
+        <!--Diseño 1 Primera Tarjeta Vertical Abril 2024-->
+        <mat-option value="unaFila">Diseño 1</mat-option>
+        <!-- Diseño 2 Segunda Tarjeta Vertical Noviembre de 2024-->
+        <mat-option value="dosFilas">Diseño 2</mat-option>
+      </mat-select>
+
+    </mat-form-field>
+
+
+    <mat-form-field appearance="fill" class="nombre-input">
+      <mat-label>Nombre:</mat-label>
+      <input placeholder="Nombre en Tarjeta" matInput [(ngModel)]="tarjeta.nombre" (input)="validarEntrada($event) "
+        (keypress)="prevenirNumeroCaracteres($event)" maxlength="26">
+    </mat-form-field>
+
+
+
+    <button mat-button class="imprimir-btn" (click)="imprimir(tarjeta)"[disabled]="!nombreValidoParaImprimir">Imprimir</button>
+    <span class="spacer"></span>
+    <button mat-button class="cerrar-btn" (click)="cerrarModal()" [mat-dialog-close]="true">Cerrar</button>
+  </div>
+
+
+
+Codigo .ts
+
 import { Component, Input, Output, OnInit, Inject, EventEmitter, ChangeDetectorRef, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatInputModule } from '@angular/material/input';
-import { FormsModule, NgModel } from '@angular/forms';
-import { MatSnackBar } from '@angular/material/snack-bar';
+import { FormsModule } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatSelectModule } from '@angular/material/select';
 import { DomSanitizer } from '@angular/platform-browser';
 import { Tarjeta } from '../../../../core/models/tarjeta.model';
 import { ImpresionService } from '../../../../core/services/impresion.service';
-import { ConfirmacionDialogoComponent } from '../../../../modules/variados/components/confirmacion-dialogo/confirmacion-dialogo.component';
 import { TarjetaService } from '../../../../core/services/tarjeta.service';
 import { AuthService } from '../../../../core/services/auth.service';
 import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-number.pipe';
@@ -24,11 +93,7 @@ import { Subscription } from 'rxjs';
 })
 export class ModalTarjetaComponent implements OnInit, OnDestroy {
 
-  // === Reglas de validación ===
-  private readonly MAX_NAME_LEN = 40; // total
-  private readonly MAX_LINE = 20;     // por línea (solo diseño 2)
-
-  private subscription: Subscription = new Subscription();
+  private readonly subscription: Subscription = new Subscription();
   private imprime: boolean;
 
   @Output() nombreCambiado = new EventEmitter<string>();
@@ -39,90 +104,100 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     fechaVencimiento: '',
     motivo: '',
     numeroCuenta: ''
-  };
+  }
 
-  nombreCompleto = '';
-  nombres = '';     // línea 1 (diseño 2)
-  apellidos = '';   // línea 2 (diseño 2)
-  numeroCuenta = '';
-  usuarioICBS = '';
-  nombreMandar = '';
-  disenoSeleccionado: 'unaFila' | 'dosFilas' = 'dosFilas';
-
-  /** Controla el [disabled] del botón imprimir. */
+  nombreCompleto: string = '';
+  nombres: string = '';
+  apellidos: string = '';
+  numeroCuenta: string = ''
+  usuarioICBS: string = "";
+  nombreMandar: string = "";
+  disenoSeleccionado: string = 'unaFila';
+  maxCaracteresFila: number = 20; //Maximo de filas para el caso en el que la tarjeta se divide en nombres arriba y abajo
   nombreValidoParaImprimir = false;
 
-  /** Texto del único mat-error. */
-  nombreError: string | null = null;
-
   constructor(
-    private authService: AuthService,
-    private snackBar: MatSnackBar,
-    private dialog: MatDialog,
+    private readonly authService: AuthService,
+    private readonly dialog: MatDialog,
     public dialogRef: MatDialogRef<ModalTarjetaComponent>,
-    private sanitizer: DomSanitizer,
-    private impresionService: ImpresionService,
-    private tarjetaService: TarjetaService,
-    private cdr: ChangeDetectorRef,
-    @Inject(MAT_DIALOG_DATA) public tarjeta: Tarjeta
-  ) {
+    private readonly sanitizer: DomSanitizer,
+    private readonly impresionService: ImpresionService,
+    private readonly tarjetaService: TarjetaService,
+    private readonly cdr: ChangeDetectorRef,
+    @Inject(MAT_DIALOG_DATA) public tarjeta: Tarjeta) {
     this.actualizarNombre(tarjeta.nombre);
     this.nombreCompleto = tarjeta.nombre;
     this.imprime = false;
   }
 
   ngOnInit(): void {
-    this.subscription.add(this.authService.sessionActive$.subscribe(isActive => {
-      if (!isActive) { this.authService.logout(); return; }
 
-      this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData.usuarioICBS ?? '';
-      this.actualizarNombre(this.tarjeta.nombre);
-      // Valida estado inicial
-      this.nombreValidoParaImprimir = this.validarYSetErrores(this.tarjeta.nombre);
-      this.cdr.detectChanges();
-      this.cdr.markForCheck();
+    this.subscription.add(this.authService.sessionActive$.subscribe(isActive => {
+      if (isActive) {
+        this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData.usuarioICBS!;
+
+        this.actualizarNombre(this.tarjeta.nombre);
+
+        this.cdr.detectChanges();
+        this.cdr.markForCheck();
+
+      } else {
+        this.authService.logout();
+      }
     }));
+
   }
 
-  ngOnDestroy(): void { this.subscription.unsubscribe(); }
+  ngOnDestroy(): void {
+    this.subscription.unsubscribe();
+  }
 
-  // ======= Impresión (con guardas de validación) =======
   imprimir(datosParaImprimir: Tarjeta): void {
-    if (!this.validarYSetErrores(this.tarjeta.nombre)) {
-      this.snackBar.open('No puedes imprimir: corrige el nombre.', 'Cerrar', { duration: 3500, verticalPosition: 'top' });
-      return;
-    }
-
     let impresionExitosa = false;
 
     this.subscription.add(this.authService.sessionActive$.subscribe(isActive => {
-      if (!isActive) { this.authService.logout(); return; }
+      if (isActive) {
+        this.tarjetaService.validaImpresion(this.tarjeta.numero).subscribe({
+          next: (respuesta) => {
+            if (respuesta.imprime) {
+              this.imprime = respuesta.imprime;
+            } else {
+              this.imprime = respuesta.imprime;
+            }
+          }
+        });
 
-      this.tarjetaService.validaImpresion(this.tarjeta.numero).subscribe({
-        next: (r) => { this.imprime = !!r.imprime; }
-      });
+        if (!this.imprime) {
+          const tipoDiseño = this.disenoSeleccionado === "unaFila"; //If Rernario porque ahorita solo hay dos diseños, si es una fila o son dos filas
 
-      if (!this.imprime) {
-        const tipoDiseño = this.disenoSeleccionado === 'unaFila'; // true=una fila, false=dos
-        impresionExitosa = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseño);
+          impresionExitosa = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseño);
+          if(impresionExitosa){
+            this.tarjetaService.guardaEstadoImpresion(this.tarjeta.numero, this.usuarioICBS, this.tarjeta.nombre.toUpperCase()).subscribe({
+              next: (respuesta) => {
+                this.cerrarModal();
+                window.location.reload();
+              },
+              error: (error) => {
+                console.log('error', error);
+              }
+            });
+          }
 
-        if (impresionExitosa) {
-          this.tarjetaService.guardaEstadoImpresion(
-            this.tarjeta.numero,
-            this.usuarioICBS,
-            this.tarjeta.nombre.toUpperCase()
-          ).subscribe({
-            next: () => { this.cerrarModal(); window.location.reload(); },
-            error: (e) => console.log('error', e)
-          });
+        } else {
+          this.cerrarModal();
         }
+
       } else {
-        this.cerrarModal();
+        this.authService.logout();
       }
     }));
+
+
   }
 
-  cerrarModal(): void { this.dialogRef.close(); }
+  cerrarModal(): void {
+    this.dialogRef.close();
+  }
 
   emitirNombreCambiado(): void {
     this.nombreMandar = this.tarjeta.nombre.toUpperCase();
@@ -134,213 +209,261 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.emitirNombreCambiado();
   }
 
-  /** Construye 2 líneas sin cortar palabras, máx 20 c/u. */
-  private computeTwoLines(full: string): { line1: string; line2: string } {
-    const tokens = (full ?? '').split(' ').filter(Boolean);
-    let l1 = '', l2 = '';
-    for (const t of tokens) {
-      if (!l1.length || (l1.length + 1 + t.length) <= this.MAX_LINE) {
-        l1 = l1 ? `${l1} ${t}` : t;
-      } else if (!l2.length || (l2.length + 1 + t.length) <= this.MAX_LINE) {
-        l2 = l2 ? `${l2} ${t}` : t;
-      } else {
-        break; // descarta si no cabe en ninguna
-      }
-    }
-    return { line1: l1, line2: l2 };
-  }
-
   dividirNombreCompleto(nombreCompleto: string) {
-    const cadena = (nombreCompleto ?? '').toUpperCase().trim().replace(/\s+/g, ' ');
-    const { line1, line2 } = this.computeTwoLines(cadena);
-    this.nombres = line1;
-    this.apellidos = line2;
+    let cadenaNombresApellidos: string = nombreCompleto.toUpperCase();
+    let partes = cadenaNombresApellidos.split(' ');
+
+    if (partes.length >= 4) {
+      this.nombres = `${partes[0]} ${partes[1]}`;
+      this.apellidos = `${partes[2]} ${partes.slice(3).join(' ')}`;
+
+    } else if (partes.length === 3) {
+      if (this.nombres.length <= 16 && this.apellidos.length <= 16) {
+        this.nombres = partes[0];
+        this.apellidos = `${partes[1]} ${partes[2]}`;
+      }
+
+      if (this.nombres.length <= 16 && this.apellidos.length >= 16) {
+        this.nombres = `${partes[0]} ${partes[1]}`;
+        this.apellidos = partes[2];
+      }
+
+    } else if (partes.length === 2) {
+      this.nombres = partes[0];
+      this.apellidos = partes[1];
+    }
+    this.nombres = this.nombres.toUpperCase();
+    this.apellidos = this.apellidos.toUpperCase();
+
   }
 
   actualizarNombre(nombre: string) {
-    let n = (nombre ?? '').toUpperCase();
-    n = this.validarNombre(n);
-    if (n.length > this.MAX_NAME_LEN) n = n.slice(0, this.MAX_NAME_LEN).trim();
-    this.tarjeta.nombre = n;
+    let nombreActualizado = nombre.toUpperCase();
+
+    nombreActualizado = this.validarNombre(nombreActualizado);
+    this.tarjeta.nombre = nombreActualizado;
 
     if (this.disenoSeleccionado === 'dosFilas') {
-      this.dividirNombreCompleto(n);
+      this.dividirNombreCompleto(nombreActualizado);
     }
+
     this.emitirNombreCambiado();
   }
 
-  /** Sanea: solo letras (incluye Ñ/acentos), un solo espacio, sin espacios al final. */
   validarNombre(nombre: string): string {
-    let v = nombre.replace(/[^A-ZÑÁÉÍÓÚÜ\s]/g, ''); // elimina caracteres no permitidos
-    v = v.replace(/\s+/g, ' ').trim();               // un solo espacio y sin finales
-    return v;
+    let nombreValido = nombre.replace(/[^A-Z\s]/g, ''); //Eliminar caracteres no permitidos.
+    nombreValido = nombreValido.replace(/\s+/g, ' '); //Elinación de Espacios, solo permite un espacio
+
+    return nombreValido;
   }
 
-  /** Bloquea teclas: solo letras/espacio y evita espacios dobles o al inicio/fin. */
-  prevenirNumeroCaracteres(event: KeyboardEvent) {
-    const key = event.key;
-    const input = event.target as HTMLInputElement;
+  prevenirNumeroCaracteres(event: KeyboardEvent){
+    const regex = /^[a-zA-Z\s]*$/;
 
-    // letras con acentos y Ñ
-    const isLetter = /^[a-zA-ZñÑáéíóúÁÉÍÓÚüÜ]$/.test(key);
-    const isSpace = key === ' ';
-
-    if (!isLetter && !isSpace) { event.preventDefault(); return; }
-
-    if (isSpace) {
-      const start = input.selectionStart ?? 0;
-      const end = input.selectionEnd ?? 0;
-      const val = input.value;
-
-      // No espacio al inicio, ni doble espacio, ni pegar contra otro espacio
-      const left = start > 0 ? val[start - 1] : '';
-      const right = end < val.length ? val[end] : '';
-      if (start === 0 || left === ' ' || right === ' ') {
-        event.preventDefault();
-        return;
-      }
+    if(!regex.test(event.key)){
+      event.preventDefault();
     }
   }
 
-  cambiarDiseno() { this.actualizarNombre(this.tarjeta.nombre); }
+  cambiarDiseno() {
+    this.actualizarNombre(this.tarjeta.nombre);
 
-  /**
-   * Input en tiempo real:
-   * - Mayúsculas, limpia, ≤ 40.
-   * - Recalcula 2 líneas (si aplica).
-   * - Actualiza errores/estado del botón y, opcionalmente, el NgModel.
-   */
-  validarEntrada(event: Event, nombreNgModel?: NgModel): void {
+  }
+
+  validarEntrada(event: Event): void {
     const input = (event.target as HTMLInputElement);
-    let valor = (input.value ?? '').toUpperCase();
+    let valor = input.value.toUpperCase();
 
-    // Solo letras/espacios, colapsa espacios y sin trailing
-    valor = valor.replace(/[^A-ZÑÁÉÍÓÚÜ\s]/g, '').replace(/\s{2,}/g, ' ').trim();
-    if (valor.length > this.MAX_NAME_LEN) valor = valor.slice(0, this.MAX_NAME_LEN).trim();
+    valor = valor.replace(/[^A-ZÑ\s]/g, '').replace(/\s{2,}/g, ' ');
 
     input.value = valor;
     this.tarjeta.nombre = valor;
 
-    if (this.disenoSeleccionado === 'dosFilas') this.dividirNombreCompleto(valor);
-    this.emitirNombreCambiado();
-
-    const esValido = this.validarYSetErrores(valor);
-    this.nombreValidoParaImprimir = esValido;
-
-    // Marca el NgModel como válido/ inválido para que <mat-error> se muestre
-    if (nombreNgModel) {
-      if (esValido) {
-        nombreNgModel.control.setErrors(null);
-      } else {
-        nombreNgModel.control.setErrors({ custom: true });
-      }
-      nombreNgModel.control.markAsTouched();
-      nombreNgModel.control.markAsDirty();
-      nombreNgModel.control.updateValueAndValidity({ emitEvent: false });
-    }
+    this.nombreValidoParaImprimir = valor.trim().length >= 10;
   }
 
-  /**
-   * Reglas y mensaje:
-   *  - obligatorio
-   *  - mínimo 2 palabras
-   *  - total ≤ 40
-   *  - ninguna palabra > 20
-   *  - si diseño 2: cada línea ≤ 20
-   */
-  private validarYSetErrores(valor: string): boolean {
-    const v = (valor ?? '').trim();
-    if (!v) { this.nombreError = 'El nombre es obligatorio.'; return false; }
-
-    const words = v.split(/\s+/).filter(Boolean);
-    if (words.length < 2) { this.nombreError = 'Ingresa al menos dos nombres.'; return false; }
-
-    if (v.length > this.MAX_NAME_LEN) { this.nombreError = 'Máximo 40 caracteres.'; return false; }
-
-    if (words.some(w => w.length > this.MAX_LINE)) {
-      this.nombreError = 'Ninguna palabra puede exceder 20 caracteres.';
-      return false;
-    }
-
-    if (this.disenoSeleccionado === 'dosFilas') {
-      const { line1, line2 } = this.computeTwoLines(v);
-      if (line1.length > this.MAX_LINE || line2.length > this.MAX_LINE) {
-        this.nombreError = 'Cada línea admite hasta 20 caracteres.';
-        return false;
-      }
-    }
-
-    this.nombreError = null;
-    return true;
-  }
 }
 
 
-<h1 mat-dialog-title> Detalle Tarjeta</h1>
-<div mat-dialog-content id="contenidoImprimir">
-  <div class="contenedor">
-    <div class="content-imagen-tarjeta">
-      <img [src]="disenoSeleccionado === 'unaFila' ? '/assets/TarjetaDiseño2.png' : '/assets/Tarjeta3.PNG'"
-           alt="imagen tarjeta"
-           class="imagen-tarjeta no-imprimir">
-    </div>
+CSS
 
-    <!-- Diseño para una fila-->
-    <div *ngIf="disenoSeleccionado === 'unaFila'" class="nombre-completo">
-      <div class="nombres-una-fila">
-        <b>{{ tarjeta.nombre }}</b>
-      </div>
-      <!-- Numero de Cuenta-->
-      <div class="cuenta-una-fila"><b>{{ tarjeta.numeroCuenta | maskAccountNumber }}</b></div>
-    </div>
+/* Modal */
+/* Estilo base para el fondo oscuro del modal */
+.modal {
+    display: none;
+    /* Hidden by default */
+    position: fixed;
+    /* Stay in place */
+    z-index: 1;
+    /* Sit on top */
+    left: 0;
+    top: 0;
+    width: 100%;
+    /* Full width */
+    height: 100%;
+    /* Full height */
+    overflow: auto;
+    /* Enable scroll if needed */
+    background-position: center;
+  }
 
-    <!-- Diseño para dos filas-->
-    <div *ngIf="disenoSeleccionado === 'dosFilas'" class="nombre-completo">
-      <div class="nombres"><b>{{ nombres }}</b></div>
-      <div class="apellidos"><b>{{ apellidos }}</b></div>
-      <!-- Numero de Cuenta-->
-      <div class="cuenta"><b>{{ tarjeta.numeroCuenta | maskAccountNumber }}</b></div>
-    </div>
-  </div>
+  /* Estilo para la caja de contenido del modal */
+  .modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    /* 15% from the top and centered */
+    padding: 20px;
+    border: 1px solid #888;
+    /* width: 207.87404194px;/* Could be more or less, depending on screen size */
+    /* height: 380px; */
 
-  <div mat-dialog-actions class="action-buttons">
-    <!--Selector de Diseño de Tarjeta-->
-    <mat-form-field appearance="fill" class="diseño-input">
-      <mat-label>Diseño</mat-label>
-      <mat-select [(value)]="disenoSeleccionado" (selectionChange)="cambiarDiseno()">
-        <mat-option value="unaFila">Diseño 1</mat-option>
-        <mat-option value="dosFilas">Diseño 2</mat-option>
-      </mat-select>
-    </mat-form-field>
+    width: 400px;
+    height: 600px;
 
-    <!-- Campo de nombre -->
-    <mat-form-field appearance="fill" class="nombre-input">
-      <mat-label>Nombre:</mat-label>
-      <input
-        placeholder="Nombre en Tarjeta"
-        matInput
-        [(ngModel)]="tarjeta.nombre"
-        name="nombreTarjeta"
-        #nombreNgModel="ngModel"
-        (input)="validarEntrada($event, nombreNgModel)"
-        (keypress)="prevenirNumeroCaracteres($event)"
-        maxlength="40"
-        autocomplete="off">
-      <mat-hint align="end">{{ (tarjeta.nombre?.length || 0) }}/40</mat-hint>
+    /* background-image: url("/assets/tarjeta.png"); */
 
-      <!-- Error visible cuando el NgModel queda inválido -->
-      <mat-error *ngIf="nombreNgModel.invalid">{{ nombreError }}</mat-error>
-    </mat-form-field>
+    background-size: 87404194px 321.25988299px;
 
-    <button mat-button class="imprimir-btn"
-            (click)="imprimir(tarjeta)"
-            [disabled]="!nombreValidoParaImprimir">
-      Imprimir
-    </button>
-    <span class="spacer"></span>
-    <button mat-button class="cerrar-btn" (click)="cerrarModal()" [mat-dialog-close]="true">Cerrar</button>
-  </div>
-</div>
+
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
 
 
 
+  .contenedor{
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+  }
+
+  @media print {
+    .no-imprimir{
+      display: none;
+    }
+  }
+
+  .content-imagen-tarjeta {
+    width: 207.87404194px;
+    height: 321.25988299px;
+    display: flex;
+    align-content: center;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+  }
+
+  .imagen-tarjeta {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .nombres-una-fila {
+    position: absolute;
+    top: 60%;
+    left:50%;
+    font-size: 6pt;
+    color: white;
+    text-align: center;
+    max-width: 90%;
+    transform: translate(-50%);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cuenta-una-fila{
+    position: absolute;
+    top: 67%;
+    left: 50%;
+    transform: translate(-50%);
+    font-size: 7pt;
+    text-align: center;
+    max-width: 80%;
+    color: white;
+  }
+
+
+  .nombres {
+    position: absolute;
+    top: 170px;
+    font-size: 6pt;
+    color: black;
+    right: 190px;
+    justify-content: end;
+  }
+
+  .apellidos {
+    position: absolute;
+    top: 185px;
+    font-size: 6pt;
+    color: black;
+    right: 190px;
+    justify-content: end;
+  }
+
+  .cuenta{
+    position: absolute;
+    top: 210px;
+    font-size: 7pt;
+    right: 220px;
+    color: white;
+  }
+
+
+  .modal-footer {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    height: 100px;
+  }
+
+  .mat-dialog-actions {
+    align-items: center;
+    justify-content: space-between;
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .action-buttons .flex-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+  }
+
+  .nombre-input {
+    flex-grow: 1;
+    margin-right: 20px;
+    width: 100%;
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .imprimir-btn {
+    background-color: #4CAF50;
+    color: white;
+  }
+
+  .imprimir-btn:hover {
+    background-color: #45a049;
+  }
+
+  .cerrar-btn {
+    background-color: #f44336;
+    color: white;
+  }
+
+  .cerrar-btn:hover {
+    background-color: #da190b;
+  }
+
+  .nombre-input{
+    text-transform: uppercase;
+  }
