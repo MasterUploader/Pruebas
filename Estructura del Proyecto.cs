@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
-import { CommonModule } from '@angular/common'; // <-- NECESARIO para *ngIf, *ngFor, etc.
+import { CommonModule } from '@angular/common';
 import { MatInputModule } from '@angular/material/input';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -18,7 +18,7 @@ import { finalize, take } from 'rxjs/operators';
   selector: 'app-login',
   standalone: true,
   imports: [
-    CommonModule,                 // <-- agrega esto
+    CommonModule,
     MatCardModule,
     FormsModule,
     MatFormFieldModule,
@@ -37,7 +37,7 @@ export class LoginComponent {
   errorMessage: string = '';
   isLoading = false;
 
-  /** Form reactivo con control 'server' para mat-error general */
+  /** Form reactivo con control 'server' para mostrar mat-error general */
   loginForm: FormGroup;
 
   constructor(
@@ -49,7 +49,7 @@ export class LoginComponent {
     this.loginForm = this.fb.group({
       userName: ['', Validators.required],
       password: ['', Validators.required],
-      server: [''] // control dummy para mostrar mat-error general
+      server: [''] // control dummy para mat-error general
     });
   }
 
@@ -77,30 +77,27 @@ export class LoginComponent {
         finalize(() => { this.isLoading = false; }) // apaga SIEMPRE el overlay (éxito o error)
       )
       .subscribe({
-        next: _ => {
-          this.router.navigate(['/tarjetas']);
-        },
+        next: _ => this.router.navigate(['/tarjetas']),
         error: (error: HttpErrorResponse) => {
-          // Manejo robusto del mensaje (401 puede venir sin body)
+          // Mensaje robusto incluso si el 401 no trae body
           const msgFromApi =
             (error?.error && (error.error.codigo?.message || error.error.message)) ||
             (typeof error?.error === 'string' ? error.error : null);
 
           this.errorMessage = msgFromApi || 'Ocurrió un error durante el inicio de sesión';
 
-          // Fuerza estado de error visible en el form-field de "server"
+          // Activa estado de error para que el mat-error se muestre
           serverCtrl?.setErrors({ server: true });
           serverCtrl?.markAsDirty();
           serverCtrl?.markAsTouched();
           serverCtrl?.updateValueAndValidity();
 
-          // Opcional: snackbar (elimínalo si no lo quieres)
+          // Opcional: snackbar; comenta si no deseas doble mensaje
           this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
         }
       });
   }
 }
-
 <div class="login-container">
   <mat-card class="content-form"
             [class.blocked]="isLoading"
@@ -168,8 +165,9 @@ export class LoginComponent {
           Entrar
         </button>
 
-        <!-- Error GENERAL bajo el botón con estilo Material -->
-        <mat-form-field appearance="fill" class="full-width error-field">
+        <!-- Error GENERAL bajo el botón con estilo Material (sin recuadro) -->
+        <mat-form-field appearance="outline" class="full-width error-field">
+          <!-- Input dummy: mantiene estado del form-field -->
           <input matInput formControlName="server" class="server-dummy-input" tabindex="-1" aria-hidden="true" />
           <mat-error *ngIf="errorMessage">{{ errorMessage }}</mat-error>
         </mat-form-field>
@@ -177,7 +175,7 @@ export class LoginComponent {
     </mat-card-content>
   </mat-card>
 
-  <!-- Overlay flotante de CARGA (usa @if, no requiere CommonModule) -->
+  <!-- Overlay flotante de CARGA -->
   @if (isLoading) {
     <div class="overlay" role="alert" aria-live="assertive">
       <div class="overlay-content" role="dialog" aria-label="Cargando">
@@ -187,4 +185,88 @@ export class LoginComponent {
     </div>
   }
 </div>
+/* ---------- Tu CSS existente (container, card, inputs, botón, overlay, etc.) ---------- */
+
+body { background-color: rgb(241, 239, 239); }
+
+.login-container { position: relative; }
+
+.content-form {
+  position: absolute;
+  top: 270px;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 400px;
+  width: 100%;
+  height: 400px;
+  background-color: #fff;
+  padding: 25px;
+  border-radius: 12px;
+  box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.349);
+}
+
+.content-form.blocked { pointer-events: none; filter: grayscale(0.2); opacity: 0.95; }
+
+.content-title-login { display: flex; justify-content: center; align-items: center; width: 100%; padding: 30px 0; }
+
+.imgLogo { position: absolute; top: -60px; width: 110px; height: 100px; display: block; }
+
+.title-login { font-size: 1.5rem; font-weight: bold; }
+
+.form { height: 80%; display: flex; flex-direction: column; gap: 20px; }
+
+.inputPass { position: relative; display: flex; }
+
+.iconPass { position: absolute; top: -10px; right: 10px; width: 30px; height: 30px; border: none; }
+
+.full-width { width: 100%; border: none !important; background-color: #fff !important; }
+
+.form input { width: 100%; height: 30px !important; outline: none; }
+
+.loginNow {
+  background-color: #e4041c; color: #fff; padding: 13px 0; border-radius: 10px; border: none;
+  font-size: 1rem; font-weight: bold; cursor: pointer;
+}
+
+.loginNow:hover { box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.349); }
+
+/* ---------- OVERLAY ---------- */
+.overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35);
+  z-index: 9999; display: grid; place-items: center; backdrop-filter: blur(1px);
+}
+.overlay-content {
+  min-width: 240px; max-width: 90vw; padding: 20px 22px; border-radius: 12px; background: #fff;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25); display: flex; align-items: center; gap: 14px;
+}
+.overlay-text { font-weight: 600; }
+
+/* ---------- Form-field de error general (SIN RECUADRO) ---------- */
+/* Oculta completamente la “caja” del form-field: outline, infix, flex y la línea inferior */
+.error-field .mat-mdc-form-field-flex,
+.error-field .mdc-notched-outline,
+.error-field .mdc-line-ripple,
+.error-field .mat-mdc-form-field-infix,
+.error-field .mat-mdc-form-field-icon-prefix,
+.error-field .mat-mdc-form-field-icon-suffix {
+  display: none !important;
+}
+
+/* Asegura que la zona del mensaje (subscript) sí quede visible y sin espacios extra */
+.error-field .mat-mdc-form-field-subscript-wrapper {
+  display: block !important;
+  margin-top: 8px;
+  padding: 0;
+  position: static; /* evita colapsar */
+}
+
+/* Input dummy: invisible pero mantiene el estado de error del form-field */
+.server-dummy-input {
+  position: absolute;
+  width: 0; height: 0; opacity: 0; pointer-events: none; border: 0; margin: 0; padding: 0; line-height: 0;
+}
+
+
+
+
 
