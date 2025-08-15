@@ -1,14 +1,13 @@
 <h1 mat-dialog-title> Detalle Tarjeta</h1>
 <div mat-dialog-content id="contenidoImprimir">
   <div class="contenedor">
-    <!-- La imagen es el contenedor de referencia (position: relative) -->
     <div class="content-imagen-tarjeta">
       <img
         [src]="disenoSeleccionado === 'unaFila' ? '/assets/TarjetaDiseño2.png' : '/assets/Tarjeta3.PNG'"
         alt="imagen tarjeta"
         class="imagen-tarjeta no-imprimir">
 
-      <!-- ==================== DISEÑO 1 (una fila) ==================== -->
+      <!-- DISEÑO 1 -->
       <ng-container *ngIf="disenoSeleccionado === 'unaFila'">
         <div class="nombres-una-fila">
           <b>{{tarjeta.nombre}}</b>
@@ -18,7 +17,7 @@
         </div>
       </ng-container>
 
-      <!-- ==================== DISEÑO 2 (dos filas) ==================== -->
+      <!-- DISEÑO 2 -->
       <ng-container *ngIf="disenoSeleccionado === 'dosFilas'">
         <div class="nombres"><b>{{nombres}}</b></div>
         <div class="apellidos"><b>{{apellidos}}</b></div>
@@ -38,26 +37,23 @@
       </mat-select>
     </mat-form-field>
 
-    <!-- Campo Nombre con ErrorStateMatcher -->
-    <mat-form-field appearance="fill" class="nombre-input" [errorStateMatcher]="nombreErrorMatcher">
+    <!-- Campo Nombre: el matcher va en el INPUT -->
+    <mat-form-field appearance="fill" class="nombre-input">
       <mat-label>Nombre:</mat-label>
       <input
-        #nombreCtrl="ngModel"
         placeholder="Nombre en Tarjeta"
         matInput
         [(ngModel)]="tarjeta.nombre"
         (input)="validarEntrada($event)"
         (keypress)="prevenirNumeroCaracteres($event)"
         maxlength="26"
-        required>
+        required
+        [errorStateMatcher]="nombreErrorMatcher">
       <mat-hint align="end">{{nombreCharsCount}}/{{nombreMaxLength}}</mat-hint>
-
-      <!-- mat-error se mostrará cuando el form-field esté en estado de error
-           (lo fuerza nuestro ErrorStateMatcher cuando nombreError !== '') -->
       <mat-error *ngIf="nombreError">{{ nombreError }}</mat-error>
     </mat-form-field>
 
-    <!-- Botón siempre habilitado; la validación es interna al presionar -->
+    <!-- Botón siempre habilitado; validación se hace al presionar -->
     <button mat-button class="imprimir-btn" (click)="imprimir(tarjeta)">Imprimir</button>
 
     <span class="spacer"></span>
@@ -65,9 +61,10 @@
   </div>
 </div>
 
+
 import { Component, Input, Output, OnInit, Inject, EventEmitter, ChangeDetectorRef, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule, NgForm, NgModel } from '@angular/forms';
+import { FormsModule, NgForm } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatSelectModule } from '@angular/material/select';
@@ -75,6 +72,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { ErrorStateMatcher } from '@angular/material/core';
+import { FormControl, FormGroupDirective } from '@angular/forms';
 
 import { DomSanitizer } from '@angular/platform-browser';
 import { Subscription } from 'rxjs';
@@ -87,16 +85,19 @@ import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-num
 
 /**
  * ErrorStateMatcher personalizado:
- * Pone el mat-form-field en estado de error cuando:
+ * Pone el input en estado de error cuando:
  *  - Hay un error externo (nombreError !== '')
  *  - O el control es inválido y fue tocado/ensuciado o el form enviado (comportamiento estándar)
+ *
+ * NOTA: la firma correcta usa FormControl | null y FormGroupDirective | NgForm | null
  */
 class NombreErrorStateMatcher implements ErrorStateMatcher {
   constructor(private hasExternalError: () => boolean) {}
 
-  isErrorState(control: NgModel | null, form: NgForm | null): boolean {
-    const invalidStandard = !!control && control.invalid && (control.touched || control.dirty || !!form?.submitted);
-    const externalError = this.hasExternalError();
+  isErrorState(control: FormControl | null, form: FormGroupDirective | NgForm | null): boolean {
+    const submitted = !!form && form.submitted;
+    const invalidStandard = !!control && control.invalid && (control.touched || control.dirty || submitted);
+    const externalError = this.hasExternalError(); // debe devolver boolean, no null
     return externalError || invalidStandard;
   }
 }
@@ -109,7 +110,7 @@ class NombreErrorStateMatcher implements ErrorStateMatcher {
     FormsModule,
     MatDialogModule,
     MatSelectModule,
-    MatFormFieldModule,   // Asegura mat-form-field y mat-error disponibles aquí
+    MatFormFieldModule,
     MatInputModule,
     MatSnackBarModule,
     MaskAccountNumberPipe
@@ -133,30 +134,25 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     numeroCuenta: ''
   };
 
-  /** Copia de nombre completo (sólo informativo) */
   nombreCompleto: string = '';
-  /** Línea superior para Diseño 2 */
   nombres: string = '';
-  /** Línea inferior para Diseño 2 */
   apellidos: string = '';
 
   numeroCuenta: string = '';
   usuarioICBS: string = '';
   nombreMandar: string = '';
 
-  /** Diseño seleccionado: 'unaFila' (Diseño 1) o 'dosFilas' (Diseño 2) */
   disenoSeleccionado: string = 'unaFila';
 
-  /** Máximo por fila en diseño 2 */
   maxCaracteresFila: number = 16;
 
-  /** Validación / UI */
-  nombreError: string = '';             // Mensaje a mostrar bajo el campo y en SnackBar
+  // Validación / UI
+  nombreError: string = '';
   nombreCharsCount: number = 0;
   nombreMaxLength: number = 26;
 
-  /** ErrorStateMatcher que fuerza el estado de error si nombreError !== '' */
-  nombreErrorMatcher = new NombreErrorStateMatcher(() => !!this.nombreError);
+  // Matcher que fuerza el estado de error cuando existe nombreError
+  nombreErrorMatcher = new NombreErrorStateMatcher(() => this.nombreError.trim().length > 0);
 
   constructor(
     private readonly authService: AuthService,
@@ -169,12 +165,10 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     private readonly snackBar: MatSnackBar,
     @Inject(MAT_DIALOG_DATA) public tarjeta: Tarjeta
   ) {
-    // Inicialización respetando el flujo actual
     this.actualizarNombre(tarjeta.nombre);
     this.nombreCompleto = tarjeta.nombre;
     this.imprime = false;
 
-    // Inicializar contador/validación
     this.nombreCharsCount = (this.tarjeta.nombre || '').length;
     this.aplicarValidaciones(this.tarjeta.nombre);
   }
@@ -184,7 +178,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
       if (isActive) {
         this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData.usuarioICBS!;
 
-        // Recalcula nombres/apellidos al iniciar y ante cambios de sesión
         this.actualizarNombre(this.tarjeta.nombre);
 
         this.cdr.detectChanges();
@@ -199,17 +192,12 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.subscription.unsubscribe();
   }
 
-  /**
-   * Imprimir con validación dura:
-   * - Si hay error (vacío o una sola palabra), NO imprime y muestra snackbar + mat-error.
-   */
   imprimir(datosParaImprimir: Tarjeta): void {
-    // Revalida justo al presionar
     this.aplicarValidaciones(this.tarjeta.nombre);
 
     if (this.nombreError) {
       this.mostrarNotificacionError(this.nombreError);
-      return; // Bloquea la impresión
+      return;
     }
 
     let impresionExitosa = false;
@@ -223,7 +211,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
         });
 
         if (!this.imprime) {
-          // true = Diseño 1 (una fila). false = Diseño 2 (dos filas)
           const tipoDiseño = this.disenoSeleccionado === 'unaFila';
 
           impresionExitosa = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseño);
@@ -254,7 +241,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.dialogRef.close();
   }
 
-  /** Emite el nombre (en mayúsculas) al componente padre */
   emitirNombreCambiado(): void {
     this.nombreMandar = this.tarjeta.nombre.toUpperCase();
     this.nombreCambiado.emit(this.nombreMandar);
@@ -265,13 +251,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.emitirNombreCambiado();
   }
 
-  /**
-   * Lógica de división para Diseño 2 (máx 16 por fila):
-   * - 1 parte: arriba esa parte, abajo vacío
-   * - 2 partes: 1 arriba, 1 abajo
-   * - 3 partes: 2 arriba, 1 abajo
-   * - 4+ partes: 2 arriba, resto abajo
-   */
   private dividirNombreCompleto(nombreCompleto: string): void {
     const cadena = (nombreCompleto || '').toUpperCase().trim();
     if (!cadena) {
@@ -296,7 +275,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
       this.apellidos = partes.slice(2).join(' ');
     }
 
-    // Forzar máximo 16 por fila
     if (this.nombres.length > this.maxCaracteresFila) {
       this.nombres = this.nombres.slice(0, this.maxCaracteresFila);
     }
@@ -305,14 +283,9 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     }
   }
 
-  /**
-   * Actualiza el nombre (en mayúsculas), aplica validaciones existentes
-   * y, si el diseño es “dosFilas”, divide en nombres/apellidos.
-   */
   actualizarNombre(nombre: string) {
     let nombreActualizado = (nombre || '').toUpperCase();
 
-    // Mantengo tu validación original (NO se tocan regex)
     nombreActualizado = this.validarNombre(nombreActualizado);
 
     this.tarjeta.nombre = nombreActualizado;
@@ -327,9 +300,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.emitirNombreCambiado();
   }
 
-  /**
-   * Validación original: sólo letras y espacios; colapsa espacios.
-   */
   validarNombre(nombre: string): string {
     let nombreValido = nombre.replace(/[^A-Z\s]/g, '');
     nombreValido = nombreValido.replace(/\s+/g, ' ');
@@ -347,10 +317,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.actualizarNombre(this.tarjeta.nombre);
   }
 
-  /**
-   * Valida entrada en tiempo real:
-   * - Respeta tu regex que permite Ñ en la escritura.
-   */
   validarEntrada(event: Event): void {
     const input = (event.target as HTMLInputElement);
     let valor = (input.value || '').toUpperCase();
@@ -370,12 +336,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.emitirNombreCambiado();
   }
 
-  // ======== Validaciones solicitadas ========
-  /**
-   * Reglas:
-   * 1) Vacío -> error: "El nombre no puede estar vacío."
-   * 2) Una sola palabra -> error: "Debe ingresar al menos nombre y apellido (mínimo 2 palabras)."
-   */
   private aplicarValidaciones(valor: string): void {
     const limpio = (valor || '').trim();
     const palabras = limpio.length === 0 ? [] : limpio.split(' ').filter(p => p.length > 0);
@@ -393,7 +353,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Notificación flotante con error */
   private mostrarNotificacionError(mensaje: string): void {
     this.snackBar.open(mensaje, 'Cerrar', {
       duration: 3500,
