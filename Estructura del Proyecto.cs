@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
+import { CommonModule } from '@angular/common'; // <-- NECESARIO para *ngIf, *ngFor, etc.
 import { MatInputModule } from '@angular/material/input';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -17,6 +18,7 @@ import { finalize, take } from 'rxjs/operators';
   selector: 'app-login',
   standalone: true,
   imports: [
+    CommonModule,                 // <-- agrega esto
     MatCardModule,
     FormsModule,
     MatFormFieldModule,
@@ -35,7 +37,7 @@ export class LoginComponent {
   errorMessage: string = '';
   isLoading = false;
 
-  /** Form reactivo con control 'server' para mostrar mat-error general */
+  /** Form reactivo con control 'server' para mat-error general */
   loginForm: FormGroup;
 
   constructor(
@@ -47,7 +49,7 @@ export class LoginComponent {
     this.loginForm = this.fb.group({
       userName: ['', Validators.required],
       password: ['', Validators.required],
-      server: [''] // control dummy para mat-error general
+      server: [''] // control dummy para mostrar mat-error general
     });
   }
 
@@ -60,7 +62,7 @@ export class LoginComponent {
 
     const { userName, password } = this.loginForm.value;
 
-    // Encendemos loader y limpiamos errores previos
+    // Enciende overlay y limpia errores previos
     this.isLoading = true;
     this.errorMessage = '';
     const serverCtrl = this.loginForm.get('server');
@@ -72,17 +74,19 @@ export class LoginComponent {
     this.authService.login(userName, password)
       .pipe(
         take(1),
-        finalize(() => { this.isLoading = false; }) // apaga SIEMPRE el overlay
+        finalize(() => { this.isLoading = false; }) // apaga SIEMPRE el overlay (éxito o error)
       )
       .subscribe({
-        next: _data => {
+        next: _ => {
           this.router.navigate(['/tarjetas']);
         },
         error: (error: HttpErrorResponse) => {
-          this.errorMessage =
-            error?.error?.codigo?.message ||
-            error?.error?.message ||
-            'Ocurrió un error durante el inicio de sesión';
+          // Manejo robusto del mensaje (401 puede venir sin body)
+          const msgFromApi =
+            (error?.error && (error.error.codigo?.message || error.error.message)) ||
+            (typeof error?.error === 'string' ? error.error : null);
+
+          this.errorMessage = msgFromApi || 'Ocurrió un error durante el inicio de sesión';
 
           // Fuerza estado de error visible en el form-field de "server"
           serverCtrl?.setErrors({ server: true });
@@ -90,7 +94,7 @@ export class LoginComponent {
           serverCtrl?.markAsTouched();
           serverCtrl?.updateValueAndValidity();
 
-          // Opcional: snackbar (puedes quitarlo si no lo quieres)
+          // Opcional: snackbar (elimínalo si no lo quieres)
           this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
         }
       });
@@ -164,9 +168,8 @@ export class LoginComponent {
           Entrar
         </button>
 
-        <!-- Mensaje de error GENERAL bajo el botón, alineado como Material -->
+        <!-- Error GENERAL bajo el botón con estilo Material -->
         <mat-form-field appearance="fill" class="full-width error-field">
-          <!-- Input dummy: oculto visualmente pero mantiene el estado de error del form-field -->
           <input matInput formControlName="server" class="server-dummy-input" tabindex="-1" aria-hidden="true" />
           <mat-error *ngIf="errorMessage">{{ errorMessage }}</mat-error>
         </mat-form-field>
@@ -174,7 +177,7 @@ export class LoginComponent {
     </mat-card-content>
   </mat-card>
 
-  <!-- Overlay flotante de CARGA -->
+  <!-- Overlay flotante de CARGA (usa @if, no requiere CommonModule) -->
   @if (isLoading) {
     <div class="overlay" role="alert" aria-live="assertive">
       <div class="overlay-content" role="dialog" aria-label="Cargando">
@@ -185,27 +188,3 @@ export class LoginComponent {
   }
 </div>
 
-
-/* ...tu CSS existente... */
-
-/* Oculta la caja del input dentro del form-field de error,
-   pero deja visible sólo el subscript (mat-error). */
-.error-field .mdc-text-field {
-  display: none;
-}
-
-.server-dummy-input {
-  position: absolute;
-  width: 0;
-  height: 0;
-  opacity: 0;
-  pointer-events: none;
-  border: 0;
-  margin: 0;
-  padding: 0;
-  line-height: 0;
-}
-
-.error-field {
-  margin-top: -8px; /* Ajusta la distancia con el botón */
-}
