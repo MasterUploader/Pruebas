@@ -15,7 +15,6 @@ import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-num
 
 @Component({
   selector: 'app-modal-tarjeta',
-  // Este componente usa "imports" (estilo standalone) para sus templates
   imports: [
     MatDialogModule,
     MatFormFieldModule,
@@ -30,6 +29,10 @@ import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-num
 })
 export class ModalTarjetaComponent implements OnInit, OnDestroy {
 
+  // ===== Constantes de formato =====
+  private readonly MAX_NAME_LEN = 40;
+  private readonly MAX_LINE = 20;
+
   private subscription: Subscription = new Subscription();
   private imprime = false;
 
@@ -43,7 +46,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     numeroCuenta: ''
   };
 
-  // Form reactivo (diseño fijo: 2 filas)
   form!: FormGroup;
 
   // Vista (dos líneas)
@@ -61,109 +63,112 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     private tarjetaService: TarjetaService,
     private cdr: ChangeDetectorRef,
     @Inject(MAT_DIALOG_DATA) public tarjeta: Tarjeta
-  ) { }
+  ) {}
 
+  // ===== Ciclo de vida =====
   ngOnInit(): void {
-    // Estado de sesión
     this.subscription.add(
-      this.authService.sessionActive$.subscribe(isActive => {
-        if (isActive) {
-          this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData.usuarioICBS ?? '';
-          this.actualizarNombre((this.tarjeta?.nombre ?? '').toUpperCase());
-          this.cdr.detectChanges();
-          this.cdr.markForCheck();
-        } else {
-          this.authService.logout();
-        }
-      })
+      this.authService.sessionActive$.subscribe(isActive => this.handleSessionChange(isActive))
     );
 
-    // FormGroup con reglas:
-    // - requerido
-    // - solo letras/espacios en MAYÚSCULAS
-    // - máximo 40
-    // - al menos dos palabras (dos nombres)
-    this.form = this.fb.group({
-      nombre: [
-        (this.tarjeta?.nombre ?? '').toUpperCase(),
-        [
-          Validators.required,
-          Validators.pattern(/^[A-ZÑ ]+$/),
-          Validators.maxLength(40),
-          this.minTwoWords()
-        ]
-      ]
-    });
-
-    // Mantener MAYÚSCULAS, modelo y vista sincronizados
-    const nombreCtrl = this.form.get('nombre')!;
-    this.subscription.add(
-      nombreCtrl.valueChanges.subscribe((v: string) => {
-        const up = (v ?? '').toUpperCase();
-        if (v !== up) {
-          nombreCtrl.setValue(up, { emitEvent: false });
-        }
-        this.tarjeta.nombre = this.normalizarNombre(up);
-        this.actualizarNombre(this.tarjeta.nombre);
-      })
-    );
-
-    // Primera actualización
-    const inicial = (this.tarjeta?.nombre ?? '').toUpperCase();
-    this.tarjeta.nombre = this.normalizarNombre(inicial);
-    this.actualizarNombre(this.tarjeta.nombre);
+    this.buildForm();
+    this.bindForm();
+    this.bootstrapName();
   }
 
   ngOnDestroy(): void {
     this.subscription.unsubscribe();
   }
 
-  // ====== Validadores y helpers ======
+  // ===== Inicialización =====
+  private handleSessionChange(isActive: boolean): void {
+    if (!isActive) {
+      this.authService.logout();
+      return;
+    }
+    this.usuarioICBS = this.authService.currentUserValue?.activeDirectoryData.usuarioICBS ?? '';
+    this.actualizarNombre((this.tarjeta?.nombre ?? '').toUpperCase());
+    this.cdr.detectChanges();
+    this.cdr.markForCheck();
+  }
 
-  /** Valida que existan al menos dos palabras; si está vacío, permite que 'required' sea el que dispare. */
+  private buildForm(): void {
+    this.form = this.fb.group({
+      nombre: [
+        (this.tarjeta?.nombre ?? '').toUpperCase(),
+        [
+          Validators.required,
+          Validators.pattern(/^[A-ZÑ ]+$/),
+          Validators.maxLength(this.MAX_NAME_LEN),
+          this.minTwoWords()
+        ]
+      ]
+    });
+  }
+
+  private bindForm(): void {
+    const nombreCtrl = this.form.get('nombre')!;
+    this.subscription.add(
+      nombreCtrl.valueChanges.subscribe((v: string) => {
+        const up = (v ?? '').toUpperCase();
+        if (v !== up) nombreCtrl.setValue(up, { emitEvent: false });
+        this.tarjeta.nombre = this.normalizarNombre(up);
+        this.actualizarNombre(this.tarjeta.nombre);
+      })
+    );
+  }
+
+  private bootstrapName(): void {
+    const inicial = (this.tarjeta?.nombre ?? '').toUpperCase();
+    this.tarjeta.nombre = this.normalizarNombre(inicial);
+    this.actualizarNombre(this.tarjeta.nombre);
+  }
+
+  // ===== Validadores y helpers =====
+
+  /** >= 2 palabras; si está vacío, deja que 'required' lo maneje. */
   private minTwoWords(): ValidatorFn {
     return (control: AbstractControl): ValidationErrors | null => {
       const raw = (control.value ?? '').toString().trim();
-      if (!raw) return null; // deja que 'required' maneje vacío
+      if (!raw) return null;
       const words = this.normalizarNombre(raw).split(/\s+/).filter(Boolean);
       return words.length >= 2 ? null : { twoWords: true };
     };
   }
 
-  /** Deja solo letras/espacios, colapsa espacios y recorta. */
+  /** Mayúsculas, solo letras/espacios, colapsa espacios. */
   private normalizarNombre(nombre: string): string {
     let out = (nombre ?? '').toUpperCase().replace(/[^A-ZÑ\s]/g, '');
-    out = out.replace(/\s+/g, ' ').trim();
-    return out;
+    return out.replace(/\s+/g, ' ').trim();
+  }
+
+  private tokenize(full: string): string[] {
+    return (full ?? '').split(' ').filter(Boolean);
+  }
+
+  private canFit(line: string, token: string, max: number = this.MAX_LINE): boolean {
+    return line.length === 0 ? token.length <= max : (line.length + 1 + token.length) <= max;
+  }
+
+  private concatLine(line: string, token: string): string {
+    return line.length ? `${line} ${token}` : token;
   }
 
   /** Calcula 2 líneas (máx 20 c/u) sin cortar palabras; si no cabe, prioriza no cortar. */
   private computeTwoLines(full: string): { line1: string; line2: string } {
-    const MAX = 20;
-    const tokens = (full ?? '').split(' ').filter(Boolean);
-
+    const tokens = this.tokenize(full);
     let line1 = '';
     let line2 = '';
 
     for (const t of tokens) {
-      // Intenta agregar a línea 1
-      if ((line1.length === 0 && t.length <= MAX) || (line1.length > 0 && (line1.length + 1 + t.length) <= MAX)) {
-        line1 = line1.length ? `${line1} ${t}` : t;
-        continue;
-      }
-      // Intenta agregar a línea 2
-      if ((line2.length === 0 && t.length <= MAX) || (line2.length > 0 && (line2.length + 1 + t.length) <= MAX)) {
-        line2 = line2.length ? `${line2} ${t}` : t;
-        continue;
-      }
-      // Caso límite: excedería 20 en la línea 2 → lo agregamos completo (sin cortar)
-      line2 = line2.length ? `${line2} ${t}` : t;
+      if (this.canFit(line1, t)) { line1 = this.concatLine(line1, t); continue; }
+      if (this.canFit(line2, t)) { line2 = this.concatLine(line2, t); continue; }
+      line2 = this.concatLine(line2, t); // fallback sin cortar
     }
-
     return { line1, line2 };
   }
 
-  private actualizarNombre(nombre: string) {
+  private actualizarNombre(nombre: string): void {
     const limpio = this.normalizarNombre(nombre);
     const { line1, line2 } = this.computeTwoLines(limpio);
     this.nombres = line1;
@@ -176,78 +181,94 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     this.nombreCambiado.emit(this.nombreMandar);
   }
 
-  /** Mensaje único de error para el mat-error. */
+  /** Único mensaje de error para el mat-error (evita superposición). */
   get nombreError(): string | null {
     const c = this.form.get('nombre');
     if (!c || !c.touched) return null;
-    if (c.hasError('required'))  return 'El nombre es obligatorio.';
-    if (c.hasError('twoWords'))  return 'Debe ingresar al menos dos nombres.';
-    if (c.hasError('maxlength')) return 'El nombre no puede exceder 40 caracteres.';
-    if (c.hasError('pattern'))   return 'Solo se permiten letras y espacios en mayúsculas.';
+
+    const map: Record<string, string> = {
+      required: 'El nombre es obligatorio.',
+      twoWords: 'Debe ingresar al menos dos nombres.',
+      maxlength: `El nombre no puede exceder ${this.MAX_NAME_LEN} caracteres.`,
+      pattern: 'Solo se permiten letras y espacios en mayúsculas.'
+    };
+
+    for (const key of Object.keys(map)) {
+      if ((c as any).hasError(key)) return map[key];
+    }
     return null;
   }
 
-  // ====== Acción principal ======
+  // ===== Flujo principal =====
 
   imprimir(datosParaImprimir: Tarjeta): void {
     const nombreCtrl = this.form.get('nombre')!;
-    if (nombreCtrl.invalid) {
-      nombreCtrl.markAsTouched();
-      nombreCtrl.updateValueAndValidity();
+    if (this.blockIfInvalid(nombreCtrl)) return;
 
-      const msg = this.nombreError ?? 'El nombre no es válido.';
-      this.snackBar.open(msg, 'Cerrar', {
-        duration: 3500,
-        verticalPosition: 'top',
-        horizontalPosition: 'center'
+    this.ensureSessionActive(() => {
+      this.checkImpresionAndPrint(datosParaImprimir);
+    });
+  }
+
+  /** Marca control, muestra snackbar y retorna true si inválido. */
+  private blockIfInvalid(ctrl: AbstractControl): boolean {
+    if (ctrl.valid) return false;
+    ctrl.markAsTouched();
+    ctrl.updateValueAndValidity();
+    this.showSnack(this.nombreError ?? 'El nombre no es válido.');
+    return true;
+  }
+
+  /** Verifica sesión activa antes de continuar. */
+  private ensureSessionActive(onActive: () => void): void {
+    this.authService.sessionActive$.pipe(take(1)).subscribe(isActive => {
+      if (!isActive) {
+        this.authService.logout();
+        return;
+      }
+      onActive();
+    });
+  }
+
+  /** Consulta si se puede imprimir; si sí, imprime y registra; si ya estaba impresa, cierra. */
+  private checkImpresionAndPrint(datosParaImprimir: Tarjeta): void {
+    this.tarjetaService.validaImpresion(this.tarjeta.numero).pipe(take(1)).subscribe({
+      next: (r) => {
+        this.imprime = !!r.imprime;
+        if (this.imprime) { this.cerrarModal(); return; }
+        this.performPrintAndRegister(datosParaImprimir);
+      },
+      error: (e) => console.error('Error en validaImpresion', e)
+    });
+  }
+
+  /** Imprime (2 filas) y registra estado; al finalizar, cierra y recarga. */
+  private performPrintAndRegister(datosParaImprimir: Tarjeta): void {
+    const tipoDiseno = false; // siempre 2 filas (en tu servicio: true=1 fila, false=2 filas)
+    const ok = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseno);
+    if (!ok) return;
+
+    this.tarjetaService
+      .guardaEstadoImpresion(this.tarjeta.numero, this.usuarioICBS, (this.tarjeta.nombre ?? '').toUpperCase())
+      .pipe(take(1))
+      .subscribe({
+        next: () => { this.cerrarModal(); window.location.reload(); },
+        error: (e) => console.error('Error al guardar estado de impresión', e)
       });
-      return;
-    }
+  }
 
-    // Validación de backend y flujo de impresión/registro
-    this.subscription.add(
-      this.authService.sessionActive$.pipe(take(1)).subscribe(isActive => {
-        if (!isActive) {
-          this.authService.logout();
-          return;
-        }
-
-        this.tarjetaService.validaImpresion(this.tarjeta.numero).pipe(take(1)).subscribe({
-          next: (respuesta) => {
-            this.imprime = !!respuesta.imprime;
-
-            if (!this.imprime) {
-              // Siempre 2 filas → false (en tu servicio: true=1 fila, false=2 filas)
-              const tipoDiseno = false;
-
-              const ok = this.impresionService.imprimirTarjeta(datosParaImprimir, tipoDiseno);
-              if (ok) {
-                this.tarjetaService
-                  .guardaEstadoImpresion(this.tarjeta.numero, this.usuarioICBS, (this.tarjeta.nombre ?? '').toUpperCase())
-                  .pipe(take(1))
-                  .subscribe({
-                    next: () => {
-                      this.cerrarModal();
-                      window.location.reload();
-                    },
-                    error: (error) => console.error('Error al guardar estado de impresión', error)
-                  });
-              }
-            } else {
-              this.cerrarModal();
-            }
-          },
-          error: (error) => console.error('Error en validaImpresion', error)
-        });
-      })
-    );
+  private showSnack(message: string): void {
+    this.snackBar.open(message, 'Cerrar', {
+      duration: 3500,
+      verticalPosition: 'top',
+      horizontalPosition: 'center'
+    });
   }
 
   cerrarModal(): void {
     this.dialogRef.close();
   }
 }
-
 
 
 <h1 mat-dialog-title> Detalle Tarjeta</h1>
@@ -274,7 +295,6 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     </div>
 
     <div mat-dialog-actions class="action-buttons">
-
       <!-- Nombre en tarjeta (reactivo) -->
       <mat-form-field appearance="fill" class="nombre-input">
         <mat-label>Nombre:</mat-label>
@@ -300,3 +320,4 @@ export class ModalTarjetaComponent implements OnInit, OnDestroy {
     </div>
   </div>
 </form>
+
