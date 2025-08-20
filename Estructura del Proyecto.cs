@@ -1,8 +1,6 @@
 import { firstValueFrom } from 'rxjs';
 import { take } from 'rxjs/operators';
 
-// === Helpers de bajo acoplamiento ===
-
 /** Obtiene el nombre a registrar (seleccionado > encontrado) en MAYÚSCULAS */
 private getNombreParaRegistrar(numeroTarjeta: string): string {
   const seleccionado = this.tarjetaSeleccionada?.nombre ?? null;
@@ -17,35 +15,50 @@ private removeFromUi(numeroTarjeta: string): void {
   this.cdr.markForCheck();
 }
 
-// === Método optimizado ===
-
 /**
  * Marca una tarjeta como impresa:
- * - Detiene propagación del click
- * - Calcula nombre a registrar (una sola vez)
- * - Valida sesión y remueve la fila de la UI
- * - Llama al backend con await (sin subscribe next/error)
- * - Notifica éxito / error
+ * - NO elimina la fila hasta que el backend confirme
+ * - Muestra snackbar de éxito/fracaso
  */
-public async eliminarTarjeta(event: Event, numeroTarjeta: string): Promise<void> {
+public eliminarTarjeta(event: Event, numeroTarjeta: string): void {
   event.stopPropagation();
   if (!numeroTarjeta) return; // guard clause
 
   const nombreParaRegistrar = this.getNombreParaRegistrar(numeroTarjeta);
 
-  // Mantén tu helper de sesión; aquí solo ejecutamos el efecto de UI
-  this.withActiveSession(() => this.removeFromUi(numeroTarjeta));
+  // Mantén tu validación de sesión; ejecutamos dentro la lógica completa
+  this.withActiveSession(() => {
+    // IIFE async para poder usar await dentro aunque withActiveSession espere sync
+    (async () => {
+      try {
+        await firstValueFrom(
+          this.datosTarjetaServices
+            .guardaEstadoImpresion(numeroTarjeta, this.usuarioICBS, nombreParaRegistrar)
+            .pipe(take(1))
+        );
 
+        // ✅ Sólo aquí (cuando el backend respondió OK) removemos de la UI
+        this.removeFromUi(numeroTarjeta);
+
+        this.showSnackOk('Tarjeta marcada como impresa.');
+      } catch {
+        // ❌ No removemos nada si falla
+        this.showSnack('No se pudo registrar la impresión. Intenta de nuevo.');
+      }
+    })();
+  });
+}
+
+this.withActiveSession(async () => {
   try {
     await firstValueFrom(
       this.datosTarjetaServices
         .guardaEstadoImpresion(numeroTarjeta, this.usuarioICBS, nombreParaRegistrar)
         .pipe(take(1))
     );
-
+    this.removeFromUi(numeroTarjeta);
     this.showSnackOk('Tarjeta marcada como impresa.');
   } catch {
-    // Mantengo el mensaje genérico que tenías
     this.showSnack('No se pudo registrar la impresión. Intenta de nuevo.');
   }
-}
+});
