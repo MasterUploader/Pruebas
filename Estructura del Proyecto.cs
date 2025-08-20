@@ -1,18 +1,21 @@
-Validemos que este codigo funcione correctamente
-
 import { RouterModule, Routes } from '@angular/router';
 import { LoginComponent } from './modules/auth/components/login/login.component';
 import { ConsultaTarjetaComponent } from './modules/tarjetas/components/consulta-tarjeta/consulta-tarjeta.component';
 import { authGuard } from './core/guards/auth.guard';
 
-
-
 export const routes: Routes = [
-  { path: 'login', component: LoginComponent },
-  { path: 'tarjetas', component: ConsultaTarjetaComponent, canActivate: [authGuard], title: 'Tarjetas' },
-  { path: '', component: ConsultaTarjetaComponent, canActivate: [authGuard] },
-  { path: '**', component: ConsultaTarjetaComponent, canActivate: [authGuard] }
+  // Página de login (sin guard)
+  { path: 'login', component: LoginComponent, title: 'Iniciar sesión' },
 
+  // Ruta protegida por el guard
+  { path: 'tarjetas', component: ConsultaTarjetaComponent, canActivate: [authGuard], title: 'Tarjetas' },
+
+  // Raíz: redirige a /tarjetas (el guard decidirá si pasa o te manda al login)
+  { path: '', pathMatch: 'full', redirectTo: 'tarjetas' },
+
+  // Cualquier ruta desconocida → redirige a /tarjetas (el guard actuará igual)
+  { path: '**', redirectTo: 'tarjetas' }
 ];
 
+// Si usas AppModule clásico:
 export const AppRoutingModule = RouterModule.forRoot(routes);
