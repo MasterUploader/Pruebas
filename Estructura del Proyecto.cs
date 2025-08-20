@@ -1,3 +1,5 @@
+Me quedare con este codigo, no hagas más cambios, pronto te pedire mejoras en otros puntos:
+
 import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
 import { BehaviorSubject, Observable, tap, catchError, throwError } from 'rxjs';
 import { Router } from '@angular/router';
@@ -99,6 +101,7 @@ export class AuthService {
 }
 
 
+
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
@@ -187,33 +190,3 @@ export class LoginComponent {
     }
   }
 }
-
-
-async login(): Promise<void> {
-  if (this.loginForm.invalid || this.isLoading) return;
-
-  const raw = this.loginForm.value;
-  const userName = (raw.userName ?? '').trim(); // ✅ quita espacios
-  const password = raw.password;
-
-  this.errorMessage = '';
-  this.isLoading = true;
-  this.loginForm.disable({ emitEvent: false });
-
-  try {
-    await firstValueFrom(this.authService.login(userName, password));
-
-    // ✅ cerrar notificaciones previas si existieran
-    this.snackBar.dismiss();
-
-    // navega siempre aquí
-    this.router.navigate(['/tarjetas']);
-  } catch (error: any) {
-    this.errorMessage = error?.message ?? 'Ocurrió un error durante el inicio de sesión';
-    this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
-  } finally {
-    this.isLoading = false;
-    this.loginForm.enable({ emitEvent: false });
-  }
-}
-
