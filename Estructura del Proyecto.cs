@@ -1,23 +1,34 @@
-<button
-  mat-raised-button
-  type="submit"
-  class="loginNow custom-login-btn"
-  [disabled]="isLoading || loginForm.invalid">
-  Entrar
-</button>
+Tengo este codigo en un sitio en angular 20
+
+  <div class="overlay" *ngIf="isLoading" role="alert" aria-live="assertive">
+    <div class="overlay-content" role="dialog" aria-label="Autenticando">
+      <mat-progress-spinner
+        mode="indeterminate"
+        diameter="48"
+      ></mat-progress-spinner>
+      <div class="overlay-text">Autenticando</div>
+    </div>
+  </div>
 
 
-/* Mantener color específico del botón de login */
-.custom-login-btn {
-  background-color: #e91e63 !important; /* Ejemplo: color rosa Material */
-  color: white !important;
-}
+  <div
+          class="inline-error mat-mdc-form-field-error"
+          *ngIf="errorMessage"
+          role="alert"
+        >
+          <mat-icon aria-hidden="true">error</mat-icon>
+          <span>{{ errorMessage }}</span>
+        </div>
 
-.custom-login-btn:hover {
-  background-color: #d81b60 !important; /* Un poco más oscuro al pasar el mouse */
-}
+Me dice que las lineas 
 
-.custom-login-btn:disabled {
-  background-color: #ccc !important; /* Gris cuando está deshabilitado */
-  color: #666 !important;
-}
+<div class="overlay" *ngIf="isLoading" role="alert" aria-live="assertive">
+
+y 
+
+<div class="inline-error mat-mdc-form-field-error"
+          *ngIf="errorMessage"
+          role="alert"
+        >
+
+el *ngIf esta deprecado, como puedo corregir ese codigo en particular
