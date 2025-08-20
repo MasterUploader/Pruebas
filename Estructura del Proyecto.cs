@@ -1,32 +1,37 @@
-import { CanActivateFn, Router } from '@angular/router';
-import { inject } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
+import { loginGuard } from './login.guard';
 import { AuthService } from '../services/auth.service';
 
-/**
- * Evita acceder a /login si ya hay sesión activa.
- * Si la sesión está activa, redirige a /tarjetas.
- * Si no, permite ver el login.
- */
-export const loginGuard: CanActivateFn = () => {
-  const auth = inject(AuthService);
-  const router = inject(Router);
+describe('loginGuard', () => {
+  let authServiceSpy: jasmine.SpyObj<AuthService>;
+  let routerSpy: jasmine.SpyObj<Router>;
 
-  return auth.sessionIsActive()
-    ? router.createUrlTree(['/tarjetas'])
-    : true;
-};
+  beforeEach(() => {
+    authServiceSpy = jasmine.createSpyObj('AuthService', ['sessionIsActive']);
+    routerSpy = jasmine.createSpyObj('Router', ['createUrlTree']);
 
-import { RouterModule, Routes } from '@angular/router';
-import { LoginComponent } from './modules/auth/components/login/login.component';
-import { ConsultaTarjetaComponent } from './modules/tarjetas/components/consulta-tarjeta/consulta-tarjeta.component';
-import { authGuard } from './core/guards/auth.guard';
-import { loginGuard } from './core/guards/login.guard'; // ⬅️ importa el nuevo guard
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: AuthService, useValue: authServiceSpy },
+        { provide: Router, useValue: routerSpy }
+      ]
+    });
+  });
 
-export const routes: Routes = [
-  { path: 'login', component: LoginComponent, canActivate: [loginGuard], title: 'Iniciar sesión' },
-  { path: 'tarjetas', component: ConsultaTarjetaComponent, canActivate: [authGuard], title: 'Tarjetas' },
-  { path: '', pathMatch: 'full', redirectTo: 'tarjetas' },
-  { path: '**', redirectTo: 'tarjetas' }
-];
+  it('debe redirigir a /tarjetas si la sesión está activa', () => {
+    authServiceSpy.sessionIsActive.and.returnValue(true);
+    routerSpy.createUrlTree.and.returnValue({} as any);
 
-export const AppRoutingModule = RouterModule.forRoot(routes);
+    const result = TestBed.runInInjectionContext(() => loginGuard());
+    expect(routerSpy.createUrlTree).toHaveBeenCalledWith(['/tarjetas']);
+    expect(result).toBe(routerSpy.createUrlTree.calls.mostRecent().returnValue);
+  });
+
+  it('debe permitir ver /login si NO hay sesión', () => {
+    authServiceSpy.sessionIsActive.and.returnValue(false);
+    const result = TestBed.runInInjectionContext(() => loginGuard());
+    expect(result).toBeTrue();
+    expect(routerSpy.createUrlTree).not.toHaveBeenCalled();
+  });
+});
