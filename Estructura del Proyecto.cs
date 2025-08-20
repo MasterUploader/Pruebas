@@ -13,7 +13,8 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatDialogModule } from '@angular/material/dialog';
 import { AuthService } from '../../../../core/services/auth.service';
 import { HttpErrorResponse } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs'; // <-- usamos async/await con observables
+import { catchError, tap, take, finalize } from 'rxjs/operators';
+import { of } from 'rxjs'; // para devolver un observable vacío en catchError
 
 @Component({
   selector: 'app-login',
@@ -90,22 +91,25 @@ export class LoginComponent {
     return fromApi || 'Ocurrió un error durante el inicio de sesión';
   }
 
-  /** Versión optimizada con async/await y menor complejidad */
-  async login(): Promise<void> {
+  /** Versión RxJS con baja complejidad */
+  login(): void {
     if (this.loginForm.invalid || this.isLoading) return;
 
     this.errorMessage = '';
     this.setLoading(true);
 
-    try {
-      const { userName, password } = this.loginForm.value;
-      await firstValueFrom(this.authService.login(userName, password));
-      await this.router.navigate(['/tarjetas']);
-    } catch (error) {
-      this.errorMessage = this.getApiErrorMessage(error);
-      this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
-    } finally {
-      this.setLoading(false);
-    }
+    const { userName, password } = this.loginForm.value;
+
+    this.authService.login(userName, password).pipe(
+      take(1),
+      tap(() => { this.router.navigate(['/tarjetas']); }),
+      catchError((error) => {
+        this.errorMessage = this.getApiErrorMessage(error);
+        this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
+        // Devolvemos un observable “neutro” para que finalize() se ejecute y no reviente la cadena
+        return of(null);
+      }),
+      finalize(() => this.setLoading(false))
+    ).subscribe();
   }
 }
