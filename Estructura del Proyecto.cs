@@ -1,5 +1,3 @@
-OK, deacuerdo haz el cambio acá te dejo el codigo actual:
-
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
@@ -14,7 +12,6 @@ import { FormGroup, FormsModule, FormBuilder, Validators, ReactiveFormsModule } 
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatDialogModule } from '@angular/material/dialog';
 import { AuthService } from '../../../../core/services/auth.service';
-import { HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 
 @Component({
@@ -37,14 +34,14 @@ import { firstValueFrom } from 'rxjs';
   styleUrl: './login.component.css'
 })
 export class LoginComponent {
-  /** Control de UI */
+  /** UI */
   hidePassword = true;
   isLoading = false;
 
   /** Mensaje general del API mostrado bajo el botón y en snackbar */
   errorMessage = '';
 
-  /** Form reactivo con validaciones */
+  /** Form reactivo */
   loginForm: FormGroup;
 
   constructor(
@@ -59,7 +56,6 @@ export class LoginComponent {
     });
   }
 
-  /** Alterna visibilidad de la contraseña */
   togglePasswordVisibility(): void {
     this.hidePassword = !this.hidePassword;
   }
@@ -72,29 +68,14 @@ export class LoginComponent {
       : this.loginForm.enable({ emitEvent: false });
   }
 
-  /** Navegación encapsulada (reduce líneas en login) */
-  private gotoTarjetas(): Promise<boolean> {
-    return this.router.navigate(['/tarjetas']);
-  }
-
-  /** Normaliza el mensaje de error del backend */
-  private getApiErrorMessage(error: unknown): string {
-    const err = error as HttpErrorResponse;
-    const fromApi =
-      (err?.error && (err.error?.codigo?.message || err.error?.message)) ||
-      (typeof err?.error === 'string' ? err.error : null);
-    return fromApi || 'Ocurrió un error durante el inicio de sesión';
-  }
-
-  /** Manejo centralizado de errores (reduce complejidad en login) */
+  /** Manejo centralizado de errores (el servicio ya entrega Error.message listo) */
   private handleLoginError(error: unknown): void {
-    this.errorMessage = this.getApiErrorMessage(error);
+    this.errorMessage = (error as Error)?.message || 'Ocurrió un error durante el inicio de sesión';
     this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
   }
 
-  /** Versión async/await con complejidad reducida */
+  /** Versión async/await con errores normalizados por el servicio */
   async login(): Promise<void> {
-    // Guard clauses simples → menos ramas
     if (this.loginForm.invalid || this.isLoading) return;
 
     this.errorMessage = '';
@@ -102,8 +83,9 @@ export class LoginComponent {
 
     try {
       const { userName, password } = this.loginForm.value;
+      // El AuthService se encarga de: guardar sesión, y navegar a /tarjetas (si así lo deseas)
       await firstValueFrom(this.authService.login(userName, password));
-      await this.gotoTarjetas();
+      // No navegamos aquí para evitar duplicidad: el servicio ya lo hace.
     } catch (error) {
       this.handleLoginError(error);
     } finally {
@@ -113,16 +95,13 @@ export class LoginComponent {
 }
 
 
-
-import { Injectable , Inject, PLATFORM_ID, inject } from '@angular/core';
-import { BehaviorSubject, Observable, map } from 'rxjs';
+import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
+import { BehaviorSubject, Observable, map, catchError, throwError } from 'rxjs';
 import { Router } from '@angular/router';
 import { isPlatformBrowser } from '@angular/common';
 import { LoginResponse } from '../models/login.Response.model';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { environment } from '../../environments/environment';
-//import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
-//import exp from 'node:constants';
 
 @Injectable({
   providedIn: 'root'
@@ -131,23 +110,26 @@ export class AuthService {
   private currentUserSubject: BehaviorSubject<LoginResponse | null>;
   public currentUser: Observable<LoginResponse | null>;
 
-  private currentUserSubject2 = new  BehaviorSubject<any>(null); //Prueba
-  public currentUser2 = this.currentUserSubject2.asObservable(); //Prueba
-
+  private currentUserSubject2 = new BehaviorSubject<any>(null); // Prueba
+  public currentUser2 = this.currentUserSubject2.asObservable(); // Prueba
 
   private sessionActive: BehaviorSubject<boolean>;
   private apiUrl = environment.apiBaseUrl;
   public agenciaAperturaCodigo: string | null = null;
   public agenciaImprimeCodigo: string | null = null;
-  public usuarioICBS: string = "";
-  private isBrowser: boolean = false;
+  public usuarioICBS: string = '';
+  private isBrowser = false;
 
-  constructor(@Inject(PLATFORM_ID) private platformId: Object, private router: Router, private http: HttpClient) {
+  constructor(
+    @Inject(PLATFORM_ID) private platformId: Object,
+    private router: Router,
+    private http: HttpClient
+  ) {
     let initialUser: LoginResponse | null;
-    let sessionIsActive: boolean = false;
+    let sessionIsActive = false;
     this.isBrowser = isPlatformBrowser(this.platformId);
 
-    if (isPlatformBrowser(this.platformId)) {
+    if (this.isBrowser) {
       initialUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
       sessionIsActive = this.sessionIsActive();
     } else {
@@ -159,29 +141,43 @@ export class AuthService {
     this.sessionActive = new BehaviorSubject<boolean>(sessionIsActive);
   }
 
-  login(userName: string, password: string): Observable<LoginResponse> {
-    return this.http.post<LoginResponse>(`${this.apiUrl}/api/Auth/Login`, { user: userName, password: password })
-      .pipe(map(response => {
-        if (isPlatformBrowser(this.platformId)) {
-          const expiresAt = new Date(response.token.expiration);
-
-          localStorage.setItem('currentUser', JSON.stringify(response));
-          localStorage.setItem('token', response.token.token);
-          localStorage.setItem('expiresAt', expiresAt.getTime().toString());
-
-          this.sessionActive.next(true);
-          this.currentUserSubject.next(response);
-          this.agenciaAperturaCodigo = response.activeDirectoryData.agenciaAperturaCodigo;
-          this.agenciaImprimeCodigo = response.activeDirectoryData.agenciaImprimeCodigo;
-          this.usuarioICBS = response.activeDirectoryData.usuarioICBS;
-
-          this.router.navigate(['/tarjetas']);
-        }
-        return response;
-      }));
+  /** Normaliza cualquier HttpErrorResponse a un Error con message legible */
+  private toUserFacingError(error: HttpErrorResponse): Error {
+    const msgFromApi =
+      (error?.error && (error.error?.codigo?.message || error.error?.message)) ||
+      (typeof error?.error === 'string' ? error.error : null);
+    return new Error(msgFromApi || 'Ocurrió un error durante el inicio de sesión');
   }
 
-  logout(): void {    
+  login(userName: string, password: string): Observable<LoginResponse> {
+    return this.http
+      .post<LoginResponse>(`${this.apiUrl}/api/Auth/Login`, { user: userName, password })
+      .pipe(
+        map(response => {
+          if (isPlatformBrowser(this.platformId)) {
+            const expiresAt = new Date(response.token.expiration);
+
+            localStorage.setItem('currentUser', JSON.stringify(response));
+            localStorage.setItem('token', response.token.token);
+            localStorage.setItem('expiresAt', expiresAt.getTime().toString());
+
+            this.sessionActive.next(true);
+            this.currentUserSubject.next(response);
+            this.agenciaAperturaCodigo = response.activeDirectoryData.agenciaAperturaCodigo;
+            this.agenciaImprimeCodigo = response.activeDirectoryData.agenciaImprimeCodigo;
+            this.usuarioICBS = response.activeDirectoryData.usuarioICBS;
+
+            // Mantengo tu navegación aquí para no duplicarla en el componente
+            this.router.navigate(['/tarjetas']);
+          }
+          return response;
+        }),
+        // ⬇️ Centralizamos el manejo del error: el componente recibirá un Error con message claro
+        catchError((err: HttpErrorResponse) => throwError(() => this.toUserFacingError(err)))
+      );
+  }
+
+  logout(): void {
     localStorage.clear();
     this.currentUserSubject.next(null);
     this.router.navigate(['/login']);
@@ -196,11 +192,8 @@ export class AuthService {
     if (this.isBrowser) {
       const expiresAt = localStorage.getItem('expiresAt');
       return new Date().getTime() < Number(expiresAt);
-
-    } else {
-      return false;
     }
-
+    return false;
   }
 
   public get currentUserValue(): LoginResponse | null {
@@ -215,6 +208,3 @@ export class AuthService {
     return this.currentUserValue?.activeDirectoryData.nombreUsuario || null;
   }
 }
-
-
-
