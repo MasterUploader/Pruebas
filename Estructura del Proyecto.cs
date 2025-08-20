@@ -14,7 +14,7 @@ import { MatDialogModule } from '@angular/material/dialog';
 import { AuthService } from '../../../../core/services/auth.service';
 import { HttpErrorResponse } from '@angular/common/http';
 import { catchError, tap, take, finalize } from 'rxjs/operators';
-import { of } from 'rxjs'; // para devolver un observable vacío en catchError
+import { of } from 'rxjs';
 
 @Component({
   selector: 'app-login',
@@ -36,13 +36,16 @@ import { of } from 'rxjs'; // para devolver un observable vacío en catchError
   styleUrl: './login.component.css'
 })
 export class LoginComponent {
+  /** Controla visibilidad de contraseña */
   hidePassword = true;
+
+  /** Bandera de carga para overlay + deshabilitar form */
   isLoading = false;
 
-  /** Mensaje general del API que mostramos debajo del botón y en snackbar */
+  /** Mensaje general de error (se muestra bajo el botón y en snackbar) */
   errorMessage = '';
 
-  /** Form reactivo con validaciones y límites para los hints/contadores */
+  /** Form reactivo con validaciones */
   loginForm: FormGroup;
 
   constructor(
@@ -52,34 +55,27 @@ export class LoginComponent {
     private readonly snackBar: MatSnackBar
   ) {
     this.loginForm = this.fb.group({
-      userName: [
-        '',
-        [
-          Validators.required,
-          Validators.maxLength(150)
-        ]
-      ],
-      password: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(6),
-          Validators.maxLength(128)
-        ]
-      ]
+      userName: ['', [Validators.required, Validators.maxLength(150)]],
+      password: ['', [Validators.required, Validators.minLength(6), Validators.maxLength(128)]]
     });
   }
 
+  /** Alterna visibilidad del campo password */
   togglePasswordVisibility(): void {
     this.hidePassword = !this.hidePassword;
   }
 
-  /** Enciende/apaga loading y (des)habilita el form sin warnings */
+  /** Activa/desactiva loading y (des)habilita el form de forma segura (evita warnings) */
   private setLoading(loading: boolean): void {
     this.isLoading = loading;
     loading
       ? this.loginForm.disable({ emitEvent: false })
       : this.loginForm.enable({ emitEvent: false });
+  }
+
+  /** Navegación encapsulada (reduce ramas en login) */
+  private gotoTarjetas(): void {
+    this.router.navigate(['/tarjetas']);
   }
 
   /** Extrae un mensaje entendible del error del backend */
@@ -91,7 +87,13 @@ export class LoginComponent {
     return fromApi || 'Ocurrió un error durante el inicio de sesión';
   }
 
-  /** Versión RxJS con baja complejidad */
+  /**
+   * Login (versión RxJS con baja complejidad):
+   * - take(1) evita múltiples emisiones
+   * - tap navega en éxito
+   * - catchError maneja mensaje + snackbar y devuelve of(null) para no romper la cadena
+   * - finalize apaga el loading SIEMPRE
+   */
   login(): void {
     if (this.loginForm.invalid || this.isLoading) return;
 
@@ -102,12 +104,11 @@ export class LoginComponent {
 
     this.authService.login(userName, password).pipe(
       take(1),
-      tap(() => { this.router.navigate(['/tarjetas']); }),
+      tap(() => this.gotoTarjetas()),
       catchError((error) => {
         this.errorMessage = this.getApiErrorMessage(error);
         this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
-        // Devolvemos un observable “neutro” para que finalize() se ejecute y no reviente la cadena
-        return of(null);
+        return of(null); // mantiene viva la cadena para que finalize() corra
       }),
       finalize(() => this.setLoading(false))
     ).subscribe();
