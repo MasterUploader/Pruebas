@@ -1,8 +1,6 @@
-Así tengo el consulta-tarjeta.component.ts, agrega los cambios para solo copiar y pegar
-
 import {
   Component, OnInit, ChangeDetectorRef, ViewChild, OnDestroy,
-  ChangeDetectionStrategy
+  ChangeDetectionStrategy, AfterViewInit
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
@@ -18,6 +16,7 @@ import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatPaginatorModule, MatPaginator } from '@angular/material/paginator';
 
 // Forms
 import { ReactiveFormsModule, FormGroup, FormBuilder, Validators, FormControl } from '@angular/forms';
@@ -43,22 +42,23 @@ import { MaskAccountNumberPipe } from '../../../../shared/pipes/mask-account-num
     CommonModule, MatCardModule, MatDialogModule, MatTableModule,
     MatFormFieldModule, ReactiveFormsModule, MatInputModule,
     MatIconModule, MatSortModule, MatMenuModule, MatButtonModule,
-    MatProgressSpinnerModule, MatSnackBarModule,
+    MatProgressSpinnerModule, MatSnackBarModule, MatPaginatorModule,
     MaskCardNumberPipe, MaskAccountNumberPipe
   ],
   templateUrl: './consulta-tarjeta.component.html',
   styleUrl: './consulta-tarjeta.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
+export class ConsultaTarjetaComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ===== Configuración =====
   private readonly BIN = '411052';
   private readonly MAX_DIGITS = 3;
   private readonly ONLY_DIGITS_RE = /^\d+$/;
 
-  // ===== Table / Sort =====
+  // ===== Table / Sort / Paginator =====
   @ViewChild(MatSort, { static: true }) sort!: MatSort;
+  @ViewChild(MatPaginator) paginator!: MatPaginator; // 👈 nuevo: paginador
   public readonly dataSource = new MatTableDataSource<Tarjeta>([]);
   public readonly displayedColumns: ReadonlyArray<string> =
     ['numero', 'nombre', 'motivo', 'numeroCuenta', 'eliminar'];
@@ -123,6 +123,12 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     });
   }
 
+  // 👇 nuevo: conecta el paginador después de renderizar la vista
+  ngAfterViewInit(): void {
+    this.dataSource.paginator = this.paginator;
+    this.cdr.markForCheck();
+  }
+
   ngOnDestroy(): void { this.subscription.unsubscribe(); }
 
   // ===== Infra =====
@@ -157,9 +163,7 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
   }
 
   /** Snackbar de éxito (visual igual; separo método por claridad). */
-  private showSnackOk(message: string): void {
-    this.showSnack(message);
-  }
+  private showSnackOk(message: string): void { this.showSnack(message); }
 
   // ===== Filtro tabla =====
   private configurarFiltros(): void {
@@ -180,6 +184,9 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
     const value = (evt.target as HTMLInputElement)?.value ?? '';
     this.activateFilter = `${field}:${value.trim().toLowerCase()}`;
     this.dataSource.filter = this.activateFilter;
+
+    // 👇 al filtrar, volvemos a la primera página
+    if (this.paginator) this.paginator.firstPage();
   }
 
   // ===== Consultas =====
@@ -192,6 +199,9 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           this.dataSource.data = response.tarjetas;
+
+          // 👇 al recargar datos, volvemos a la primera página
+          if (this.paginator) this.paginator.firstPage();
 
           const sinTarjetas = !response?.tarjetas?.length;
           this.noDataMessage = sinTarjetas
@@ -275,20 +285,13 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
 
   // --- atajos con Ctrl/Meta permitidos ---
   private static readonly CTRL_COMBOS = new Set<string>([
-    'a', // seleccionar tod
-    'c', // copiar
-    'v', // pegar
-    'x', // cortar
-    'z', // deshacer
-    'y'  // rehacer
+    'a', 'c', 'v', 'x', 'z', 'y'
   ]);
 
   /** Devuelve true si la tecla es de control/navegación o un atajo Ctrl/Meta permitido */
   private isControlKey(e: KeyboardEvent): boolean {
     const k = e.key;
     const isCtrl = e.ctrlKey || e.metaKey;
-
-    // lookup O(1), sin cadenas de OR
     return (
       ConsultaTarjetaComponent.ALLOWED_KEYS.has(k) ||
       (isCtrl && ConsultaTarjetaComponent.CTRL_COMBOS.has(k.toLowerCase()))
@@ -335,54 +338,47 @@ export class ConsultaTarjetaComponent implements OnInit, OnDestroy {
   }
 
   // ===== Eliminar (marcar impresa) =====
-// === Helpers de bajo acoplamiento ===
+  /** Obtiene el nombre a registrar (seleccionado > encontrado) en MAYÚSCULAS */
+  private getNombreParaRegistrar(numeroTarjeta: string): string {
+    const seleccionado = this.tarjetaSeleccionada?.nombre ?? null;
+    const encontrado = this.dataSource.data.find(x => x.numero === numeroTarjeta)?.nombre ?? null;
+    const nombre = seleccionado ?? encontrado ?? '';
+    return nombre.toUpperCase();
+  }
 
-/** Obtiene el nombre a registrar (seleccionado > encontrado) en MAYÚSCULAS */
-private getNombreParaRegistrar(numeroTarjeta: string): string {
-  const seleccionado = this.tarjetaSeleccionada?.nombre ?? null;
-  const encontrado = this.dataSource.data.find(x => x.numero === numeroTarjeta)?.nombre ?? null;
-  const nombre = seleccionado ?? encontrado ?? '';
-  return nombre.toUpperCase();
+  /** Quita la fila de la UI y marca change detection */
+  private removeFromUi(numeroTarjeta: string): void {
+    this.dataSource.data = this.dataSource.data.filter(item => item.numero !== numeroTarjeta);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Marca una tarjeta como impresa:
+   * - NO elimina la fila hasta que el backend confirme
+   * - Muestra snackbar de éxito/fracaso
+   */
+  public eliminarTarjeta(event: Event, numeroTarjeta: string): void {
+    event.stopPropagation();
+    if (!numeroTarjeta) return;
+
+    const nombreParaRegistrar = this.getNombreParaRegistrar(numeroTarjeta);
+
+    this.withActiveSession(async () => {
+      (async () => {
+        try {
+          await firstValueFrom(
+            this.datosTarjetaServices
+              .guardaEstadoImpresion(numeroTarjeta, this.usuarioICBS, nombreParaRegistrar)
+              .pipe(take(1))
+          );
+
+          // ✅ Sólo aquí removemos de la UI
+          this.removeFromUi(numeroTarjeta);
+          this.showSnackOk('Tarjeta marcada como impresa.');
+        } catch {
+          this.showSnack('No se pudo registrar la impresión. Intenta de nuevo.');
+        }
+      })();
+    });
+  }
 }
-
-/** Quita la fila de la UI y marca change detection */
-private removeFromUi(numeroTarjeta: string): void {
-  this.dataSource.data = this.dataSource.data.filter(item => item.numero !== numeroTarjeta);
-  this.cdr.markForCheck();
-}
-
-/**
- * Marca una tarjeta como impresa:
- * - NO elimina la fila hasta que el backend confirme
- * - Muestra snackbar de éxito/fracaso
- */
-public eliminarTarjeta(event: Event, numeroTarjeta: string): void {
-  event.stopPropagation();
-  if (!numeroTarjeta) return; // guard clause
-
-  const nombreParaRegistrar = this.getNombreParaRegistrar(numeroTarjeta);
-
-  // Mantén tu validación de sesión; ejecutamos dentro la lógica completa
-  this.withActiveSession(async() => {
-    // IIFE async para poder usar await dentro aunque withActiveSession espere sync
-    (async () => {
-      try {
-        await firstValueFrom(
-          this.datosTarjetaServices
-            .guardaEstadoImpresion(numeroTarjeta, this.usuarioICBS, nombreParaRegistrar)
-            .pipe(take(1))
-        );
-
-        // ✅ Sólo aquí (cuando el backend respondió OK) removemos de la UI
-        this.removeFromUi(numeroTarjeta);
-
-        this.showSnackOk('Tarjeta marcada como impresa.');
-      } catch {
-        // ❌ No removemos nada si falla
-        this.showSnack('No se pudo registrar la impresión. Intenta de nuevo.');
-      }
-    })();
-  });
-}
-}
-
