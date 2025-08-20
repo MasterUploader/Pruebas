@@ -1,5 +1,3 @@
-Este es el TS completo
-
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
@@ -15,7 +13,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatDialogModule } from '@angular/material/dialog';
 import { AuthService } from '../../../../core/services/auth.service';
 import { HttpErrorResponse } from '@angular/common/http';
-import { finalize, take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs'; // <-- usamos async/await con observables
 
 @Component({
   selector: 'app-login',
@@ -75,38 +73,39 @@ export class LoginComponent {
     this.hidePassword = !this.hidePassword;
   }
 
-  login(): void {
+  /** Enciende/apaga loading y (des)habilita el form sin warnings */
+  private setLoading(loading: boolean): void {
+    this.isLoading = loading;
+    loading
+      ? this.loginForm.disable({ emitEvent: false })
+      : this.loginForm.enable({ emitEvent: false });
+  }
+
+  /** Extrae un mensaje entendible del error del backend */
+  private getApiErrorMessage(error: unknown): string {
+    const err = error as HttpErrorResponse;
+    const fromApi =
+      (err?.error && (err.error?.codigo?.message || err.error?.message)) ||
+      (typeof err?.error === 'string' ? err.error : null);
+    return fromApi || 'Ocurrió un error durante el inicio de sesión';
+  }
+
+  /** Versión optimizada con async/await y menor complejidad */
+  async login(): Promise<void> {
     if (this.loginForm.invalid || this.isLoading) return;
 
-    const { userName, password } = this.loginForm.value;
-
-    // Reset de estado previo
     this.errorMessage = '';
+    this.setLoading(true);
 
-    // Deshabilita controles correctamente (evita warnings)
-    this.isLoading = true;
-    this.loginForm.disable({ emitEvent: false });
-
-    this.authService.login(userName, password)
-      .pipe(
-        take(1),
-        finalize(() => {
-          this.isLoading = false;
-          this.loginForm.enable({ emitEvent: false }); // reactivar SIEMPRE
-        })
-      )
-      .subscribe({
-        next: () => this.router.navigate(['/tarjetas']),
-        error: (error: HttpErrorResponse) => {
-          const msgFromApi =
-            (error?.error && (error.error.codigo?.message || error.error.message)) ||
-            (typeof error?.error === 'string' ? error.error : null);
-
-          this.errorMessage = msgFromApi || 'Ocurrió un error durante el inicio de sesión';
-
-          // Notificación flotante (si no la quieres, quita esta línea)
-          this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
-        }
-      });
+    try {
+      const { userName, password } = this.loginForm.value;
+      await firstValueFrom(this.authService.login(userName, password));
+      await this.router.navigate(['/tarjetas']);
+    } catch (error) {
+      this.errorMessage = this.getApiErrorMessage(error);
+      this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
+    } finally {
+      this.setLoading(false);
+    }
   }
 }
