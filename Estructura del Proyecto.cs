@@ -1,3 +1,5 @@
+OK, deacuerdo haz el cambio acá te dejo el codigo actual:
+
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
@@ -52,8 +54,8 @@ export class LoginComponent {
     private readonly snackBar: MatSnackBar
   ) {
     this.loginForm = this.fb.group({
-      userName: ['', [Validators.required, Validators.maxLength(150)]],
-      password: ['', [Validators.required, Validators.minLength(6), Validators.maxLength(128)]]
+      userName: ['', [Validators.required, Validators.maxLength(10)]],
+      password: ['', [Validators.required, Validators.minLength(6), Validators.maxLength(100)]]
     });
   }
 
@@ -109,3 +111,110 @@ export class LoginComponent {
     }
   }
 }
+
+
+
+import { Injectable , Inject, PLATFORM_ID, inject } from '@angular/core';
+import { BehaviorSubject, Observable, map } from 'rxjs';
+import { Router } from '@angular/router';
+import { isPlatformBrowser } from '@angular/common';
+import { LoginResponse } from '../models/login.Response.model';
+import { HttpClient } from '@angular/common/http';
+import { environment } from '../../environments/environment';
+//import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
+//import exp from 'node:constants';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class AuthService {
+  private currentUserSubject: BehaviorSubject<LoginResponse | null>;
+  public currentUser: Observable<LoginResponse | null>;
+
+  private currentUserSubject2 = new  BehaviorSubject<any>(null); //Prueba
+  public currentUser2 = this.currentUserSubject2.asObservable(); //Prueba
+
+
+  private sessionActive: BehaviorSubject<boolean>;
+  private apiUrl = environment.apiBaseUrl;
+  public agenciaAperturaCodigo: string | null = null;
+  public agenciaImprimeCodigo: string | null = null;
+  public usuarioICBS: string = "";
+  private isBrowser: boolean = false;
+
+  constructor(@Inject(PLATFORM_ID) private platformId: Object, private router: Router, private http: HttpClient) {
+    let initialUser: LoginResponse | null;
+    let sessionIsActive: boolean = false;
+    this.isBrowser = isPlatformBrowser(this.platformId);
+
+    if (isPlatformBrowser(this.platformId)) {
+      initialUser = JSON.parse(localStorage.getItem('currentUser') || 'null');
+      sessionIsActive = this.sessionIsActive();
+    } else {
+      initialUser = null;
+    }
+
+    this.currentUserSubject = new BehaviorSubject<LoginResponse | null>(initialUser);
+    this.currentUser = this.currentUserSubject.asObservable();
+    this.sessionActive = new BehaviorSubject<boolean>(sessionIsActive);
+  }
+
+  login(userName: string, password: string): Observable<LoginResponse> {
+    return this.http.post<LoginResponse>(`${this.apiUrl}/api/Auth/Login`, { user: userName, password: password })
+      .pipe(map(response => {
+        if (isPlatformBrowser(this.platformId)) {
+          const expiresAt = new Date(response.token.expiration);
+
+          localStorage.setItem('currentUser', JSON.stringify(response));
+          localStorage.setItem('token', response.token.token);
+          localStorage.setItem('expiresAt', expiresAt.getTime().toString());
+
+          this.sessionActive.next(true);
+          this.currentUserSubject.next(response);
+          this.agenciaAperturaCodigo = response.activeDirectoryData.agenciaAperturaCodigo;
+          this.agenciaImprimeCodigo = response.activeDirectoryData.agenciaImprimeCodigo;
+          this.usuarioICBS = response.activeDirectoryData.usuarioICBS;
+
+          this.router.navigate(['/tarjetas']);
+        }
+        return response;
+      }));
+  }
+
+  logout(): void {    
+    localStorage.clear();
+    this.currentUserSubject.next(null);
+    this.router.navigate(['/login']);
+  }
+
+  isAuthenticated(): boolean {
+    const currentUser = this.currentUserValue;
+    return !!currentUser && !!currentUser.token;
+  }
+
+  sessionIsActive(): boolean {
+    if (this.isBrowser) {
+      const expiresAt = localStorage.getItem('expiresAt');
+      return new Date().getTime() < Number(expiresAt);
+
+    } else {
+      return false;
+    }
+
+  }
+
+  public get currentUserValue(): LoginResponse | null {
+    return this.currentUserSubject.value;
+  }
+
+  public get sessionActive$(): Observable<boolean> {
+    return this.sessionActive.asObservable();
+  }
+
+  public get currentUserName(): string | null {
+    return this.currentUserValue?.activeDirectoryData.nombreUsuario || null;
+  }
+}
+
+
+
