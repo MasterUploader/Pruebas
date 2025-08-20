@@ -1,21 +1,23 @@
-import { RouterModule, Routes } from '@angular/router';
-import { LoginComponent } from './modules/auth/components/login/login.component';
-import { ConsultaTarjetaComponent } from './modules/tarjetas/components/consulta-tarjeta/consulta-tarjeta.component';
-import { authGuard } from './core/guards/auth.guard';
+Revisa si el guard esta bien y si asegura que cuando la sesion venza se cierre el login
 
-export const routes: Routes = [
-  // Página de login (sin guard)
-  { path: 'login', component: LoginComponent, title: 'Iniciar sesión' },
+import { CanActivateFn, Router, RouterModule } from '@angular/router';
+import { NgModule , inject } from '@angular/core';
+import { AuthService } from '../services/auth.service';
+import { routes } from '../../app.routes';
 
-  // Ruta protegida por el guard
-  { path: 'tarjetas', component: ConsultaTarjetaComponent, canActivate: [authGuard], title: 'Tarjetas' },
+export const authGuard: CanActivateFn = () => {
+  const authService = inject(AuthService);
+  const router = inject(Router);
+  if(authService.sessionIsActive()){
+    return true;
+  }else{
+    router.navigateByUrl('/login');
+    return false;
+  }
+};
 
-  // Raíz: redirige a /tarjetas (el guard decidirá si pasa o te manda al login)
-  { path: '', pathMatch: 'full', redirectTo: 'tarjetas' },
-
-  // Cualquier ruta desconocida → redirige a /tarjetas (el guard actuará igual)
-  { path: '**', redirectTo: 'tarjetas' }
-];
-
-// Si usas AppModule clásico:
-export const AppRoutingModule = RouterModule.forRoot(routes);
+@NgModule({
+  imports: [RouterModule.forRoot(routes)],
+  exports: [RouterModule]
+})
+export class AppRoutingModule{}
