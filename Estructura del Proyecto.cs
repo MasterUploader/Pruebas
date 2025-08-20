@@ -1,21 +1,25 @@
-Ahora necesito mejorar el navbar, el cual el nombre hace que el titulo no se mantenga centrado, y el menu que despliega para el logout aparece con una barra de desplazamiento cuando no la necesita, te dejo el codigo que considero que puedes requerir:
-
-
 <mat-toolbar class="navBar" color="primary">
-  <mat-toolbar-row class="Info">
-    <span class="Info__text">Servicio Impresión Tarjetas Débito</span>
+  <mat-toolbar-row class="info-grid">
+    <!-- Col 1: vacío (equilibra visualmente la grilla) -->
+    <div class="slot-left"></div>
 
+    <!-- Col 2: título SIEMPRE centrado -->
+    <span class="title">Servicio Impresión Tarjetas Débito</span>
+
+    <!-- Col 3: usuario + menú (se trunca si es largo) -->
     @if (userName) {
-      <div class="button_container">
+      <div class="slot-right">
         <button
           mat-button
           [matMenuTriggerFor]="userMenu"
-          class="Info__buttons-user">
+          class="user-btn"
+          aria-label="Menú de usuario"
+          title="{{ userName }}">
           {{ userName }}
         </button>
 
-        <mat-menu #userMenu="matMenu">
-          <button mat-menu-item (click)="logout()" class="Info__buttons-logout">
+        <mat-menu #userMenu="matMenu" class="user-menu">
+          <button mat-menu-item (click)="logout()" class="logout-item">
             <mat-icon>logout</mat-icon>
             <span>Logout</span>
           </button>
@@ -26,130 +30,82 @@ Ahora necesito mejorar el navbar, el cual el nombre hace que el titulo no se man
 </mat-toolbar>
 
 
-import { Component, OnDestroy, OnInit } from '@angular/core';
-import { MatToolbarModule } from '@angular/material/toolbar';
-import { MatIconModule } from '@angular/material/icon';
-import { MatCardModule } from '@angular/material/card';
-import { MatButtonModule } from '@angular/material/button';
-import { MatMenuModule } from '@angular/material/menu';
-import { Subscription } from 'rxjs';
-import { AuthService } from '../../../../app/core/services/auth.service';
-
-@Component({
-  selector: 'app-navbar',
-  standalone: true,
-  imports: [
-    MatToolbarModule,
-    MatIconModule,
-    MatCardModule,
-    MatButtonModule,
-    MatMenuModule
-  ],
-  templateUrl: './navbar.component.html',
-  styleUrls: ['./navbar.component.css']
-})
-export class NavbarComponent implements OnInit, OnDestroy {
-  userName: string | null = null;
-  private readonly subscription = new Subscription();
-
-  constructor(private readonly authService: AuthService) {}
-
-  ngOnInit(): void {
-    // Guardamos la suscripción para liberarla luego
-    const sub = this.authService.currentUser.subscribe(user => {
-      this.userName = user?.activeDirectoryData?.nombreUsuario ?? null;
-    });
-    this.subscription.add(sub);
-  }
-
-  ngOnDestroy(): void {
-    this.subscription.unsubscribe();
-  }
-
-  logout(): void {
-    this.userName = null;
-    this.authService.logout();
-  }
-
-  // Si en el futuro usas sidenav, aquí va el toggle
-  toggleSidenav(): void {}
-}
-
-
+/* Fondo general app */
 body {
-    background-color: rgb(241, 239, 239);
-    margin: 0;
-    height: 100vh;
+  background-color: rgb(241, 239, 239);
+  margin: 0;
+  height: 100vh;
 }
 
-
+/* Altura cómoda Material (evita problemas con el menú) */
 .navBar {
-    width: 100%;
-    height: 30px;
-    background-color: #bd0909 !important;
-    color: #fff;
+  width: 100%;
+  height: 56px;                 /* 56 desktop / 48 mobile */
+  background-color: #bd0909 !important;
+  color: #fff;
+  padding: 0 8px;
 }
 
-.Info {
-    width: 100%;
-    display: flex;
-    justify-content: space-evenly;
-     align-items: center;
+/* 3 columnas: [izq vacía] [título centrado] [usuario] */
+.info-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
 }
 
-.Info__text {
-
-    width: 80%;
-    height: auto;
-    font-size: 1.3rem;
-    letter-spacing: 1.5px;
-    text-align: center;
+/* Columna izquierda vacía solo para balancear */
+.slot-left {
+  justify-self: start;
 }
 
-.Info__buttons-user,
-.Info__buttons-logout {
-    background-color: transparent;
-    border: none;
-    padding: 12px 15px;
-    color: #fff !important;
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: all .2s ease;
-
+/* Título SIEMPRE centrado independientemente del ancho del usuario */
+.title {
+  justify-self: center;
+  font-size: 1.2rem;
+  letter-spacing: 1.2px;
+  text-align: center;
+  white-space: nowrap;
 }
 
-.Info__buttons-user:hover,
-.Info__buttons-logout:hover {
-    background-color: salmon;
-
+/* Columna derecha: botón usuario alineado al extremo derecho */
+.slot-right {
+  justify-self: end;
+  min-width: 0;                 /* permite truncar dentro */
 }
 
-.Info__buttons-logout {
-    color: black !important;
-    margin-left: 22px;
+/* Botón usuario: truncado si el nombre es largo */
+.user-btn {
+  max-width: 240px;             /* ajusta a tu gusto */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff !important;
 }
 
-/* medias querys */
-@media only screen and (max-width:992px) {
-
-    .Info__text {
-        width: 60%;
-        font-size: 1.3rem;
-        margin-top: 2px;
-    }
-
+/* Estilos del item de logout dentro del menú */
+.logout-item {
+  font-size: 0.9rem;
 }
 
-@media only screen and (max-width:768px) {
-    .navBar {
-        width: 100%;
-
-    }
-
-    .Info__text {
-        width: 50%;
-        font-size: 1rem;
-    }
-
-
+/* --- Quitar scrollbar innecesario del mat-menu --- */
+/* PONER ESTO EN styles.css GLOBAL o usa ::ng-deep aquí */
+.user-menu .mat-mdc-menu-panel {
+  max-height: none;             /* evita overflow:auto por altura limitada */
+  overflow: visible;            /* sin barra cuando no hace falta */
 }
+
+/* Hover sutil para botones en toolbar */
+.user-btn:hover,
+.logout-item:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Responsivo */
+@media (max-width: 768px) {
+  .navBar { height: 48px; }
+  .title { font-size: 1rem; }
+  .user-btn { max-width: 160px; }
+}
+
+:host ::ng-deep .user-menu .mat-mdc-menu-panel { max-height:none; overflow:visible; }
