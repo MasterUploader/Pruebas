@@ -1,293 +1,63 @@
-Ahora vamos a validar el servicio de impresión, este es el codigo, solo dime si es posible del modal tomar la posición del numero de cuenta y del nombre en tarjeta para pasarlo al servicio y que imprima manteniendo la proporcion de lo que esta sobre la imagen?
+Tengo este codigo
 
-import { Injectable } from '@angular/core';
-import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+public bool GuardarRegistroEnAs400(string codcco, string estado, string nombreArchivo, string rutaServidor)
+{
+    try
+    {
+        // Abrir conexión a AS400 desde la librería RestUtilities.Connections
+        _as400.Open();
 
-@Injectable({
-  providedIn: 'root'
-})
-export class ImpresionService {
-  constructor(private readonly sanitizer: DomSanitizer) { }
+        if (_as400.IsConnected)
+        {
+            // Obtener comando para ejecutar SQL
+            using var command = _as400.GetDbCommand(_httpContextAccessor.HttpContext!);
 
-  imprimirTarjeta(datosSeleccionados: any, tipoDiseño: boolean): boolean {
-    const htmlImprimir = this.sanitizer.sanitize(1, this.generarVistaPreviaImpresion(datosSeleccionados, tipoDiseño));
-    const printWindow = window.open('', '_blank', 'width=600,height=400');
-    let impresionExitosa = false;
+            // Obtener nuevo ID para el video
+            int codVideo = GetUltimoId(command);
 
-    if (printWindow && htmlImprimir) {
-      printWindow.document.write(htmlImprimir);
-      printWindow.document.close();
-      printWindow.focus();
+            // Obtener secuencia correlativa
+            int sec = GetSecuencia(command, codcco);
 
-      printWindow.onafterprint = () => {
-        console.log('OnAfterPrint');
-        impresionExitosa = true;
-        printWindow.close();
-      }
+            // Construir la ruta en el formato que espera AS400: C:\Vid{codcco}Marq\
+            string rutaAs400 = $"C:\\Vid{codcco}Marq\\";
 
-      printWindow.onbeforeunload = () => {
-        if (!impresionExitosa) {
+            // Construir query de inserción SQL
+            var query = new InsertQueryBuilder("MANTVIDEO", "BCAH96DTA")
+            .Values(
+                    ("CODCCO", codcco),
+                    ("CODVIDEO", codVideo),
+                    ("RUTA", rutaAs400),
+                    ("NOMBRE", nombreArchivo),
+                    ("ESTADO", estado),
+                    ("SEQ", sec)
+                    )
+            .Build();
 
-          console.log('OnBeforeLoad');
-          impresionExitosa = false;
+            command.CommandText = query.Sql;
+
+            // Ejecutar inserción
+            int result = command.ExecuteNonQuery();
+
+            return result > 0;
+
         }
-      }
-
-      printWindow.print();
-    } else {
-      // Manejo de caso en que la ventana emergente ha sido bloqueada por el navegador
-      alert("La ventana de impresión no se pudo abrir. Por favor, verifica si las ventanas emergentes están bloqueadas.");
-      impresionExitosa = false;
+        return false;
     }
-    return impresionExitosa;
-
-  }
-
-  /* imprimirDatosSeleccionados(datosSeleccionados: any): void {
-     const vistaPreviaHtml = this.generarVistaPreviaImpresion(datosSeleccionados);
-     const ventanaImpresion = window.open('', '_blank', 'width=600,height=400');
-
-     if (ventanaImpresion) { // Verifica que la ventana no sea null
-
-       ventanaImpresion.document.body.innerHTML = this.sanitizer.sanitize(SecurityContext.HTML, vistaPreviaHtml) || '';
-
-       ventanaImpresion.document.close();
-       ventanaImpresion.focus();
-       ventanaImpresion.print();
-       ventanaImpresion.close();
-
-     } else {
-       // Manejo de caso en que la ventana emergente ha sido bloqueada por el navegador
-       alert("La ventana de impresión no se pudo abrir. Por favor, verifica si las ventanas emergentes están bloqueadas.");
-     }
-   }*/
-
-  generarVistaPreviaImpresion(tarjeta: any, tipoDiseño: boolean): SafeHtml {
-    let cadenaNombresApellidos: string = tarjeta.nombre;
-    let nombres: string = '';
-    let apellidos: string = '';
-    let numeroCuenta: string = tarjeta.numeroCuenta;
-
-    let cadenaLimpia = cadenaNombresApellidos.replace(/\s+/g, ' ');
-    let partes = cadenaLimpia.split(' ');
-
-    if (partes.length >= 4) {
-      nombres = `${partes[0]} ${partes[1]}`;
-      apellidos = `${partes[2]} ${partes.slice(3).join(' ')}`;
-
-    } else if (partes.length === 3) {
-      if (nombres.length <= 16 && apellidos.length <= 16) {
-        nombres = partes[0];
-        apellidos = `${partes[1]} ${partes[2]}`;
-      }
-
-      if (nombres.length <= 16 && apellidos.length >= 16) {
-        nombres = `${partes[0]} ${partes[1]}`;
-        apellidos = partes[2];
-      }
-
-    } else if (partes.length === 2) {
-      nombres = partes[0];
-      apellidos = partes[1];
+    catch (Exception ex)
+    {
+        // Loguear o manejar el error según tu sistema (puedes usar RestUtilities.Logging aquí si lo deseas)
+        // Por ahora, devolvemos false controladamente
+        return false;
     }
-    nombres = nombres.toUpperCase();
-    apellidos = apellidos.toUpperCase();
-
-    const htmlContent = `
-  <style>
-  body {
-    margin: 0;
-
-  }
-  .principal{
-    position: absolute;
-    width: 207.87404194px;
-    height: 321.25988299px;
-    font-family: 'Arial', sans-serif;
-    box-sizing: border-box;
-  }
-  .internas1{
-    position: absolute;
-    top: 190px;
-    font-size: 8pt;
-    right: 20px;
-    font-family: sans-serif;
-    color: black;
-  justify-content: end;
-
-  }
-  .internas2{
-    position: absolute;
-    top: 205px;
-    right: 20px;
-    font-size: 8pt;
-    font-family:  sans-serif;
-    color: black;
-    justify-content: end;
-
-  }
-  .internas3{
-    position: absolute;
-    top: 220px;
-    right: 20px;
-    font-size: 8pt;
-    font-family:  sans-serif;
-    color: black;
-    justify-content: end;
-
-  }
-
-
-  </style>
-  <div class="principal">
-  <div class = "internas1">
-  <b>${nombres}</b>
- </div>
- <div class = "internas2">
- <b> ${apellidos}</b>
-</div>
-<div class="internas3">
-<b>${numeroCuenta}</b>
-</div>
-  </div>
-
-  `;
-
-    const htmlContent2 = `
-  <style>
-  .contenedor{
-    position: relative;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-
-  }
-  *{
-    margin: 0;
-    padding: 0;
-  }
-  @media print {
-
-    .no-imprimir{
-      display: none;
+    finally
+    {
+        // Cerrar conexión correctamente
+        _as400.Close();
     }
-  }
-  .content-imagen-tarjeta {
-    width: 207.87404194px;
-    height: 321.25988299px;
-    display: flex;
-    align-content: center;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .nombres {
-    position: absolute;
-    top: 160px;
-    font-size: 15pt;
-    color: black;
-    right: 80px;
-    text-align: start;
-  }
-
-  .apellidos {
-    position: absolute;
-    top: 185px;
-    font-size: 15pt;
-    color: blck;
-    right: 80px;
-    text-align: start;
-  }
-
-  .cuenta{
-    position: absolute;
-    top: 290px;
-    font-size: 20pt;
-    right: 80px;
-    color: black;
-  }
-  </style>
-  <div class="contenedor">
-  <div class="content-imagen-tarjeta">
-
-
-    <div class="nombres">
-    <b>${nombres}</b>
-    </div>
-    <div class="apellidos">
-   <b> ${apellidos}</b>
-    </div>
-    <div class="cuenta">
-    <b>${numeroCuenta}</b>
-    </div>
-  </div>
-
-
-</div>
-`;
-
-
-    const htmlContent3 = `
-<style>
-body {
-  margin: 0;
-
-}
-.principal{
-  position: absolute;
-  width: 207.87404194px;
-  height: 321.25988299px;
-  font-family: 'Arial', sans-serif;
-  box-sizing: border-box;
-}
-.internas1{
-  position: absolute;
-  top: 65%;
-    left:50%;
-    color: black;
-    text-align: center;
-    max-width: 90%;
-    transform: translate(-50%);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  font-size: 7pt;
-  font-family:  sans-serif;
-
-}
-
-.internas3{
-  position: absolute;
-    top: 70%;
-    left: 50%;
-    transform: translate(-50%);
-    font-size: 7pt;
-    text-align: center;
-    max-width: 80%;
-    color: black;
-  font-family:  sans-serif;
-  justify-content: end;
-
 }
 
 
-</style>
-<div class="principal">
-<div class = "internas1">
-<b>${tarjeta.nombre}</b>
-</div>
-<div class="internas3">
-<b>${numeroCuenta}</b>
-</div>
-</div>
 
-`;
+Y tengo este error
 
-    // Sanitizar y retornar el HTML como SafeHtml
-    if (tipoDiseño) {
-      return this.sanitizer.bypassSecurityTrustHtml(htmlContent3);
-    } else {
-      return this.sanitizer.bypassSecurityTrustHtml(htmlContent);
-    }
-  }
-}
+{"SQL0313: Número de variables del lenguaje principal no válido.\r\nCausa . . . . . :   El número de variables del lenguaje principal o de entradas en una SQLDA o área de descriptor especificados en una sentencia EXECUTE u OPEN no es igual que el número de marcadores de parámetro especificado en la sentencia SQL preparada S000001. Si el nombre de sentencia es *N, el número de variables del lenguaje principal o de entradas en una SQLDA o área de descriptor se especificó en una sentencia OPEN, y no es igual que el número de variables del lenguaje principal especificado en la sentencia DECLARE CURSOR para el cursor *N. Recuperación . .:   Cambie el número de variables del lenguaje principal especificado en la cláusula USING, o el número de entradas en la SQLDA o área de descriptor para igualar el número de marcadores de parámetro en la sentencia SQL preparada, o el número de variables del lenguaje principal en la sentencia DECLARE CURSOR. Vuelva a precompilar el programa."}
