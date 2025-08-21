@@ -257,189 +257,106 @@ namespace QueryBuilder.Metadata
         /// </summary>
         public static void ApplyToParameter(DbParameter parameter, object? value, ColumnMetadata? meta)
         {
+            if (parameter == null) throw new ArgumentNullException(nameof(parameter));
 
-                pi.SetValue(parameter, boxed);
+            // Tipo
+            if (meta?.DbType is DbType dbt) parameter.DbType = dbt;
+
+            // Tamaño
+            if (meta?.Size is int size && size > 0) parameter.Size = size;
+
+            // Precisión / Escala (si el proveedor las soporta)
+            // OleDbParameter, SqlParameter, etc. suelen exponer estas propiedades.
+            TrySetNumericProperty(parameter, "Precision", meta?.Precision);
+            TrySetNumericProperty(parameter, "Scale", meta?.Scale);
+
+            // Valor
+            parameter.Value = value ?? DBNull.Value;
         }
-    }
-}        /// <param name="builder">Instancia.</param>
-        /// <param name="columns">Columnas o expresiones.</param>
-        public static SelectQueryBuilder OrderBy(this SelectQueryBuilder builder, params string[] columns)
+
+        // ---------------------------
+        // Helpers privados
+        // ---------------------------
+
+        private static EntityMetadata BuildMetadata(Type t)
         {
-            if (columns is { Length: > 0 })
+            var lib = t.GetCustomAttribute<LibraryAttribute>(inherit: true)?.Name;
+            var tab = t.GetCustomAttribute<TableNameAttribute>(inherit: true)?.Name;
+
+            var dict = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var m in t.GetMembers(BindingFlags.Public | BindingFlags.Instance))
             {
-                foreach (var c in columns.Where(c => !string.IsNullOrWhiteSpace(c)))
-                    builder.OrderBy((c, SortDirection.None));
-            }
-            return builder;
-        }
+                if (m is not PropertyInfo && m is not FieldInfo) continue;
 
-        /// <summary>
-        /// ORDER BY basado en una expresión CASE WHEN generada con <see cref="CaseWhenBuilder"/>.
-        /// </summary>
-        /// <param name="builder">Instancia.</param>
-        /// <param name="caseWhen">Expresión CASE WHEN (builder).</param>
-        /// <param name="direction">Dirección (None/Asc/Desc). Si se deja en None, no agrega ASC/DESC.</param>
-        public static SelectQueryBuilder OrderByCase(this SelectQueryBuilder builder, CaseWhenBuilder caseWhen, SortDirection direction = SortDirection.None)
-        {
-            if (caseWhen == null)
-                throw new ArgumentNullException(nameof(caseWhen));
+                // ColumnAttribute
+                var colAttr = m.GetCustomAttribute<ColumnAttribute>(inherit: true);
+                // ParameterNameAttribute (compat)
+                var parAttr = m.GetCustomAttribute<ParameterNameAttribute>(inherit: true);
 
-            var expr = caseWhen.Build();
-            builder.OrderBy((expr, direction));
-            return builder;
-        }
-
-        // =========================
-        // SELECT helpers
-        // =========================
-
-        /// <summary>
-        /// Agrega al SELECT una expresión CASE WHEN con un alias.
-        /// </summary>
-        /// <param name="builder">Instancia.</param>
-        /// <param name="caseWhen">Expresión CASE WHEN.</param>
-        /// <param name="alias">Alias a usar para la columna.</param>
-        public static SelectQueryBuilder SelectCase(this SelectQueryBuilder builder, CaseWhenBuilder caseWhen, string alias)
-        {
-            if (caseWhen == null)
-                throw new ArgumentNullException(nameof(caseWhen));
-            if (string.IsNullOrWhiteSpace(alias))
-                throw new ArgumentNullException(nameof(alias));
-
-            var expr = caseWhen.Build();
-            return builder.SelectCase(expr, alias);
-        }
-
-        /// <summary>
-        /// Agrega al SELECT una expresión computada arbitraria (por ejemplo, funciones SQL).
-        /// Si <paramref name="alias"/> es nulo o vacío, no se agrega AS.
-        /// </summary>
-        /// <param name="builder">Instancia.</param>
-        /// <param name="sqlExpression">Expresión/función SQL completa (ej: "COALESCE(A.B, 0)").</param>
-        /// <param name="alias">Alias de la columna (opcional).</param>
-        public static SelectQueryBuilder SelectComputed(this SelectQueryBuilder builder, string sqlExpression, string? alias = null)
-        {
-            if (string.IsNullOrWhiteSpace(sqlExpression))
-                return builder;
-
-            if (string.IsNullOrWhiteSpace(alias))
-                return builder.Select(sqlExpression); // usa tu overload Select(params string[])
-
-            return builder.Select((sqlExpression, alias)); // usa tu overload Select((col, alias)[])
-        }
-
-        // =========================
-        // JOIN helper abreviado
-        // =========================
-
-        /// <summary>
-        /// Atajo de JOIN recibiendo una condición compacta "LEFT = RIGHT".
-        /// Internamente llama a tu Join(table, library, alias, left, right, joinType).
-        /// </summary>
-        /// <param name="builder">Instancia.</param>
-        /// <param name="table">Tabla a unir (sin esquema o con esquema "LIB.TAB").</param>
-        /// <param name="onCondition">Condición ON en formato "A = B".</param>
-        /// <param name="type">Tipo de JOIN.</param>
-        /// <param name="library">Biblioteca/esquema si <paramref name="table"/> se pasó sin punto.</param>
-        /// <param name="alias">Alias de la tabla unida (recomendado).</param>
-        public static SelectQueryBuilder Join(this SelectQueryBuilder builder,
-                                              string table,
-                                              string onCondition,
-                                              JoinType type = JoinType.Inner,
-                                              string? library = null,
-                                              string? alias = null)
-        {
-            if (string.IsNullOrWhiteSpace(table))
-                throw new ArgumentNullException(nameof(table));
-            if (string.IsNullOrWhiteSpace(onCondition))
-                throw new ArgumentNullException(nameof(onCondition));
-
-            // Partir "A = B"
-            var parts = onCondition.Split('=', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length != 2)
-                throw new ArgumentException("La condición ON debe tener el formato 'A = B'.", nameof(onCondition));
-
-            var left = parts[0];
-            var right = parts[1];
-
-            // Si el table viene como "LIB.TAB" y no se pasó library, extraerlo.
-            string tbl = table;
-            string? lib = library;
-            if (lib is null && table.Contains('.'))
-            {
-                var p = table.Split('.', 2);
-                lib = p[0];
-                tbl = p[1];
+                // Resolver preferencia: Column > ParameterName
+                if (colAttr is not null)
+                {
+                    dict[m.Name] = new ColumnMetadata
+                    {
+                        ColumnName = colAttr.Name ?? m.Name,
+                        DbType = colAttr.DbType,
+                        Size = colAttr.Size,
+                        Precision = colAttr.Precision,
+                        Scale = colAttr.Scale
+                    };
+                }
+                else if (parAttr is not null)
+                {
+                    dict[m.Name] = new ColumnMetadata
+                    {
+                        ColumnName = parAttr.Name ?? m.Name,
+                        DbType = parAttr.DbType,
+                        Size = parAttr.Size,
+                        Precision = parAttr.Precision,
+                        Scale = parAttr.Scale
+                    };
+                }
+                else
+                {
+                    // Sin atributo: fallback al nombre del miembro
+                    dict[m.Name] = new ColumnMetadata { ColumnName = m.Name };
+                }
             }
 
-            var joinType = type.ToString().ToUpperInvariant();
-            var usableAlias = string.IsNullOrWhiteSpace(alias) ? tbl : alias;
-
-            return builder.Join(tbl, lib, usableAlias, left, right, joinType);
-        }
-    }
-
-    /// <summary>
-    /// Extensiones tipadas extra (si ya adoptaste los metadatos con atributos).
-    /// Solo se agregan las que no interactúan con miembros privados.
-    /// </summary>
-    public static class SelectQueryBuilderTypedExtras
-    {
-        /// <summary>
-        /// ORDER BY tipado para varias propiedades de la misma entidad, todas con la misma dirección.
-        /// </summary>
-        /// <typeparam name="T">Tipo de entidad anotada con atributos.</typeparam>
-        /// <param name="builder">Instancia.</param>
-        /// <param name="direction">Dirección (None/Asc/Desc).</param>
-        /// <param name="props">Expresiones de propiedades.</param>
-        public static SelectQueryBuilder OrderBy<T>(this SelectQueryBuilder builder, SortDirection direction, params Expression<Func<T, object?>>[] props)
-        {
-            var alias = GetAlias(builder, typeof(T));
-            foreach (var p in props)
+            return new EntityMetadata
             {
-                var col = MetadataCache.GetColumnFor<T>(GetMemberName(p));
-                var full = string.IsNullOrWhiteSpace(alias) ? col : $"{alias}.{col}";
-                builder.OrderBy((full, direction));
-            }
-            return builder;
+                Library = lib,
+                TableName = tab,
+                Columns = dict
+            };
         }
-
-        /// <summary>
-        /// GROUP BY tipado para varias propiedades (azúcar sintáctico).
-        /// </summary>
-        public static SelectQueryBuilder GroupBy<T>(this SelectQueryBuilder builder, params Expression<Func<T, object?>>[] props)
-        {
-            var alias = GetAlias(builder, typeof(T));
-            foreach (var p in props)
-            {
-                var col = MetadataCache.GetColumnFor<T>(GetMemberName(p));
-                var full = string.IsNullOrWhiteSpace(alias) ? col : $"{alias}.{col}";
-                builder.GroupBy(full);
-            }
-            return builder;
-        }
-
-        // ===== Helpers (privados a esta clase de extensión) =====
 
         private static string GetMemberName(LambdaExpression expr)
         {
             if (expr.Body is MemberExpression m) return m.Member.Name;
             if (expr.Body is UnaryExpression u && u.Operand is MemberExpression um) return um.Member.Name;
-            throw new InvalidOperationException("La expresión debe referenciar una propiedad.");
+            throw new InvalidOperationException("La expresión debe referenciar una propiedad o campo público.");
         }
 
-        private static string? GetAlias(SelectQueryBuilder builder, Type t)
+        private static void TrySetNumericProperty(DbParameter parameter, string propertyName, byte? value)
         {
-            // Intento de recuperar alias tipado registrado:
-            // Si implementaste Register<T>(alias) en tu builder, intenta leerlo por reflexión (opcional).
-            var field = builder.GetType().GetField("_typeAliases", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (field?.GetValue(builder) is System.Collections.IDictionary map && map.Contains(t))
-                return map[t]?.ToString();
+            if (value is null) return;
 
-            // Fallback: si builder tiene _tableAlias y el tipo T coincide con la tabla "base", úsalo.
-            var fAlias = builder.GetType().GetField("_tableAlias", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.GetValue(builder)?.ToString();
-            return string.IsNullOrWhiteSpace(fAlias) ? null : fAlias;
+            var pi = parameter.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
+            if (pi is null || !pi.CanWrite) return;
+
+            // Precision/Scale suelen ser byte en la mayoría de proveedores .NET
+            // Si el proveedor usa otro tipo, intentamos convertir.
+            object boxed = value.Value;
+            if (pi.PropertyType == typeof(byte))
+                pi.SetValue(parameter, value.Value);
+            else if (pi.PropertyType == typeof(short))
+                pi.SetValue(parameter, (short)value.Value);
+            else if (pi.PropertyType == typeof(int))
+                pi.SetValue(parameter, (int)value.Value);
+            else
+                pi.SetValue(parameter, boxed);
         }
     }
 }
-
