@@ -1,107 +1,267 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.Common;
 using System.Linq;
 using System.Linq.Expressions;
-using QueryBuilder.Enums;
-using QueryBuilder.Metadata;
+using System.Reflection;
 
-namespace QueryBuilder.Builders
+namespace QueryBuilder.Metadata
 {
+    // ============================================================
+    //  A T R I B U T O S   D E   M E T A D A T O S
+    // ============================================================
+
     /// <summary>
-    /// Extensiones complementarias para SELECT:
-    /// - HavingFunction / WhereFunction
-    /// - HavingRaw (si no la tienes)
-    /// - OrderBy(string...) con Direction opcional (incluye None ⇒ sin ASC/DESC)
-    /// - OrderByCase(CaseWhenBuilder...)
-    /// - SelectCase(CaseWhenBuilder...)
-    /// - SelectComputed(sql, alias)
-    /// - Join(table, onCondition, JoinType, library, alias) abreviado
-    /// 
-    /// Se implementan como extensiones para no colisionar con métodos existentes.
+    /// Indica la biblioteca/esquema donde se encuentra la tabla.
+    /// Ej.: <c>[Library("IS4TECHDTA")]</c>
     /// </summary>
-    public static class SelectQueryBuilderExtensions
+    [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+    public sealed class LibraryAttribute : Attribute
     {
-        // =========================
-        // WHERE / HAVING helpers
-        // =========================
+        /// <summary>Nombre de la biblioteca/esquema.</summary>
+        public string Name { get; }
+
+        public LibraryAttribute(string name) => Name = name ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Indica el nombre de la tabla asociada a la clase/DTO.
+    /// Ej.: <c>[TableName("PQR01CLI")]</c>
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+    public sealed class TableNameAttribute : Attribute
+    {
+        /// <summary>Nombre de la tabla.</summary>
+        public string Name { get; }
+
+        public TableNameAttribute(string name) => Name = name ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Mapea una propiedad con el nombre de columna en la base de datos.
+    /// Permite opcionalmente especificar tipo, tamaño, precisión y escala para los parámetros.
+    /// Ej.: <c>[Column("CLINOM", DbType.String, Size = 100)]</c>
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
+    public sealed class ColumnAttribute : Attribute
+    {
+        /// <summary>Nombre de la columna en DB.</summary>
+        public string Name { get; }
+
+        /// <summary>Tipo de dato del parámetro (opcional).</summary>
+        public DbType? DbType { get; }
+
+        /// <summary>Tamaño del parámetro (para strings/binary) (opcional).</summary>
+        public int? Size { get; set; }
+
+        /// <summary>Precisión (para decimales) (opcional).</summary>
+        public byte? Precision { get; set; }
+
+        /// <summary>Escala (para decimales) (opcional).</summary>
+        public byte? Scale { get; set; }
+
+        public ColumnAttribute(string name)
+        {
+            Name = name ?? string.Empty;
+        }
+
+        public ColumnAttribute(string name, DbType dbType)
+        {
+            Name = name ?? string.Empty;
+            DbType = dbType;
+        }
+    }
+
+    /// <summary>
+    /// Alias de <see cref="ColumnAttribute"/> para compatibilidad con código existente
+    /// donde se usaba <c>[ParameterName(...)]</c>. Tiene el mismo comportamiento.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
+    public sealed class ParameterNameAttribute : Attribute
+    {
+        /// <summary>Nombre de la columna/param en DB.</summary>
+        public string Name { get; }
+
+        /// <summary>Tipo de dato del parámetro (opcional).</summary>
+        public DbType? DbType { get; }
+
+        /// <summary>Tamaño del parámetro (para strings/binary) (opcional).</summary>
+        public int? Size { get; set; }
+
+        /// <summary>Precisión (para decimales) (opcional).</summary>
+        public byte? Precision { get; set; }
+
+        /// <summary>Escala (para decimales) (opcional).</summary>
+        public byte? Scale { get; set; }
+
+        public ParameterNameAttribute(string name)
+        {
+            Name = name ?? string.Empty;
+        }
+
+        public ParameterNameAttribute(string name, DbType dbType)
+        {
+            Name = name ?? string.Empty;
+            DbType = dbType;
+        }
+    }
+
+    // ============================================================
+    //  M O D E L O S   D E   M E T A D A T O S   (C A C H É)
+    // ============================================================
+
+    /// <summary>
+    /// Metadatos de una columna: nombre en DB y configuración de parámetros.
+    /// </summary>
+    public sealed class ColumnMetadata
+    {
+        /// <summary>Nombre de la columna en DB.</summary>
+        public string ColumnName { get; init; } = string.Empty;
+
+        /// <summary>Tipo de dato (si se especificó).</summary>
+        public DbType? DbType { get; init; }
+
+        /// <summary>Tamaño (si se especificó).</summary>
+        public int? Size { get; init; }
+
+        /// <summary>Precisión (si se especificó).</summary>
+        public byte? Precision { get; init; }
+
+        /// <summary>Escala (si se especificó).</summary>
+        public byte? Scale { get; init; }
+    }
+
+    /// <summary>
+    /// Metadatos de una entidad (tabla): biblioteca, nombre de tabla y columnas.
+    /// </summary>
+    public sealed class EntityMetadata
+    {
+        /// <summary>Biblioteca/esquema.</summary>
+        public string? Library { get; init; }
+
+        /// <summary>Nombre de la tabla.</summary>
+        public string? TableName { get; init; }
 
         /// <summary>
-        /// Agrega una condición basada en función/expresión SQL directamente en WHERE.
-        /// Ejemplo: <c>WhereFunction("UPPER(NOMBRE) = 'PEDRO'")</c>.
+        /// Mapa de propiedades (por nombre de miembro) a metadatos de columna.
+        /// Case-insensitive para comodidad.
         /// </summary>
-        /// <param name="builder">Instancia del builder.</param>
-        /// <param name="sqlFunctionCondition">Condición completa en SQL.</param>
-        public static SelectQueryBuilder WhereFunction(this SelectQueryBuilder builder, string sqlFunctionCondition)
+        public Dictionary<string, ColumnMetadata> Columns { get; init; } =
+            new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    // ============================================================
+    //  C A C H É   D E   R E F L E X I Ó N
+    // ============================================================
+
+    /// <summary>
+    /// Caché de metadatos basada en atributos. Descubre y guarda:
+    /// - Biblioteca (<see cref="LibraryAttribute"/>)
+    /// - Tabla (<see cref="TableNameAttribute"/>)
+    /// - Columnas (<see cref="ColumnAttribute"/> o <see cref="ParameterNameAttribute"/>)
+    /// </summary>
+    public static class MetadataCache
+    {
+        private static readonly ConcurrentDictionary<Type, EntityMetadata> _cache = new();
+
+        /// <summary>
+        /// Obtiene (o construye) los metadatos para un tipo.
+        /// </summary>
+        public static EntityMetadata GetOrAdd(Type t) => _cache.GetOrAdd(t, BuildMetadata);
+
+        /// <summary>
+        /// Obtiene el nombre de la biblioteca (esquema) para <typeparamref name="T"/>.
+        /// Devuelve <c>null</c> si no está definido.
+        /// </summary>
+        public static string? GetLibraryFor<T>() => GetOrAdd(typeof(T)).Library;
+
+        /// <summary>
+        /// Obtiene el nombre de tabla para <typeparamref name="T"/>.
+        /// Devuelve <c>null</c> si no está definido.
+        /// </summary>
+        public static string? GetTableFor<T>() => GetOrAdd(typeof(T)).TableName;
+
+        /// <summary>
+        /// Devuelve el nombre de columna mapeado para la propiedad indicada. 
+        /// Si no hay atributo, devuelve el nombre de la propiedad tal cual.
+        /// Lanza si la propiedad no existe.
+        /// </summary>
+        public static string GetColumnFor<T>(string propertyName)
         {
-            if (string.IsNullOrWhiteSpace(sqlFunctionCondition))
-                return builder;
+            if (string.IsNullOrWhiteSpace(propertyName))
+                throw new ArgumentNullException(nameof(propertyName));
 
-            if (string.IsNullOrWhiteSpace(builder.WhereClause))
-                builder.WhereClause = sqlFunctionCondition;
-            else
-                builder.WhereClause += $" AND {sqlFunctionCondition}";
+            var meta = GetOrAdd(typeof(T));
+            if (meta.Columns.TryGetValue(propertyName, out var col))
+                return col.ColumnName;
 
-            return builder;
+            // Si no hubo atributo, verificar que la propiedad exista:
+            var prop = typeof(T).GetMember(propertyName, MemberTypes.Property | MemberTypes.Field,
+                                           BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (prop is { Length: > 0 })
+                return prop[0].Name; // fallback: nombre del miembro
+
+            throw new InvalidOperationException($"La propiedad '{propertyName}' no existe en {typeof(T).Name}.");
         }
 
         /// <summary>
-        /// Agrega una condición basada en función/expresión SQL directamente en HAVING.
-        /// Ejemplo: <c>HavingFunction("SUM(MONTO) &gt; 1000")</c>.
+        /// Devuelve el nombre de columna mapeado para una expresión de propiedad.
         /// </summary>
-        /// <param name="builder">Instancia del builder.</param>
-        /// <param name="sqlFunctionCondition">Condición completa en SQL.</param>
-        public static SelectQueryBuilder HavingFunction(this SelectQueryBuilder builder, string sqlFunctionCondition)
+        public static string GetColumnFor<T>(Expression<Func<T, object?>> propertyExpression)
         {
-            if (string.IsNullOrWhiteSpace(sqlFunctionCondition))
-                return builder;
-
-            if (string.IsNullOrWhiteSpace(builder.HavingClause))
-                builder.HavingClause = sqlFunctionCondition;
-            else
-                builder.HavingClause += $" AND {sqlFunctionCondition}";
-
-            return builder;
+            var memberName = GetMemberName(propertyExpression);
+            return GetColumnFor<T>(memberName);
         }
 
         /// <summary>
-        /// Agrega SQL crudo a HAVING. Útil si tu versión no lo trae de serie.
+        /// Intenta recuperar los metadatos completos de la columna (tipo, tamaño, etc.).
         /// </summary>
-        /// <param name="builder">Instancia.</param>
-        /// <param name="sql">SQL crudo a incluir en HAVING.</param>
-        public static SelectQueryBuilder HavingRaw(this SelectQueryBuilder builder, string sql)
+        public static bool TryGetColumnMeta<T>(string propertyName, out ColumnMetadata? meta)
         {
-            if (string.IsNullOrWhiteSpace(sql))
-                return builder;
+            var entity = GetOrAdd(typeof(T));
+            if (entity.Columns.TryGetValue(propertyName, out var col))
+            {
+                meta = col;
+                return true;
+            }
 
-            if (string.IsNullOrWhiteSpace(builder.HavingClause))
-                builder.HavingClause = sql;
-            else
-                builder.HavingClause += $" AND {sql}";
+            // Fallback: si no hay atributo, construir solo con el nombre
+            var prop = typeof(T).GetMember(propertyName, MemberTypes.Property | MemberTypes.Field,
+                                           BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (prop is { Length: > 0 })
+            {
+                meta = new ColumnMetadata { ColumnName = prop[0].Name };
+                return true;
+            }
 
-            return builder;
-        }
-
-        // =========================
-        // ORDER BY helpers
-        // =========================
-
-        /// <summary>
-        /// Ordena por una columna literal. Si la dirección es <see cref="SortDirection.None"/>,
-        /// no se agrega sufijo ASC/DESC (SQL limpio).
-        /// </summary>
-        /// <param name="builder">Instancia.</param>
-        /// <param name="column">Nombre de columna o expresión.</param>
-        /// <param name="direction">Dirección (None/Asc/Desc).</param>
-        public static SelectQueryBuilder OrderBy(this SelectQueryBuilder builder, string column, SortDirection direction = SortDirection.None)
-        {
-            if (!string.IsNullOrWhiteSpace(column))
-                builder.OrderBy((column, direction));
-            return builder;
+            meta = null;
+            return false;
         }
 
         /// <summary>
-        /// Azúcar sintáctico para varios ORDER BY de texto sin dirección (todos con <see cref="SortDirection.None"/>).
+        /// Construye "LIB.TABLA" si hay biblioteca, o solo "TABLA" si no.
         /// </summary>
-        /// <param name="builder">Instancia.</param>
+        public static string GetQualifiedTableName<T>()
+        {
+            var meta = GetOrAdd(typeof(T));
+            var table = meta.TableName ?? throw new InvalidOperationException(
+                $"No se definió [TableName] en {typeof(T).Name}.");
+            return string.IsNullOrWhiteSpace(meta.Library) ? table : $"{meta.Library}.{table}";
+        }
+
+        /// <summary>
+        /// Aplica metadatos (tipo, tamaño, precisión, escala) a un parámetro DB.
+        /// Siempre asigna el valor, convirtiendo <c>null</c> a <see cref="DBNull.Value"/>.
+        /// </summary>
+        public static void ApplyToParameter(DbParameter parameter, object? value, ColumnMetadata? meta)
+        {
+
+                pi.SetValue(parameter, boxed);
+        }
+    }
+}        /// <param name="builder">Instancia.</param>
         /// <param name="columns">Columnas o expresiones.</param>
         public static SelectQueryBuilder OrderBy(this SelectQueryBuilder builder, params string[] columns)
         {
@@ -282,3 +442,4 @@ namespace QueryBuilder.Builders
         }
     }
 }
+
