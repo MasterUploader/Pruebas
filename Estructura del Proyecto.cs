@@ -1,37 +1,32 @@
-// Teclas de control permitidas para poder corregir
+// Teclas de control permitidas (mover, borrar, tab…)
 private static readonly CONTROL_KEYS = new Set<string>([
   'Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Tab','Home','End'
 ]);
 
-/** Verdadero si el valor actual ya tiene alguna racha de 3 letras iguales seguidas */
+/** ¿El valor contiene 3 o más letras idénticas consecutivas en algún lugar? */
 private hasTripleRun(value: string): boolean {
   return /([A-ZÑ])\1{2}/.test((value || '').toUpperCase());
 }
 
-/** Bloquea cualquier nueva entrada si ya hay 3 repetidas consecutivas en el valor */
-bloquearSiLimite(e: KeyboardEvent): void {
-  const key = e.key;
-  // Permitir combinaciones con Ctrl/Meta (copiar, pegar, etc.) y teclas de control
-  if (e.ctrlKey || e.metaKey || ModalTarjetaComponent.CONTROL_KEYS.has(key)) return;
 
+/** Si ya hay una racha de 3, no permitimos seguir escribiendo nada (solo teclas de control) */
+bloquearSiLimite(e: KeyboardEvent): void {
+  if (e.ctrlKey || e.metaKey || ModalTarjetaComponent.CONTROL_KEYS.has(e.key)) return;
   const input = e.target as HTMLInputElement;
-  if (this.hasTripleRun(input.value)) {
-    // Ya existe una racha de 3 → no dejamos escribir nada más
-    e.preventDefault();
-  }
+  if (this.hasTripleRun(input.value)) e.preventDefault();
 }
+
 
 validarEntrada(event: Event): void {
   const input = event.target as HTMLInputElement;
   let valor = (input.value || '').toUpperCase();
 
-  // Solo letras + espacios y colapsa espacios
+  // Solo letras/espacios; colapsa espacios
   valor = valor.replace(/[^A-ZÑ\s]/g, '').replace(/\s{2,}/g, ' ');
 
-  // Si ya tiene triple, no dejamos crecer el string: lo dejamos como estaba antes del input
-  // (el keydown ya lo bloquea, pero esto cubre pegas/autocompletado)
+  // Si el pegado/auto-completado trae más de 3 seguidas, recorta a 3
+  // (seguirá siendo inválido por la regla, pero evita “carreras” más largas)
   if (this.hasTripleRun(valor)) {
-    // Recorta para que no pase de 3 iguales consecutivas
     valor = valor.replace(/([A-ZÑ])\1{3,}/g, (_m, ch) => ch.repeat(3));
   }
 
@@ -41,20 +36,41 @@ validarEntrada(event: Event): void {
   if (this.disenoSeleccionado === 'dosFilas') this.dividirNombreCompleto(valor);
 
   this.nombreCharsCount = valor.length;
-  this.aplicarValidaciones(valor);
+  this.aplicarValidaciones(valor);   // ⬅️ Ahora marcará error por triple repetición
   this.emitirNombreCambiado();
 }
 
 onPasteNombre(e: ClipboardEvent): void {
   const clip = (e.clipboardData?.getData('text') || '').toUpperCase();
-  const soloLetras = clip.replace(/[^A-ZÑ\s]/g, '').replace(/\s{2,}/g, ' ');
+  const limpio = clip.replace(/[^A-ZÑ\s]/g, '').replace(/\s{2,}/g, ' ');
   const input = e.target as HTMLInputElement;
-  const combinado = (input.value || '') + soloLetras;
+  const combinado = (input.value || '') + limpio;
 
-  if (this.hasTripleRun(combinado)) {
-    e.preventDefault();
+  if (this.hasTripleRun(combinado)) e.preventDefault();
+}
+
+
+
+private aplicarValidaciones(valor: string): void {
+  const limpio = (valor || '').toUpperCase().trim().replace(/\s{2,}/g, ' ');
+  const palabras = limpio ? limpio.split(' ') : [];
+
+  this.nombreError = '';
+
+  if (!limpio) {
+    this.nombreError = 'El nombre no puede estar vacío.';
+    return;
+  }
+  if (palabras.length < 2) {
+    this.nombreError = 'Debe ingresar al menos nombre y apellido (mínimo 2 palabras).';
+    return;
+  }
+  if (this.hasTripleRun(limpio)) {
+    this.nombreError = 'No se permiten 3 o más letras idénticas consecutivas en ninguna palabra.';
+    return;
   }
 }
+
 
 <input
   placeholder="Nombre en Tarjeta"
@@ -67,3 +83,6 @@ onPasteNombre(e: ClipboardEvent): void {
   maxlength="26"
   required
   [errorStateMatcher]="nombreErrorMatcher">
+
+
+  
