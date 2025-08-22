@@ -344,3 +344,170 @@ namespace MonitoringApi.Services
     }
 }
 
+
+
+#nullable enable
+using Microsoft.AspNetCore.Mvc;
+using MonitoringApi.Services;
+
+namespace MonitoringApi.Controllers
+{
+    /// <summary>
+    /// Exposición de métricas del propio API (formato Prometheus o texto plano).
+    /// MOCK: Devuelve texto en duro; en fail devuelve JSON de error.
+    /// </summary>
+    [ApiController]
+    public class MetricsController : ControllerBase
+    {
+        private readonly IHealthService _svc;
+
+        public MetricsController(IHealthService svc)
+        {
+            _svc = svc;
+        }
+
+        /// <summary>
+        /// Métricas del API (Prometheus exposition format simulado).
+        /// </summary>
+        /// <param name="demo">"ok" (default) para texto de métricas; "fail" para error JSON.</param>
+        /// <returns>text/plain en ok; application/json en fail.</returns>
+        /// <remarks>GET /api/v1/metrics?demo=ok</remarks>
+        [HttpGet]
+        [Route("api/v1/metrics")]
+        public IActionResult Metrics([FromQuery] string? demo = "ok")
+        {
+            if ((demo ?? "ok").ToLowerInvariant() == "fail")
+                return Content(_svc.GetMetricsFail(), "application/json");
+
+            return Content(_svc.GetMetricsOk(), "text/plain");
+        }
+    }
+}
+
+
+#nullable enable
+using Microsoft.AspNetCore.Mvc;
+using MonitoringApi.Services;
+
+namespace MonitoringApi.Controllers
+{
+    /// <summary>
+    /// Endpoints de salud del propio API (liveness/readiness).
+    /// MOCK: Respuestas en duro con ?demo=ok|fail.
+    /// </summary>
+    [ApiController]
+    [Route("api/v1/health")]
+    [Produces("application/json")]
+    public class HealthController : ControllerBase
+    {
+        private readonly IHealthService _svc;
+
+        public HealthController(IHealthService svc)
+        {
+            _svc = svc;
+        }
+
+        /// <summary>Liveness: solo verifica que el proceso esté arriba.</summary>
+        /// <param name="demo">"ok" (default) o "fail".</param>
+        /// <returns>JSON literal {"status":"Live"} o error simulado.</returns>
+        /// <remarks>GET /api/v1/health/live?demo=ok</remarks>
+        [HttpGet("live")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult Live([FromQuery] string? demo = "ok")
+            => Content(_svc.GetLive(demo ?? "ok"), "application/json");
+
+        /// <summary>
+        /// Readiness: verifica conectividad a BD/caché y dependencias mínimas del API.
+        /// </summary>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal {"status":"Ready"} o error simulado.</returns>
+        /// <remarks>GET /api/v1/health/ready?demo=ok</remarks>
+        [HttpGet("ready")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult Ready([FromQuery] string? demo = "ok")
+            => Content(_svc.GetReady(demo ?? "ok"), "application/json");
+    }
+}
+
+
+
+#nullable enable
+using Microsoft.AspNetCore.Mvc;
+using MonitoringApi.Services;
+using MonitoringApi.Models;
+
+namespace MonitoringApi.Controllers
+{
+    /// <summary>
+    /// Utilidades generales: configuración visible, validación de definiciones
+    /// y descubrimiento asistido de endpoints/puertos.
+    /// MOCK: Respuestas en duro usando ?demo=ok|fail.
+    /// </summary>
+    [ApiController]
+    [Route("api/v1")]
+    [Produces("application/json")]
+    public class UtilitiesController : ControllerBase
+    {
+        private readonly IUtilitiesService _svc;
+
+        public UtilitiesController(IUtilitiesService svc)
+        {
+            _svc = svc;
+        }
+
+        /// <summary>
+        /// Devuelve configuración operativa no sensible del API.
+        /// </summary>
+        /// <param name="demo">"ok" (default) o "fail".</param>
+        /// <returns>JSON literal con defaults/limits o error simulado.</returns>
+        /// <remarks>GET /api/v1/config?demo=ok</remarks>
+        [HttpGet("config")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult GetConfig([FromQuery] string? demo = "ok")
+            => Content(_svc.GetConfig(demo ?? "ok"), "application/json");
+
+        /// <summary>
+        /// Valida definiciones (linting) sin persistir ni ejecutar.
+        /// </summary>
+        /// <param name="request">Definición de servicio y checks (parcial).</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con valid=true/false y warnings/errors.</returns>
+        /// <remarks>POST /api/v1/validate?demo=ok</remarks>
+        [HttpPost("validate")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult Validate([FromBody] ValidateRequest request, [FromQuery] string? demo = "ok")
+            => Content(_svc.Validate(request, demo ?? "ok"), "application/json");
+
+        /// <summary>
+        /// Descubre endpoints HTTP públicos/permitidos a partir de bases.
+        /// </summary>
+        /// <param name="request">Listado de URLs base para escanear con reglas de allow-list.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con proposals (no se persiste).</returns>
+        /// <remarks>POST /api/v1/discovery/http?demo=ok</remarks>
+        [HttpPost("discovery/http")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult DiscoveryHttp([FromBody] DiscoveryHttpRequest request, [FromQuery] string? demo = "ok")
+            => Content(_svc.DiscoveryHttp(request, demo ?? "ok"), "application/json");
+
+        /// <summary>
+        /// Descubre puertos/servicios TCP en hosts permitidos.
+        /// </summary>
+        /// <param name="request">Hosts y puertos a verificar (con allow/deny-lists).</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con open[].</returns>
+        /// <remarks>POST /api/v1/discovery/tcp?demo=ok</remarks>
+        [HttpPost("discovery/tcp")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult DiscoveryTcp([FromBody] DiscoveryTcpRequest request, [FromQuery] string? demo = "ok")
+            => Content(_svc.DiscoveryTcp(request, demo ?? "ok"), "application/json");
+    }
+}
+
+
+
+builder.Services.AddScoped<MonitoringApi.Services.IUtilitiesService, MonitoringApi.Services.UtilitiesService>();
+builder.Services.AddScoped<MonitoringApi.Services.IHealthService, MonitoringApi.Services.HealthService>();
+
+
+
