@@ -1,109 +1,73 @@
-Esta es la clase que uso para la encriptación y desencriptacion
+// Services/Usuarios/UsuarioService.cs (extracto)
+using System;
+using System.Data;
+using System.Threading.Tasks;
+using CAUAdministracion.Models;
+using Microsoft.Extensions.Configuration;
+using RestUtilities.Connections;
+using RestUtilities.QueryBuilder;
 
-using System.Security.Cryptography;
-using System.Text;
-
-namespace CAUAdministracion.Helpers;
-
-/// <summary> 
-/// Clase utilitaria para encriptar y desencriptar cadenas compatibles con el sistema anterior. 
-/// /// </summary> 
-public static class OperacionesVarias
+namespace CAUAdministracion.Services.Usuarios
 {
-    /// <summary>
-    /// Clase utilitaria para encriptar y desencriptar cadenas. 
-    /// Soporta formato antiguo (Base64 Unicode) y moderno (AES). 
-    /// </summary> 
-    /// 
-    private static readonly string aesKey = "TuClaveAES128Bits"; // 16 caracteres
-    private static readonly string aesIV = "VectorInicialAES";   // 16 caracteres
-
-    public static string EncriptarCadena(string cadenaEncriptar)
+    public class UsuarioService : IUsuarioService
     {
-        byte[] encrypted = Encoding.Unicode.GetBytes(cadenaEncriptar);
-        return Convert.ToBase64String(encrypted);
-    }
+        private readonly IConnections _connections;
+        private readonly IPasswordCipher _cipher;
+        private readonly string _connName;
 
-    public static string DesencriptarCadena(string cadenaDesencriptar)
-    {
-        try
+        public UsuarioService(IConnections connections, IPasswordCipher cipher, IConfiguration cfg)
         {
-            byte[] decrypted = Convert.FromBase64String(cadenaDesencriptar);
-            return Encoding.Unicode.GetString(decrypted);
+            _connections = connections;
+            _cipher = cipher;
+            _connName = cfg.GetConnectionString("AS400") ?? "AS400";
         }
-        catch
+
+        // ... ExisteUsuarioAsync (con WhereRaw) se queda igual ...
+
+        /// <summary>
+        /// Inserta un registro en BCAH96DTA.USUADMIN cifrando la clave con OperacionesVarias.
+        /// </summary>
+        public async Task<bool> CrearUsuarioAsync(UsuarioModel usuario, string clavePlano)
         {
-            return string.Empty;
-        }
-    }
+            if (usuario == null) throw new ArgumentNullException(nameof(usuario));
+            if (string.IsNullOrWhiteSpace(usuario.Usuario)) throw new ArgumentException("Usuario requerido.", nameof(usuario));
+            if (usuario.TipoUsu is < 1 or > 3) throw new ArgumentException("Tipo de usuario inválido.", nameof(usuario));
+            if (usuario.Estado is not ("A" or "I")) throw new ArgumentException("Estado inválido.", nameof(usuario));
+            if (string.IsNullOrWhiteSpace(clavePlano)) throw new ArgumentException("Clave requerida.", nameof(clavePlano));
 
-    public static string EncriptarCadenaAES(string textoPlano)
-    {
-        using Aes aes = Aes.Create();
-        aes.Key = Encoding.UTF8.GetBytes(aesKey);
-        aes.IV = Encoding.UTF8.GetBytes(aesIV);
+            // ====> Cifrado con tu clase OperacionesVarias (Legacy por defecto o AES si config lo indica)
+            var claveCifrada = _cipher.Encriptar(clavePlano);
 
-        ICryptoTransform encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
-        byte[] inputBytes = Encoding.UTF8.GetBytes(textoPlano);
+            await using var cn = await _connections.OpenAsync(_connName);
+            await using var tx = await cn.BeginTransactionAsync();
 
-        using var ms = new System.IO.MemoryStream();
-        using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
-        {
-            cs.Write(inputBytes, 0, inputBytes.Length);
-            cs.FlushFinalBlock();
-            return Convert.ToBase64String(ms.ToArray());
-        }
-    }
+            try
+            {
+                var qb = SqlBuilder
+                    .InsertInto("BCAH96DTA.USUADMIN")
+                    .Columns("USUARIO", "PASS", "TIPUSU", "ESTADO")
+                    .Values("@usuario", "@pass", "@tipo", "@estado");
 
-    public static string DesencriptarCadenaAES(string textoEncriptado)
-    {
-        try
-        {
-            using Aes aes = Aes.Create();
-            aes.Key = Encoding.UTF8.GetBytes(aesKey);
-            aes.IV = Encoding.UTF8.GetBytes(aesIV);
+                var (sql, _) = qb.Build();
 
-            ICryptoTransform decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
-            byte[] inputBytes = Convert.FromBase64String(textoEncriptado);
+                await using var cmd = cn.CreateCommand();
+                cmd.Transaction = (IDbTransaction)tx;
+                cmd.CommandText = sql;
 
-            using var ms = new System.IO.MemoryStream(inputBytes);
-            using var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read);
-            using var reader = new System.IO.StreamReader(cs);
-            return reader.ReadToEnd();
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
+                var pUsuario = cmd.CreateParameter(); pUsuario.ParameterName = "@usuario"; pUsuario.Value = usuario.Usuario; cmd.Parameters.Add(pUsuario);
+                var pPass    = cmd.CreateParameter(); pPass.ParameterName    = "@pass";    pPass.Value    = claveCifrada;   cmd.Parameters.Add(pPass);
+                var pTipo    = cmd.CreateParameter(); pTipo.ParameterName    = "@tipo";    pTipo.Value    = usuario.TipoUsu; cmd.Parameters.Add(pTipo);
+                var pEstado  = cmd.CreateParameter(); pEstado.ParameterName  = "@estado";  pEstado.Value  = usuario.Estado;  cmd.Parameters.Add(pEstado);
 
-    /// <summary>
-    /// Detecta automáticamente si la contraseña está en formato viejo o nuevo y la desencripta.
-    /// </summary>
-    public static string DesencriptarAuto(string cadena)
-    {
-        string desencriptado = DesencriptarCadenaAES(cadena);
-        if (!string.IsNullOrWhiteSpace(desencriptado))
-            return desencriptado;
-
-        desencriptado = DesencriptarCadena(cadena);
-        return desencriptado;
-    }
-
-    /// <summary>
-    /// Detecta si una cadena parece ser AES (nuevo formato) por su tamaño y contenido.
-    /// </summary>
-    public static bool EsFormatoNuevo(string cadena)
-    {
-        try
-        {
-            string intento = DesencriptarCadenaAES(cadena);
-            return !string.IsNullOrWhiteSpace(intento);
-        }
-        catch
-        {
-            return false;
+                var rows = await cmd.ExecuteNonQueryAsync();
+                await tx.CommitAsync();
+                return rows > 0;
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
         }
     }
 }
-
