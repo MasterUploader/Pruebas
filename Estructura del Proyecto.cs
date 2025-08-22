@@ -1,190 +1,275 @@
-using CAUAdministracion.Helpers;
-using CAUAdministracion.Models;
-using CAUAdministracion.Services.Usuarios; // <- tu servicio
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Rendering;
-using X.PagedList.Extensions;
+Falto la parte de mantenimiento de usuarios, acá te dejo el codigo antiguo
 
-namespace CAUAdministracion.Controllers;
+<%@ Page Language="C#" AutoEventWireup="true" CodeFile="Administracion.aspx.cs" Inherits="Administracion" %>
 
-[Authorize, AutorizarPorTipoUsuario("1")] // ajusta si aplica
-public class UsuariosController : Controller
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head id="Head1" runat="server">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <link href="Content/style.css" rel="stylesheet" />
+    <script src="Scripts/jsAcciones.js"></script>
+    <title>Administraci&oacute;n de Usuarios</title> 
+</head>
+<body>
+
+    <div class="container">
+        <header style="width:auto; height:100px; background-image:url('Images/header.jpg'); border-radius:10px; -moz-border-radius:5px 5px 5px 5px;-webkit-border-radius:5px 5px 5px 5px">
+            <div style="float:right; margin-right:5px;">
+               <a href="javascript:logout();" style="color:white;">Cerrar Sesi&oacute;n [<%Response.Write(Session["usuario"].ToString());%>]</a>         
+            </div>
+        </header>
+
+         <div style="margin-top:10px;">
+             <h2 id="tituloPrincipal" style="color:red;">Administraci&oacute;n de Usuarios</h2>
+        </div>
+
+
+        <form id="form1" runat="server">
+        
+            <p>
+                <asp:Button ID="btnAgregarNuevo" runat="server" Text="Agregar Nuevo Usuario" OnClick="btnAgregarNuevo_Click"/>
+            </p>
+
+            <div class="separador"></div>
+
+            <asp:GridView ID="gvUsuarios" runat="server" CellPadding="4" DataSourceID="DBDataSourceUsuarios" ForeColor="#333333" GridLines="None" Width="934px" AutoGenerateColumns="False" DataKeyNames="USUARIO" OnRowDeleting="gvUsuarios_RowDeleting" OnRowUpdating="gvUsuarios_RowUpdating">
+                    <AlternatingRowStyle BackColor="White" />
+                    <Columns>
+                        <asp:CommandField ShowEditButton="True" />
+                        <asp:CommandField ShowDeleteButton="True" />
+                        <asp:BoundField DataField="USUARIO" HeaderText="Usuario" ReadOnly="True" SortExpression="USUARIO" >
+                        <HeaderStyle HorizontalAlign="Left" />
+                        </asp:BoundField>
+                        <asp:TemplateField HeaderText="Tipo Usuario" SortExpression="TIPUSU">
+                            <EditItemTemplate>
+                                <asp:DropDownList ID="DropDownList1" runat="server">
+                                    <asp:ListItem Value="1">Administrador</asp:ListItem>
+                                    <asp:ListItem Value="2">Admin. Videos</asp:ListItem>
+                                    <asp:ListItem Value="3">Admin. Mensajes</asp:ListItem>
+                                </asp:DropDownList>
+                            </EditItemTemplate>
+                            <ItemTemplate>
+                                <asp:Label ID="Label1" runat="server" Text='<%# Bind("TIPUSU") %>'></asp:Label>
+                            </ItemTemplate>
+                            <HeaderStyle HorizontalAlign="Left" />
+                        </asp:TemplateField>
+                        <asp:TemplateField HeaderText="Estado" SortExpression="ESTADO">
+                            <EditItemTemplate>
+                                <asp:DropDownList ID="DropDownList2" runat="server">
+                                    <asp:ListItem Value="A">Activo</asp:ListItem>
+                                    <asp:ListItem Value="I">Inactivo</asp:ListItem>
+                                </asp:DropDownList>
+                            </EditItemTemplate>
+                            <ItemTemplate>
+                                <asp:Label ID="Label2" runat="server" Text='<%# Bind("ESTADO") %>'></asp:Label>
+                            </ItemTemplate>
+                            <HeaderStyle HorizontalAlign="Left" />
+                        </asp:TemplateField>
+                    </Columns>
+                    <FooterStyle BackColor="#990000" Font-Bold="True" ForeColor="White" />
+                    <HeaderStyle BackColor="#990000" Font-Bold="True" ForeColor="White" />
+                    <PagerStyle BackColor="#FFCC66" ForeColor="#333333" HorizontalAlign="Center" />
+                    <RowStyle BackColor="#FFFBD6" ForeColor="#333333" />
+                    <SelectedRowStyle BackColor="#FFCC66" Font-Bold="True" ForeColor="Navy" />
+                    <SortedAscendingCellStyle BackColor="#FDF5AC" />
+                    <SortedAscendingHeaderStyle BackColor="#4D0000" />
+                    <SortedDescendingCellStyle BackColor="#FCF6C0" />
+                    <SortedDescendingHeaderStyle BackColor="#820000" />
+                </asp:GridView>
+
+                <asp:SqlDataSource ID="DBDataSourceUsuarios" runat="server" ConnectionString="<%$ ConnectionStrings:ConnectionString2 %>" ProviderName="<%$ ConnectionStrings:ConnectionString2.ProviderName %>" SelectCommand="SELECT USUARIO, CASE WHEN TIPUSU = 1 THEN 'Administrador' WHEN TIPUSU = 2 THEN 'Admin. Videos' WHEN TIPUSU = 3 THEN 'Admin. Mensaje' END AS TiPUsu, CASE WHEN ESTADO = 'A' THEN 'Activo' WHEN ESTADO = 'I' THEN 'Inactivo' END AS Estado FROM BCAH96DTA.USUADMIN WHERE (USUARIO &lt;&gt; 'usrmar')"></asp:SqlDataSource>
+                <asp:SqlDataSource ID="DBDataSourceOperaciones" runat="server" ConnectionString="<%$ ConnectionStrings:ConnectionString2 %>" ProviderName="<%$ ConnectionStrings:ConnectionString2.ProviderName %>" SelectCommand="SELECT COUNT(*) AS Expr1 FROM BCAH96DTA.RSAGE01"></asp:SqlDataSource>
+
+             <p>
+                 <asp:Button ID="btnMenu" runat="server" Text="Volver" OnClick="btnMenu_Click" />
+             </p>
+
+            <p>
+                <asp:Label ID="lblError" runat="server" Text="lblError" ForeColor="Red" Visible="False"></asp:Label>
+            </p>
+
+
+        </form>
+
+    </div>
+
+</body>
+</html>
+
+using System;
+using System.Data;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+
+public partial class Administracion : System.Web.UI.Page
 {
-    private readonly IUsuarioService _usuarioService;
+    string qry = string.Empty;
+    string _error = string.Empty;
 
-    public UsuariosController(IUsuarioService usuarioService)
+    protected void Page_Load(object sender, EventArgs e)
     {
-        _usuarioService = usuarioService;
+        if (Session["usuario"] == null)
+            Response.Redirect("Default.aspx");
+    }
+    protected void btnAgregarNuevo_Click(object sender, EventArgs e)
+    {
+        Response.Redirect("AgregarNvoUser.aspx");
     }
 
-    [HttpGet]
-    public async Task<IActionResult> Index(int? page, string? q, string? tipo, string? estado)
+    protected void btnMenu_Click(object sender, EventArgs e)
     {
-        // 1) Cargar usuarios
-        var lista = await _usuarioService.ObtenerUsuariosAsync(); // List<UsuarioModel>
-
-        // 2) Filtros
-        if (!string.IsNullOrWhiteSpace(q))
-            lista = lista
-                .Where(u => u.Usuario?.Contains(q, StringComparison.OrdinalIgnoreCase) == true)
-                .ToList();
-
-        if (!string.IsNullOrEmpty(tipo) && int.TryParse(tipo, out var tipoInt))
-            lista = lista.Where(u => u.TipoUsuario == tipoInt).ToList();
-
-        if (!string.IsNullOrEmpty(estado))
-            lista = lista.Where(u => string.Equals(u.Estado, estado, StringComparison.OrdinalIgnoreCase)).ToList();
-
-        // 3) Selects del filtro (usamos asp-items para evitar RZ1031)
-        ViewBag.Tipos = new List<SelectListItem>
-        {
-            new("-- Todos --",""),
-            new("Administrador","1", selected: tipo == "1"),
-            new("Admin. Videos","2", selected: tipo == "2"),
-            new("Admin. Mensajes","3", selected: tipo == "3"),
-        };
-
-        ViewBag.Estados = new List<SelectListItem>
-        {
-            new("-- Todos --",""),
-            new("Activo","A", selected: estado == "A"),
-            new("Inactivo","I", selected: estado == "I"),
-        };
-
-        ViewBag.Busqueda = q ?? "";
-        ViewBag.TipoSel  = tipo ?? "";
-        ViewBag.EstadoSel = estado ?? "";
-
-        // 4) Paginación
-        var pageNumber = page ?? 1;
-        var pageSize = 10;
-
-        return View(lista.ToPagedList(pageNumber, pageSize));
+        Response.Redirect("Mnu_Configuracion.aspx");
     }
 
-    // (Opcional) Acciones de ejemplo para los botones
-    [HttpGet] public IActionResult Agregar() => View();
-    [HttpGet] public async Task<IActionResult> Editar(string id)
-        => View(await _usuarioService.ObtenerPorIdAsync(id));
-
-    [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Eliminar(string id)
+    protected void gvUsuarios_RowDeleting(object sender, GridViewDeleteEventArgs e)
     {
-        var ok = await _usuarioService.EliminarAsync(id);
-        TempData["Mensaje"] = ok ? "Usuario eliminado." : "No se pudo eliminar.";
-        return RedirectToAction(nameof(Index));
-    }
-}
-
-
-
-
-@using X.PagedList
-@using X.PagedList.Mvc.Core
-@model IPagedList<CAUAdministracion.Models.UsuarioModel>
-
-@{
-    ViewData["Title"] = "Usuarios";
-    var q        = (string)(ViewBag.Busqueda ?? "");
-    var tipoSel  = (string)(ViewBag.TipoSel  ?? "");
-    var estadoSel= (string)(ViewBag.EstadoSel?? "");
-    var tipos    = ViewBag.Tipos as List<SelectListItem>;
-    var estados  = ViewBag.Estados as List<SelectListItem>;
-
-    string TipoTexto(int t) => t switch { 1 => "Administrador", 2 => "Admin. Videos", 3 => "Admin. Mensajes", _ => "-" };
-    string EstadoTexto(string? e) => e == "A" ? "Activo" : "Inactivo";
-}
-
-<h2 class="text-danger mb-3">@ViewData["Title"]</h2>
-
-@if (TempData["Mensaje"] != null)
-{
-    <div id="autoclose-alert" class="alert alert-info alert-dismissible fade show" role="alert">
-        @TempData["Mensaje"]
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-}
-
-<form method="get" asp-action="Index" class="row g-2 align-items-end mb-3">
-    <div class="col-md-4">
-        <label class="form-label">Usuario</label>
-        <input type="text" name="q" value="@q" class="form-control" placeholder="Buscar por usuario..." />
-    </div>
-
-    <div class="col-md-3">
-        <label class="form-label">Tipo</label>
-        <select name="tipo" class="form-select" asp-items="tipos">
-            <!-- el primer item de ViewBag.Tipos ya es '-- Todos --' -->
-        </select>
-    </div>
-
-    <div class="col-md-3">
-        <label class="form-label">Estado</label>
-        <select name="estado" class="form-select" asp-items="estados"></select>
-    </div>
-
-    <div class="col-md-2 d-grid">
-        <button type="submit" class="btn btn-primary">Filtrar</button>
-    </div>
-</form>
-
-<div class="mb-3">
-    <a asp-action="Agregar" class="btn btn-success">Agregar Usuario</a>
-</div>
-
-@if (Model != null && Model.Any())
-{
-    <table class="table table-bordered table-hover align-middle">
-        <thead class="table-dark">
-            <tr>
-                <th style="width:35%">Usuario</th>
-                <th style="width:25%">Tipo</th>
-                <th style="width:15%">Estado</th>
-                <th style="width:25%">Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-        @foreach (var u in Model)
+        if (e.RowIndex > -1)
         {
-            <tr>
-                <td>@u.Usuario</td>
-                <td>@TipoTexto(u.TipoUsuario)</td>
-                <td>@EstadoTexto(u.Estado)</td>
-                <td class="text-nowrap">
-                    <a asp-action="Editar" asp-route-id="@u.Usuario" class="btn btn-warning btn-sm me-2">Editar</a>
+            string usuario = string.Empty;
 
-                    <form asp-action="Eliminar" asp-route-id="@u.Usuario" method="post" class="d-inline"
-                          onsubmit="return confirm('¿Eliminar el usuario @u.Usuario?');">
-                        @Html.AntiForgeryToken()
-                        <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
-                    </form>
-                </td>
-            </tr>
+            TableCell celda = null;
+            GridViewRow tmpFila = this.gvUsuarios.Rows[e.RowIndex];
+
+            celda = tmpFila.Cells[2];
+            usuario = celda.Text;
+
+            if (eliminarEntradadeDB(usuario))
+            {
+                string msg = "Se ha eliminado el usuario: " + usuario + "!";
+                ClientScript.RegisterStartupScript(this.GetType(), "Exito", "alert('" + msg + "');", true);
+            }            
         }
-        </tbody>
-    </table>
 
-    <div class="d-flex justify-content-center">
-        @Html.PagedListPager(
-            Model,
-            page => Url.Action("Index", new { page, q = q, tipo = tipoSel, estado = estadoSel })
-        )
-    </div>
+        Response.Redirect("Administracion.aspx");
+    }
+
+    private bool eliminarEntradadeDB(string usuario)
+    {
+        if (!validarUnicoUsuario())
+        {
+            qry = "DELETE FROM BCAH96DTA.USUADMIN WHERE usuario = '" + usuario + "'";
+
+            DBDataSourceOperaciones.DeleteCommand = qry;
+
+            if (DBDataSourceOperaciones.Delete() > 0)
+                return true;
+            else
+                return false;
+        }
+        else
+        {
+            _error = "El usuario que intenta eliminar es el único en el sistema, debe existir al menos un usuario";            
+            return false;
+        }
+
+    }
+
+    protected void gvUsuarios_RowUpdating(object sender, GridViewUpdateEventArgs e)
+    {
+        if (e.RowIndex > -1)
+        {
+            string usuario = string.Empty; //Usuario
+            string estado = string.Empty; //Estado del usuario
+            string perfil = string.Empty; //Tipo de usuario
+
+            GridViewRow tmpFila = this.gvUsuarios.Rows[e.RowIndex];
+            TableCell celda = null;
+
+            celda = tmpFila.Cells[2];
+            usuario = celda.Text;
+
+            perfil = ((DropDownList)(tmpFila.Cells[3].Controls[1])).SelectedValue.ToString(); //celda.Text;
+            estado = ((DropDownList)(tmpFila.Cells[4].Controls[1])).SelectedValue.ToString(); //celda.Text;            
+
+            if (ActualizarUsuario(usuario, estado, perfil))
+            {
+                string msg = "Se ha editado el usuario: " + usuario + "!";
+                ClientScript.RegisterStartupScript(this.GetType(), "Exito", "alert('" + msg + "');", true);
+            }            
+        }
+    }
+
+    private bool ActualizarUsuario(string usuario, string estado, string perfil)
+    {
+        if (estado.Equals("I") || !estado.Equals("1"))
+        {
+            if (!validarUnicoUsuario())
+            {
+                qry = "UPDATE BCAH96DTA.USUADMIN " +
+                      "SET estado= '" + estado + "', TIPUSU = '" + perfil + "'" +
+                      "WHERE usuario = '" + usuario + "'";
+
+                //DBDataSourceOperaciones.UpdateCommand = qry;
+                this.DBDataSourceUsuarios.UpdateCommand = qry;
+                try
+                {
+                    if (DBDataSourceUsuarios.Update() > 0)
+                        return true;
+                    else
+                    {
+                        _error = "Fallo en la actualización";
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _error = ex.Message;
+                    return false;
+                }
+            }
+            else
+            {
+                this._error = "No puede modificar a Inactivo el usuario dado que es el unico usuario en el sistema, agregue más para poder editar el actual";
+                return false;
+            }
+        }
+        else
+        {
+            qry = "UPDATE BCAH96DTA.USUADMIN " +
+                      "SET estado= '" + estado + "', TIPUSU = '" + perfil + "'" +
+                      "WHERE usuario = '" + usuario + "'";
+
+            DBDataSourceOperaciones.UpdateCommand = qry;
+
+            try
+            {
+                if (DBDataSourceUsuarios.Update() > 0)
+                    return true;
+                else
+                {
+                    _error = "Fallo en la actualización";
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _error = ex.Message;
+                return false;
+            }
+        }
+    }
+
+    private bool validarUnicoUsuario()
+    {
+        qry = "SELECT count(*) FROM BCAH96DTA.USUADMIN";
+
+        DBDataSourceOperaciones.SelectCommand = qry;
+        DataView tmpDV = (DataView)DBDataSourceOperaciones.Select(DataSourceSelectArguments.Empty);
+
+        object hayUsuarios = tmpDV.Table.Rows[0][0];
+
+        if (hayUsuarios != null && !hayUsuarios.ToString().Equals(string.Empty))
+        {
+            if (int.Parse(hayUsuarios.ToString()) > 1)
+                return false;
+            else
+                return true;
+        }
+        else
+            return true;
+    }
 }
-else
-{
-    <div class="alert alert-info">No se encontraron usuarios con los filtros actuales.</div>
-}
-
-@section Scripts {
-    <script>
-        // Cerrar alert en 5s
-        setTimeout(() => {
-            const el = document.getElementById('autoclose-alert');
-            if (el) new bootstrap.Alert(el).close();
-        }, 5000);
-    </script>
-}
-
-
