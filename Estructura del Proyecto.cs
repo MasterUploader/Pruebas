@@ -1,318 +1,370 @@
-using CAUAdministracion.Helpers;
-using CAUAdministracion.Models;
-using CAUAdministracion.Services.Usuarios;
-using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Controllers
+builder.Services.AddControllers();
+
+// Swagger opcional para probar rápido (puedes quitarlo)
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// Inyección de dependencias (Status)
+builder.Services.AddScoped<Services.IStatusService, Services.StatusService>();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseHttpsRedirection();
+app.MapControllers();
+app.Run();
+
+
+
+#nullable enable
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Rendering;
-using X.PagedList.Extensions;
+using MonitoringApi.Services;
 
-namespace CAUAdministracion.Controllers;
-
-[Authorize, AutorizarPorTipoUsuario("1")]
-public class UsuariosController : Controller
+namespace MonitoringApi.Controllers
 {
-    private readonly IUsuarioService _usuarioService;
-
-    public UsuariosController(IUsuarioService usuarioService)
+    /// <summary>
+    /// Controlador para exponer el estado on-demand de servicios/microservicios.
+    /// Devuelve JSON literal (simulado) para "ok" o "fail" según el parámetro de demo.
+    /// </summary>
+    [ApiController]
+    [Route("api/v1/[controller]")]
+    [Produces("application/json")]
+    public class StatusController : ControllerBase
     {
-        _usuarioService = usuarioService;
-    }
+        private readonly IStatusService _service;
 
-    [HttpGet]
-    public async Task<IActionResult> Index(
-        int? page,
-        string? q,
-        string? tipo,     // "","1","2","3"
-        string? estado,   // "","A","I"
-        string? edit      // usuario que se está editando
-    )
-    {
-        // 1) Datos
-        var usuarios = await _usuarioService.ObtenerUsuariosAsync();
-
-        // 2) Filtros
-        if (!string.IsNullOrWhiteSpace(q))
-            usuarios = usuarios
-                .Where(u => (u.Usuario ?? "")
-                    .Contains(q, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-        if (!string.IsNullOrEmpty(tipo) && int.TryParse(tipo, out var t))
-            usuarios = usuarios.Where(u => u.TipoUsuario == t).ToList();
-
-        if (!string.IsNullOrEmpty(estado))
-            usuarios = usuarios.Where(u => string.Equals(u.Estado, estado, StringComparison.OrdinalIgnoreCase)).ToList();
-
-        // 3) Combos del filtro (asp-items evita RZ1031)
-        ViewBag.Tipos = new List<SelectListItem>
+        public StatusController(IStatusService service)
         {
-            new("-- Todos --",""),
-            new("Administrador","1", selected: tipo == "1"),
-            new("Admin. Videos","2", selected: tipo == "2"),
-            new("Admin. Mensajes","3", selected: tipo == "3"),
-        };
-        ViewBag.Estados = new List<SelectListItem>
-        {
-            new("-- Todos --",""),
-            new("Activo","A", selected: estado == "A"),
-            new("Inactivo","I", selected: estado == "I"),
-        };
-
-        // 4) ViewBags auxiliares
-        ViewBag.Busqueda  = q ?? "";
-        ViewBag.TipoSel   = tipo ?? "";
-        ViewBag.EstadoSel = estado ?? "";
-        ViewBag.Edit      = edit; // usuario en edición (puede ser null)
-
-        // 5) Paginación
-        int pageNumber = page ?? 1;
-        int pageSize   = 10;
-
-        return View(usuarios.ToPagedList(pageNumber, pageSize));
-    }
-
-    [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Actualizar(string usuario, int tipoUsuario, string estado,
-                                               int? page, string? q, string? tipo, string? estadoFiltro)
-    {
-        // Regla: no permitir dejar Inactivo al único usuario
-        if (string.Equals(estado, "I", StringComparison.OrdinalIgnoreCase))
-        {
-            var total = await _usuarioService.ContarUsuariosAsync();
-            if (total <= 1)
-            {
-                TempData["Mensaje"] = "No puede inactivar al único usuario del sistema.";
-                return RedirectToAction(nameof(Index), new { page, q, tipo, estado = estadoFiltro });
-            }
+            _service = service;
         }
 
-        var model = new UsuarioModel
+        /// <summary>
+        /// Lista el estado actual normalizado de los servicios.
+        /// </summary>
+        /// <param name="env">Filtro por entorno (DEV/UAT/PROD...). No aplica en el mock.</param>
+        /// <param name="tag">Filtro por etiqueta. No aplica en el mock.</param>
+        /// <param name="include">checks,dependencies,history. No aplica en el mock.</param>
+        /// <param name="history">Tamaño de historial si include=history. No aplica en el mock.</param>
+        /// <param name="demo">Modo demo: "ok" (por defecto) o "fail" para forzar JSON de error simulado.</param>
+        /// <returns>JSON literal con la lista de estados.</returns>
+        /// <remarks>
+        /// Ejemplos:
+        /// GET /api/v1/status?demo=ok
+        /// GET /api/v1/status?demo=fail
+        /// </remarks>
+        [HttpGet]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult GetStatusList([FromQuery] string? env, [FromQuery] string? tag,
+            [FromQuery] string? include, [FromQuery] int? history, [FromQuery] string? demo = "ok")
         {
-            Usuario = usuario,
-            TipoUsuario = tipoUsuario,
-            Estado = estado
-        };
+            var json = _service.GetStatusList(demo ?? "ok");
+            return Content(json, "application/json");
+        }
 
-        var ok = await _usuarioService.ActualizarAsync(model);
-        TempData["Mensaje"] = ok ? "Usuario actualizado." : "No se pudo actualizar el usuario.";
+        /// <summary>
+        /// Devuelve el estado detallado de un servicio concreto.
+        /// </summary>
+        /// <param name="serviceId">Identificador lógico del servicio.</param>
+        /// <param name="include">checks,dependencies,history. No aplica en el mock.</param>
+        /// <param name="history">Cantidad de puntos de historial. No aplica en el mock.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal del estado del servicio.</returns>
+        /// <remarks>
+        /// Ejemplos:
+        /// GET /api/v1/status/payments-api?demo=ok
+        /// GET /api/v1/status/payments-api?demo=fail
+        /// </remarks>
+        [HttpGet("{serviceId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult GetStatusById([FromRoute] string serviceId,
+            [FromQuery] string? include, [FromQuery] int? history, [FromQuery] string? demo = "ok")
+        {
+            var json = _service.GetStatusById(serviceId, demo ?? "ok");
+            return Content(json, "application/json");
+        }
 
-        return RedirectToAction(nameof(Index), new { page, q, tipo, estado = estadoFiltro });
+        /// <summary>
+        /// Devuelve un resumen agregado de estados (conteos y percentiles).
+        /// </summary>
+        /// <param name="groupBy">env, tag, owner, kind. No aplica en el mock.</param>
+        /// <param name="from">Inicio de ventana. No aplica en el mock.</param>
+        /// <param name="to">Fin de ventana. No aplica en el mock.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con resumen.</returns>
+        /// <remarks>
+        /// Ejemplos:
+        /// GET /api/v1/status/summary?demo=ok
+        /// GET /api/v1/status/summary?demo=fail
+        /// </remarks>
+        [HttpGet("summary")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult GetSummary([FromQuery] string? groupBy, [FromQuery] string? from,
+            [FromQuery] string? to, [FromQuery] string? demo = "ok")
+        {
+            var json = _service.GetStatusSummary(demo ?? "ok");
+            return Content(json, "application/json");
+        }
+
+        /// <summary>
+        /// Fuerza el refresco del estado de uno o varios servicios.
+        /// </summary>
+        /// <param name="request">Cuerpo con serviceIds y bandera coalesce.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal indicando servicios refrescados o error simulado.</returns>
+        /// <remarks>
+        /// POST /api/v1/status/refresh?demo=ok
+        /// Body:
+        /// {
+        ///   "serviceIds": ["payments-api", "auth-svc"],
+        ///   "coalesce": true
+        /// }
+        /// </remarks>
+        [HttpPost("refresh")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult Refresh([FromBody] Models.RefreshRequest request, [FromQuery] string? demo = "ok")
+        {
+            var json = _service.RefreshStatus(request, demo ?? "ok");
+            return Content(json, "application/json");
+        }
     }
+}
 
-    [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Eliminar(string usuario, int? page, string? q, string? tipo, string? estado)
+
+
+#nullable enable
+using MonitoringApi.Models;
+
+namespace MonitoringApi.Services
+{
+    /// <summary>
+    /// Contrato de servicio para proveer respuestas simuladas de los endpoints de Status.
+    /// </summary>
+    public interface IStatusService
     {
-        // Regla: no eliminar al único usuario
-        var total = await _usuarioService.ContarUsuariosAsync();
-        if (total <= 1)
-        {
-            TempData["Mensaje"] = "No puede eliminar al único usuario del sistema.";
-            return RedirectToAction(nameof(Index), new { page, q, tipo, estado });
-        }
+        /// <summary>
+        /// Devuelve el JSON literal de la lista de estados.
+        /// </summary>
+        /// <param name="demo">"ok" para respuesta buena, "fail" para respuesta mala.</param>
+        string GetStatusList(string demo);
 
-        var ok = await _usuarioService.EliminarAsync(usuario);
-        TempData["Mensaje"] = ok ? "Usuario eliminado." : "No se pudo eliminar el usuario.";
+        /// <summary>
+        /// Devuelve el JSON literal del estado por ID.
+        /// </summary>
+        /// <param name="serviceId">ID del servicio.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        string GetStatusById(string serviceId, string demo);
 
-        return RedirectToAction(nameof(Index), new { page, q, tipo, estado });
+        /// <summary>
+        /// Devuelve el JSON literal del resumen agregado.
+        /// </summary>
+        /// <param name="demo">"ok" o "fail".</param>
+        string GetStatusSummary(string demo);
+
+        /// <summary>
+        /// Devuelve el JSON literal del resultado de refrescar estado.
+        /// </summary>
+        /// <param name="request">Petición de refresco (no se usa en el mock).</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        string RefreshStatus(RefreshRequest request, string demo);
     }
-
-    // (Opcional) pantallas de alta/edición por separado
-    [HttpGet] public IActionResult Agregar() => View();
-    [HttpGet] public async Task<IActionResult> Editar(string id)
-        => View(await _usuarioService.ObtenerPorIdAsync(id));
 }
 
 
-@using X.PagedList
-@using X.PagedList.Mvc.Core
-@model IPagedList<CAUAdministracion.Models.UsuarioModel>
 
-@{
-    ViewData["Title"] = "Administración de Usuarios";
+#nullable enable
+using MonitoringApi.Data;
+using MonitoringApi.Models;
 
-    var q         = (string)(ViewBag.Busqueda  ?? "");
-    var tipoSel   = (string)(ViewBag.TipoSel   ?? "");
-    var estadoSel = (string)(ViewBag.EstadoSel ?? "");
-    var tipos     = ViewBag.Tipos   as List<SelectListItem>;
-    var estados   = ViewBag.Estados as List<SelectListItem>;
-    var editUser  = ViewBag.Edit    as string;
-
-    string TipoTexto(int t) => t switch { 1 => "Administrador", 2 => "Admin. Videos", 3 => "Admin. Mensajes", _ => "-" };
-    string EstadoTexto(string? e) => string.Equals(e, "A", StringComparison.OrdinalIgnoreCase) ? "Activo" : "Inactivo";
-}
-
-<h2 class="text-danger mb-3">@ViewData["Title"]</h2>
-
-@if (TempData["Mensaje"] != null)
+namespace MonitoringApi.Services
 {
-    <div id="autoclose-alert" class="alert alert-info alert-dismissible fade show" role="alert">
-        @TempData["Mensaje"]
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
+    /// <summary>
+    /// Implementación simulada de IStatusService que retorna JSON literal desde constantes.
+    /// </summary>
+    public class StatusService : IStatusService
+    {
+        public string GetStatusList(string demo)
+            => demo?.ToLowerInvariant() == "fail"
+                ? HardcodedStatusPayloads.StatusList_Fail
+                : HardcodedStatusPayloads.StatusList_Ok;
+
+        public string GetStatusById(string serviceId, string demo)
+            => demo?.ToLowerInvariant() == "fail"
+                ? HardcodedStatusPayloads.StatusById_Fail
+                : HardcodedStatusPayloads.StatusById_Ok;
+
+        public string GetStatusSummary(string demo)
+            => demo?.ToLowerInvariant() == "fail"
+                ? HardcodedStatusPayloads.StatusSummary_Fail
+                : HardcodedStatusPayloads.StatusSummary_Ok;
+
+        public string RefreshStatus(RefreshRequest request, string demo)
+            => demo?.ToLowerInvariant() == "fail"
+                ? HardcodedStatusPayloads.StatusRefresh_Fail
+                : HardcodedStatusPayloads.StatusRefresh_Ok;
+    }
 }
 
-<form method="get" asp-action="Index" class="row g-2 align-items-end mb-3">
-    <div class="col-md-4">
-        <label class="form-label">Usuario</label>
-        <input type="text" name="q" value="@q" class="form-control" placeholder="Buscar por usuario..." />
-    </div>
 
-    <div class="col-md-3">
-        <label class="form-label">Tipo</label>
-        <select name="tipo" class="form-select" asp-items="tipos"></select>
-    </div>
 
-    <div class="col-md-3">
-        <label class="form-label">Estado</label>
-        <select name="estado" class="form-select" asp-items="estados"></select>
-    </div>
 
-    <div class="col-md-2 d-grid">
-        <button type="submit" class="btn btn-primary">Filtrar</button>
-    </div>
-</form>
-
-<div class="mb-3">
-    <a asp-action="Agregar" class="btn btn-success">Agregar Usuario</a>
-</div>
-
-@if (Model != null && Model.Any())
+#nullable enable
+namespace MonitoringApi.Data
 {
-    <table class="table table-bordered table-hover align-middle">
-        <thead class="table-dark">
-            <tr>
-                <th style="width:30%">Usuario</th>
-                <th style="width:22%">Tipo</th>
-                <th style="width:18%">Estado</th>
-                <th style="width:30%">Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-        @foreach (var u in Model)
-        {
-            var formUpdateId = $"f-upd-{u.Usuario}";
-            var formDeleteId = $"f-del-{u.Usuario}";
+    /// <summary>
+    /// Respuestas JSON en duro (literal) para el módulo Status.
+    /// </summary>
+    public static class HardcodedStatusPayloads
+    {
+        /// <summary>Lista de estados (OK).</summary>
+        public const string StatusList_Ok = """
+[
+  {
+    "serviceId": "payments-api",
+    "env": "PROD",
+    "interface": "HTTP",
+    "endpoint": "/payments/{id}",
+    "method": "GET",
+    "status": "Healthy",
+    "latencyMs": 120,
+    "checkedAtUtc": "2025-08-11T16:59:58Z",
+    "expiresAtUtc": "2025-08-11T17:00:28Z",
+    "details": { "reason": "OK" }
+  },
+  {
+    "serviceId": "auth-svc",
+    "env": "PROD",
+    "interface": "SOAP",
+    "endpoint": "https://idp.example.com/Auth.svc",
+    "method": "CALL",
+    "status": "Degraded",
+    "latencyMs": 320,
+    "checkedAtUtc": "2025-08-11T16:59:52Z",
+    "expiresAtUtc": "2025-08-11T17:00:22Z",
+    "details": { "note": "XPath OK; latencia alta" }
+  }
+]
+""";
 
-            <!-- Formularios ocultos por fila -->
-            <tr class="d-none">
-                <td colspan="4" class="p-0">
-                    <form id="@formUpdateId" asp-action="Actualizar" method="post">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="usuario" value="@u.Usuario" />
-                        <!-- preserva filtros -->
-                        <input type="hidden" name="page"        value="@Model.PageNumber" />
-                        <input type="hidden" name="q"           value="@q" />
-                        <input type="hidden" name="tipo"        value="@tipoSel" />
-                        <input type="hidden" name="estadoFiltro" value="@estadoSel" />
-                    </form>
-
-                    <form id="@formDeleteId" asp-action="Eliminar" method="post">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="usuario" value="@u.Usuario" />
-                        <input type="hidden" name="page"   value="@Model.PageNumber" />
-                        <input type="hidden" name="q"      value="@q" />
-                        <input type="hidden" name="tipo"   value="@tipoSel" />
-                        <input type="hidden" name="estado" value="@estadoSel" />
-                    </form>
-                </td>
-            </tr>
-
-            @if (!string.IsNullOrEmpty(editUser) && string.Equals(editUser, u.Usuario, StringComparison.OrdinalIgnoreCase))
-            {
-                <!-- Fila en modo edición -->
-                <tr>
-                    <td>@u.Usuario</td>
-
-                    <td>
-                        <select name="tipoUsuario" form="@formUpdateId" class="form-select">
-                            @{
-                                var sel1 = u.TipoUsuario == 1 ? "selected" : "";
-                                var sel2 = u.TipoUsuario == 2 ? "selected" : "";
-                                var sel3 = u.TipoUsuario == 3 ? "selected" : "";
-                            }
-                            @: <option value="1" @sel1>Administrador</option>
-                            @: <option value="2" @sel2>Admin. Videos</option>
-                            @: <option value="3" @sel3>Admin. Mensajes</option>
-                        </select>
-                    </td>
-
-                    <td>
-                        @{
-                            var sA = string.Equals(u.Estado, "A", StringComparison.OrdinalIgnoreCase) ? "selected" : "";
-                            var sI = string.Equals(u.Estado, "I", StringComparison.OrdinalIgnoreCase) ? "selected" : "";
-                        }
-                        <select name="estado" form="@formUpdateId" class="form-select">
-                            @: <option value="A" @sA>Activo</option>
-                            @: <option value="I" @sI>Inactivo</option>
-                        </select>
-                    </td>
-
-                    <td class="text-nowrap">
-                        <button type="submit" form="@formUpdateId" class="btn btn-success btn-sm me-2">Guardar</button>
-                        <a class="btn btn-secondary btn-sm"
-                           asp-action="Index"
-                           asp-route-page="@Model.PageNumber"
-                           asp-route-q="@q"
-                           asp-route-tipo="@tipoSel"
-                           asp-route-estado="@estadoSel">
-                           Cancelar
-                        </a>
-                    </td>
-                </tr>
-            }
-            else
-            {
-                <!-- Fila normal -->
-                <tr>
-                    <td>@u.Usuario</td>
-                    <td>@TipoTexto(u.TipoUsuario)</td>
-                    <td>@EstadoTexto(u.Estado)</td>
-                    <td class="text-nowrap">
-                        <a class="btn btn-warning btn-sm me-2"
-                           asp-action="Index"
-                           asp-route-edit="@u.Usuario"
-                           asp-route-page="@Model.PageNumber"
-                           asp-route-q="@q"
-                           asp-route-tipo="@tipoSel"
-                           asp-route-estado="@estadoSel">
-                           Editar
-                        </a>
-
-                        <button type="submit"
-                                form="@formDeleteId"
-                                class="btn btn-danger btn-sm"
-                                onclick="return confirm('¿Eliminar el usuario @u.Usuario?');">
-                            Eliminar
-                        </button>
-                    </td>
-                </tr>
-            }
-        }
-        </tbody>
-    </table>
-
-    <div class="d-flex justify-content-center">
-        @Html.PagedListPager(
-            Model,
-            page => Url.Action("Index", new { page, q, tipo = tipoSel, estado = estadoSel })
-        )
-    </div>
-}
-else
+        /// <summary>Lista de estados (FAIL).</summary>
+        public const string StatusList_Fail = """
 {
-    <div class="alert alert-info">No se encontraron usuarios con los filtros actuales.</div>
+  "traceId": "7b2c7f2d9d2e4a1a",
+  "code": "backend_unavailable",
+  "title": "No se pudo obtener el estado",
+  "detail": "Tiempo de espera agotado al consultar 3 servicios."
+}
+""";
+
+        /// <summary>Estado por serviceId (OK).</summary>
+        public const string StatusById_Ok = """
+{
+  "serviceId": "payments-api",
+  "env": "PROD",
+  "status": "Healthy",
+  "latencyMs": 118,
+  "checkedAtUtc": "2025-08-11T16:59:58Z",
+  "expiresAtUtc": "2025-08-11T17:00:28Z",
+  "checks": [
+    { "checkId": "c1", "probeType": "GET", "status": "Healthy", "latencyMs": 118, "statusCode": 200 }
+  ],
+  "dependencies": [
+    { "dependsOnServiceId": "db-core", "status": "Healthy" }
+  ],
+  "history": [
+    { "timestampUtc": "2025-08-11T16:58:00Z", "status": "Healthy", "latencyMs": 150 }
+  ]
+}
+""";
+
+        /// <summary>Estado por serviceId (FAIL).</summary>
+        public const string StatusById_Fail = """
+{
+  "traceId": "a13f0c29dd5c4b0e",
+  "code": "service_not_found",
+  "title": "Servicio no registrado",
+  "detail": "El serviceId solicitado no existe en catálogo."
+}
+""";
+
+        /// <summary>Resumen (OK).</summary>
+        public const string StatusSummary_Ok = """
+{
+  "groups": [
+    {
+      "key": { "env": "PROD" },
+      "counts": { "healthy": 25, "degraded": 3, "unhealthy": 1, "unknown": 0 },
+      "latency": { "p50Ms": 110, "p95Ms": 420, "p99Ms": 800 }
+    }
+  ]
+}
+""";
+
+        /// <summary>Resumen (FAIL).</summary>
+        public const string StatusSummary_Fail = """
+{
+  "traceId": "de0adbee5a5f0042",
+  "code": "invalid_range",
+  "title": "Rango de tiempo no válido",
+  "detail": "'from' debe ser anterior a 'to'."
+}
+""";
+
+        /// <summary>Refresh (OK).</summary>
+        public const string StatusRefresh_Ok = """
+{
+  "refreshed": ["payments-api", "auth-svc"],
+  "skipped": []
+}
+""";
+
+        /// <summary>Refresh (FAIL).</summary>
+        public const string StatusRefresh_Fail = """
+{
+  "traceId": "ff12aa90c0ffee77",
+  "code": "coalesce_lock",
+  "title": "Operación bloqueada",
+  "detail": "Hay un refresco en curso para uno o más servicios."
+}
+""";
+    }
 }
 
-@section Scripts {
-    <script>
-        // cerrar alert en 5s
-        setTimeout(() => {
-            const el = document.getElementById('autoclose-alert');
-            if (el) new bootstrap.Alert(el).close();
-        }, 5000);
-    </script>
+
+
+#nullable enable
+using System.ComponentModel.DataAnnotations;
+
+namespace MonitoringApi.Models
+{
+    /// <summary>
+    /// Modelo de entrada para el endpoint de refresh de estado.
+    /// </summary>
+    public class RefreshRequest
+    {
+        /// <summary>
+        /// Identificadores lógicos de servicios a refrescar.
+        /// </summary>
+        [Required]
+        public List<string> ServiceIds { get; set; } = new();
+
+        /// <summary>
+        /// Si es true, colapsa peticiones concurrentes para los mismos servicios (sugerido).
+        /// En el mock no cambia el resultado.
+        /// </summary>
+        public bool Coalesce { get; set; } = true;
+    }
 }
-
-
 
 
