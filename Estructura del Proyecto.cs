@@ -1,85 +1,142 @@
-using CAUAdministracion.Helpers;
-using CAUAdministracion.Models;
-using CAUAdministracion.Services.Usuarios; // <- tu interfaz/servicio de usuarios
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.Threading.Tasks;
 
-public class UsuariosController : Controller
+public interface IUsuarioService
 {
-    private readonly IUsuarioService _usuarioService;
+    // ...lo que ya tenías
 
-    public UsuariosController(IUsuarioService usuarioService)
+    /// <summary>
+    /// Verifica si ya existe un usuario (insensible a mayúsculas/minúsculas).
+    /// </summary>
+    /// <param name="usuario">Nombre de usuario a verificar.</param>
+    /// <returns>true si existe; false en caso contrario.</returns>
+    Task<bool> ExisteUsuarioAsync(string usuario);
+
+    /// <summary>
+    /// Crea un usuario nuevo en USUADMIN.
+    /// </summary>
+    /// <param name="usuario">Objeto con Usuario, TipoUsu y Estado.</param>
+    /// <param name="clavePlano">Clave en texto plano (se cifra en el servicio).</param>
+    /// <returns>true si se insertó; false si no.</returns>
+    Task<bool> CrearUsuarioAsync(UsuarioModel usuario, string clavePlano);
+}
+
+
+using System;
+using System.Data;
+using System.Threading.Tasks;
+using RestUtilities.Connections;
+using RestUtilities.QueryBuilder;
+
+public class UsuarioService : IUsuarioService
+{
+    private readonly IConnections _connections;     // RestUtilities.Connections
+    private readonly string _connName;              // nombre de conexión (appsettings)
+    private readonly IPasswordCipher? _cipher;      // opcional: tu servicio de cifrado si lo tienes
+
+    public UsuarioService(IConnections connections, IConfiguration cfg, IPasswordCipher? cipher = null)
     {
-        _usuarioService = usuarioService;
+        _connections = connections;
+        _cipher = cipher;
+        _connName = cfg.GetConnectionString("AS400") ?? "AS400"; // ajusta el nombre
     }
 
-    // ========= AGREGAR =========
-
-    // Formulario
-    [AutorizarPorTipoUsuario("1")]
-    [HttpGet]
-    public IActionResult Agregar()
+    /// <summary>
+    /// Cifra la clave con el mecanismo disponible.
+    /// - Si se inyectó un servicio de cifrado (IPasswordCipher), lo usa.
+    /// - Si no, aplica SHA-256 como fallback (para que compile). 
+    ///   Reemplázalo si necesitas compatibilidad 100% con tu algoritmo anterior.
+    /// </summary>
+    private static string FallbackSha256(string plain)
     {
-        return View();
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(plain);
+        var hash = sha.ComputeHash(bytes);
+        return BitConverter.ToString(hash).Replace("-", string.Empty);
     }
 
-    // Guardar
-    [AutorizarPorTipoUsuario("1")]
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Agregar(
-        [FromForm] string Usuario,
-        [FromForm] int    TipoUsu,
-        [FromForm] string Estado,
-        [FromForm] string Clave,
-        [FromForm] string ConfirmarClave)
+    private string Encriptar(string plain) => _cipher != null ? _cipher.Encriptar(plain) : FallbackSha256(plain);
+
+    /// <summary>
+    /// Verifica si un usuario ya existe en BCAH96DTA.USUADMIN.
+    /// Emplea WHERE RAW para hacer la comparación insensible a mayúsculas/minúsculas.
+    /// </summary>
+    public async Task<bool> ExisteUsuarioAsync(string usuario)
     {
-        // --- Validaciones básicas del lado servidor ---
-        if (string.IsNullOrWhiteSpace(Usuario))
-            ModelState.AddModelError(nameof(Usuario), "El usuario es obligatorio.");
+        if (string.IsNullOrWhiteSpace(usuario)) return false;
 
-        if (TipoUsu < 1 || TipoUsu > 3)
-            ModelState.AddModelError(nameof(TipoUsu), "Tipo de usuario inválido.");
+        await using var cn = await _connections.OpenAsync(_connName);
 
-        if (Estado != "A" && Estado != "I")
-            ModelState.AddModelError(nameof(Estado), "Estado inválido.");
+        // SELECT COUNT(1) FROM BCAH96DTA.USUADMIN WHERE UPPER(USUARIO)=UPPER(@usuario)
+        var qb = SqlBuilder
+            .Select("COUNT(1)")
+            .From("BCAH96DTA.USUADMIN")
+            .WhereRaw("UPPER(USUARIO) = UPPER(@usuario)");
 
-        if (string.IsNullOrWhiteSpace(Clave) || string.IsNullOrWhiteSpace(ConfirmarClave))
-            ModelState.AddModelError(nameof(Clave), "Debe indicar la clave y su confirmación.");
+        var (sql, parameters) = qb.Build();
 
-        if (!string.Equals(Clave, ConfirmarClave))
-            ModelState.AddModelError(nameof(ConfirmarClave), "Las claves no coinciden.");
+        await using var cmd = cn.CreateCommand();
+        cmd.CommandText = sql;
 
-        // Usuario duplicado
-        if (await _usuarioService.ExisteUsuarioAsync(Usuario))
-            ModelState.AddModelError(nameof(Usuario), "El usuario ya existe.");
+        var pUsuario = cmd.CreateParameter();
+        pUsuario.ParameterName = "@usuario";
+        pUsuario.Value = usuario;
+        cmd.Parameters.Add(pUsuario);
 
-        if (!ModelState.IsValid)
-            return View(); // la vista rehidrata desde Request.Form
+        var scalar = await cmd.ExecuteScalarAsync();
+        var count = Convert.ToInt64(scalar ?? 0);
+        return count > 0;
+    }
 
-        // --- Construcción del modelo de dominio ---
-        var nuevo = new UsuarioModel
+    /// <summary>
+    /// Inserta un registro en BCAH96DTA.USUADMIN validando duplicados.
+    /// </summary>
+    /// <param name="usuario">Modelo con Usuario, TipoUsu (1..3), Estado ('A'/'I').</param>
+    /// <param name="clavePlano">Clave en texto plano (se cifra aquí).</param>
+    public async Task<bool> CrearUsuarioAsync(UsuarioModel usuario, string clavePlano)
+    {
+        if (usuario == null) throw new ArgumentNullException(nameof(usuario));
+        if (string.IsNullOrWhiteSpace(usuario.Usuario)) throw new ArgumentException("Usuario requerido.", nameof(usuario));
+        if (usuario.TipoUsu < 1 || usuario.TipoUsu > 3) throw new ArgumentException("Tipo de usuario inválido.", nameof(usuario.TipoUsu));
+        if (usuario.Estado is not ("A" or "I")) throw new ArgumentException("Estado inválido.", nameof(usuario.Estado));
+        if (string.IsNullOrWhiteSpace(clavePlano)) throw new ArgumentException("Clave requerida.", nameof(clavePlano));
+
+        // Validar duplicado primero
+        if (await ExisteUsuarioAsync(usuario.Usuario))
+            return false;
+
+        var pass = Encriptar(clavePlano);
+
+        await using var cn = await _connections.OpenAsync(_connName);
+        await using var tx = await cn.BeginTransactionAsync();
+
+        try
         {
-            Usuario = Usuario,
-            TipoUsu = TipoUsu,
-            Estado  = Estado
-        };
+            // INSERT INTO BCAH96DTA.USUADMIN (USUARIO, PASS, TIPUSU, ESTADO)
+            // VALUES (@usuario, @pass, @tipo, @estado)
+            var qb = SqlBuilder
+                .InsertInto("BCAH96DTA.USUADMIN")
+                .Columns("USUARIO", "PASS", "TIPUSU", "ESTADO")
+                .Values("@usuario", "@pass", "@tipo", "@estado");
 
-        // --- Creación en base de datos ---
-        // Usa el método que ya tienes en tu servicio.
-        // Si tu servicio expone otro nombre/firma (p.ej. InsertarUsuarioAsync),
-        // sustituye la línea siguiente.
-        var ok = await _usuarioService.CrearUsuarioAsync(nuevo, Clave);
+            var (sql, _) = qb.Build();
 
-        if (!ok)
-        {
-            ModelState.AddModelError(string.Empty, "No se pudo crear el usuario.");
-            return View();
+            await using var cmd = cn.CreateCommand();
+            cmd.Transaction = (IDbTransaction)tx;
+            cmd.CommandText = sql;
+
+            var pUsuario = cmd.CreateParameter(); pUsuario.ParameterName = "@usuario"; pUsuario.Value = usuario.Usuario; cmd.Parameters.Add(pUsuario);
+            var pPass    = cmd.CreateParameter(); pPass.ParameterName    = "@pass";    pPass.Value    = pass;            cmd.Parameters.Add(pPass);
+            var pTipo    = cmd.CreateParameter(); pTipo.ParameterName    = "@tipo";    pTipo.Value    = usuario.TipoUsu;  cmd.Parameters.Add(pTipo);
+            var pEstado  = cmd.CreateParameter(); pEstado.ParameterName  = "@estado";  pEstado.Value  = usuario.Estado;   cmd.Parameters.Add(pEstado);
+
+            var rows = await cmd.ExecuteNonQueryAsync();
+            await tx.CommitAsync();
+            return rows > 0;
         }
-
-        TempData["Mensaje"] = $"Usuario {Usuario} creado correctamente.";
-        return RedirectToAction(nameof(Index));
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
     }
-
-    // ... (resto de endpoints del controlador)
 }
