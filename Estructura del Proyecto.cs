@@ -1,168 +1,212 @@
-[AutorizarPorTipoUsuario("1", "3")]
-[HttpGet]
-public async Task<IActionResult> Index(int? editId, int? editSeq, string codcco = null)
-{
-    // Agencias para el filtro
-    var agencias = _mensajeService.ObtenerAgenciasSelectList();
-    ViewBag.Agencias = agencias;
+Ahora este es el codigo antiguo de otra opción, necesito migrarlo a la versión nueva
 
-    // Mantener selección actual del filtro
-    ViewBag.CodccoSeleccionado = codcco;
+<%@ Page Language="C#" AutoEventWireup="true" CodeFile="AgregarNvoUser.aspx.cs" Inherits="AgregarNvoUser" %>
 
-    // Pasar identificador de fila en edición (CodMsg + Seq)
-    ViewBag.EditId = editId;
-    ViewBag.EditSeq = editSeq;
+<!DOCTYPE html>
 
-    // Cargar mensajes (y filtrar por agencia si corresponde)
-    var mensajes = await _mensajeService.ObtenerMensajesAsync();
-    if (!string.IsNullOrEmpty(codcco))
-        mensajes = mensajes.Where(m => m.Codcco == codcco).ToList();
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head id="Head1" runat="server">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <link href="Content/style.css" rel="stylesheet" />
+    <script src="Scripts/jsAcciones.js"></script>
+    <title>Agregar Nuevo Usuario</title>
+    <style type="text/css">
+        .auto-style2 {
+            width: 108px;
+        }
+        .auto-style3 {
+            width: 159px;
+        }
+    </style>
+</head>
+<body>
 
-    return View(mensajes);
-}
+    <div class="container">
 
+          <header style="width:auto; height:100px; background-image:url('Images/header.jpg'); border-radius:10px; -moz-border-radius:5px 5px 5px 5px;-webkit-border-radius:5px 5px 5px 5px">
+            <div style="float:right; margin-right:5px;">
+               <a href="javascript:logout();" style="color:white;">Cerrar Sesi&oacute;n [<%Response.Write(Session["usuario"].ToString());%>]</a>         
+            </div>
+        </header>
 
+         <div style="margin-top:10px;">
+             <h2 id="tituloPrincipal" style="color:red;">Agregar Nuevo Usuario</h2>
+        </div>
 
+        <div class="separador"></div>
 
-@model List<CAUAdministracion.Models.MensajeModel>
-@using Microsoft.AspNetCore.Mvc.Rendering
-
-@{
-    ViewData["Title"] = "Mantenimiento de Mensajes";
-    var agencias = ViewBag.Agencias as List<SelectListItem>;
-    var codccoSel = ViewBag.CodccoSeleccionado as string;
-
-    // Edit key: CodMsg + Seq
-    int? editId = ViewBag.EditId as int?;
-    int? editSeq = ViewBag.EditSeq as int?;
-}
-
-<h2 class="text-danger">@ViewData["Title"]</h2>
-
-<!-- Filtro por Agencia -->
-<div class="mb-3">
-    <form method="get" asp-controller="Messages" asp-action="Index" class="d-inline">
-        <label for="codcco">Agencia:</label>
-        <select id="codcco" name="codcco" class="form-select d-inline-block" style="width: 320px" onchange="this.form.submit()">
-            <option value="">-- Seleccione Agencia --</option>
-            @if (agencias != null)
-            {
-                foreach (var a in agencias)
-                {
-                    var selected = (a.Value == codccoSel) ? "selected" : "";
-                    @:<option value="@a.Value" @selected>@a.Text</option>
-                }
-            }
-        </select>
-    </form>
-</div>
-
-@if (Model != null && Model.Any())
-{
-    <table class="table table-bordered table-striped align-middle">
-        <thead class="table-dark">
+        <form id="form1" runat="server">
+         
+        <table id="agrgarVideo">
             <tr>
-                <th style="width:110px">Código</th>
-                <th style="width:120px">Secuencia</th>
-                <th>Mensaje</th>
-                <th style="width:160px">Estado</th>
-                <th style="width:180px">Acciones</th>
+                <td class="auto-style2">
+                    <asp:Label ID="lblAgencia" runat="server" Text="Usuario:" Font-Names="Calibri"></asp:Label>
+                </td>
+                <td>
+                    <asp:TextBox ID="txtUsuario" runat="server" MaxLength="32" Width="230px"></asp:TextBox>
+                </td>
             </tr>
-        </thead>
-        <tbody>
-            @foreach (var item in Model)
+
+            <tr>
+                <td class="auto-style2">
+                    <asp:Label ID="lblRotulo" runat="server" Text="Tipo Usuario:" Font-Names="Calibri"></asp:Label>
+                </td>
+                <td>
+                    <asp:DropDownList ID="ddlTipoUsuario" runat="server">
+                        <asp:ListItem Value="1">Administrador</asp:ListItem>
+                        <asp:ListItem Value="2">Admin. Videos</asp:ListItem>
+                        <asp:ListItem Value="3">Admin. Mensajes</asp:ListItem>
+                    </asp:DropDownList>
+                </td>
+            </tr>
+
+            <tr>
+                <td class="auto-style2">
+                    <asp:Label ID="lblEstado" runat="server" Text="Estado" Font-Names="Calibri"></asp:Label>
+                </td>
+                <td>
+                    <asp:DropDownList ID="ddlEstado" runat="server">
+                        <asp:ListItem Value="A">Activo</asp:ListItem>
+                        <asp:ListItem Value="I">Inactivo</asp:ListItem>
+                    </asp:DropDownList>
+                </td>               
+            </tr>
+
+        </table>
+
+        <table>
+            <tr>
+                <td class="auto-style3">
+                    <asp:Label ID="lblClave" runat="server" Text="Clave:" Font-Names="Calibri" ForeColor="#0066FF"></asp:Label>
+                </td>
+
+                <td>
+                    <asp:TextBox ID="txtClave" runat="server" MaxLength="10" TextMode="Password" Width="186px"></asp:TextBox>
+                </td>
+            </tr>
+
+            <tr>
+                <td class="auto-style3">
+
+                    <asp:Label ID="lblConfirmarClave" runat="server" Font-Names="Calibri" ForeColor="#0066FF" Text="Confirmar Clave:"></asp:Label>
+
+                </td>
+                <td>
+
+                    <asp:TextBox ID="txtConfirmarClave" runat="server" MaxLength="10" TextMode="Password" Width="184px"></asp:TextBox>
+
+                </td>
+            </tr>
+
+        </table>
+
+        
+    
+
+
+    <div id="inner">
+
+         <p style="margin-left: 280px">
+        <asp:Button ID="btnAceptar" runat="server" Text="Aceptar" OnClick="btnAceptar_Click" />
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+            <asp:Button ID="btnCancelar" runat="server" Text="Cancelar" OnClick="btnCancelar_Click"  />
+        &nbsp;<asp:SqlDataSource ID="DB2DataSource3" runat="server" ConnectionString="<%$ ConnectionStrings:ConnectionString2 %>" ProviderName="<%$ ConnectionStrings:ConnectionString2.ProviderName %>" SelectCommand="SELECT MAX(CODVIDEO) AS Expr1 FROM BCAH96DTA.MANTVIDEO"></asp:SqlDataSource>
+    </p>
+
+
+    </div>
+
+     <p>
+        <asp:Label ID="lblError" runat="server" Text="lblError" ForeColor="Red" Visible="False"></asp:Label>
+    </p>
+
+    </form>
+        
+
+    </div>
+
+    
+    
+</body>
+</html>
+
+
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+
+public partial class AgregarNvoUser : System.Web.UI.Page
+{
+    protected void Page_Load(object sender, EventArgs e)
+    {
+        if (Session["usuario"] == null)
+            Response.Redirect("Default.aspx");
+    }
+    protected void btnAceptar_Click(object sender, EventArgs e)
+    {
+        if (this.txtUsuario.Text.Equals(string.Empty)) //El usuario esta vacio ?
+        {
+            this.lblError.Text = "Debe Ingresar Usuario";
+            this.lblError.Visible = true;
+            return;
+        }            
+        else
+        {
+            if (this.txtClave.Text.Equals(string.Empty)) //Alguna de los campos de las claves esta vacio?
             {
-                // IDs únicos por fila, ahora considerando también la SEQ
-                var formUpdateId = $"f-upd-{item.Codcco}-{item.CodMsg}-{item.Seq}";
-                var formDeleteId = $"f-del-{item.Codcco}-{item.CodMsg}-{item.Seq}";
-
-                <!-- Formularios “invisibles” por fila -->
-                <tr class="d-none">
-                    <td colspan="5" class="p-0">
-                        <form id="@formUpdateId" asp-controller="Messages" asp-action="Actualizar" method="post">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="Codcco" value="@item.Codcco" />
-                            <input type="hidden" name="CodMsg" value="@item.CodMsg" />
-                            <input type="hidden" name="Seq"    value="@item.Seq" />
-                        </form>
-
-                        <form id="@formDeleteId" asp-controller="Messages" asp-action="Eliminar" method="post">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="Codcco" value="@item.Codcco" />
-                            <input type="hidden" name="CodMsg" value="@item.CodMsg" />
-                        </form>
-                    </td>
-                </tr>
-
-                @if (editId.HasValue && editSeq.HasValue && editId.Value == item.CodMsg && editSeq.Value == item.Seq)
+                this.lblError.Text = "Las Claves no pueden estar vacias";
+                this.lblError.Visible = true;
+                return;
+            }
+            else
+            {
+                if (!this.txtClave.Text.Equals(this.txtConfirmarClave.Text)) //Las claves no coinciden?
                 {
-                    <!-- Fila en modo edición (única, por CodMsg + Seq) -->
-                    <tr>
-                        <td>@item.CodMsg</td>
-                        <td>@item.Seq</td>
-                        <td>
-                            <input type="text"
-                                   name="Mensaje"
-                                   form="@formUpdateId"
-                                   value="@item.Mensaje"
-                                   class="form-control" />
-                        </td>
-                        <td>
-                            <select name="Estado" form="@formUpdateId" class="form-select form-select-sm">
-                                <option value="A" @(item.Estado == "A" ? "selected" : "")>Activo</option>
-                                <option value="I" @(item.Estado == "I" ? "selected" : "")>Inactivo</option>
-                            </select>
-                        </td>
-                        <td class="text-nowrap">
-                            <button type="submit"
-                                    form="@formUpdateId"
-                                    class="btn btn-sm btn-success me-2">
-                                Guardar
-                            </button>
-
-                            <a class="btn btn-sm btn-secondary"
-                               asp-controller="Messages"
-                               asp-action="Index"
-                               asp-route-codcco="@codccoSel">
-                                Cancelar
-                            </a>
-                        </td>
-                    </tr>
+                    this.lblError.Text = "Las Claves Ingresadas no Coinciden";
+                    this.lblError.Visible = true;
+                    return;
                 }
-                else
+                else //Si todo va bien 
                 {
-                    <!-- Fila normal -->
-                    <tr>
-                        <td>@item.CodMsg</td>
-                        <td>@item.Seq</td>
-                        <td>@item.Mensaje</td>
-                        <td>@(item.Estado == "A" ? "Activo" : "Inactivo")</td>
-                        <td class="text-nowrap">
-                            <a class="btn btn-warning btn-sm me-2"
-                               asp-controller="Messages"
-                               asp-action="Index"
-                               asp-route-codcco="@codccoSel"
-                               asp-route-editId="@item.CodMsg"
-                               asp-route-editSeq="@item.Seq">
-                                Editar
-                            </a>
+                    string claveEncriptada = this.encriptarClave(this.txtClave.Text);
 
-                            <button type="submit"
-                                    form="@formDeleteId"
-                                    class="btn btn-danger btn-sm"
-                                    onclick="return confirm('¿Está seguro de eliminar este mensaje?');">
-                                Eliminar
-                            </button>
-                        </td>
-                    </tr>
+                    string qry = "insert into bcah96dta.USUADMIN values('" + this.txtUsuario.Text +  
+                                                                        "','" + claveEncriptada + "'," + ddlTipoUsuario.SelectedValue.ToString() + ",'" + 
+                                                                        this.ddlEstado.SelectedValue.ToString() + "')";
+                    DB2DataSource3.InsertCommand = qry;
+
+                    try
+                    {
+                        DB2DataSource3.Insert();
+                        this.txtUsuario.Text = string.Empty;
+                        this.txtClave.Text = string.Empty;
+                        this.txtConfirmarClave.Text = string.Empty;
+
+                        string msg = "Se ha agregado exitosamente el usuario: " + this.txtUsuario.Text + "!";
+                        ClientScript.RegisterStartupScript(this.GetType(), "Exito", "alert('" + msg + "');", true);                        
+                        
+                    }
+                    catch (Exception ex)
+                    {
+                        this.lblError.Text = ex.Message;
+                        this.lblError.Visible = true;
+                    }
                 }
             }
-        </tbody>
-    </table>
-}
-else
-{
-    <div class="alert alert-info">No se encontraron mensajes para esta agencia.</div>
-}
+        }
+    }
+    protected void btnCancelar_Click(object sender, EventArgs e)
+    {
+        Response.Redirect("Administracion.aspx");
+    }
 
-<a href="@Url.Action("Agregar", "Messages")" class="btn btn-primary">Agregar Nuevo Mensaje</a>
+    private string encriptarClave(string clave)
+    {
+        OperacionesVarias opVarias = new OperacionesVarias();
+        return opVarias.encriptarCadena(clave);        
+    }
+}
