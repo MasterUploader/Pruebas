@@ -1,3 +1,5 @@
+Si vemos el index de mensajes
+
 @model List<CAUAdministracion.Models.MensajeModel>
 @using Microsoft.AspNetCore.Mvc.Rendering
 
@@ -75,9 +77,17 @@
                     </td>
                     <td>
                         <select name="Estado" form="@formUpdateId" class="form-select form-select-sm">
-                            <option value="A" @(item.Estado == "A" ? "selected" : "")>Activo</option>
-                            <option value="I" @(item.Estado == "I" ? "selected" : "")>Inactivo</option>
-                        </select>
+                            @if (item.Estado == "A")
+                        {
+                            <option value="A" selected>Activo</option>
+                            <option value="I">Inactivo</option>
+                        }
+                        else
+                        {
+                            <option value="A">Activo</option>
+                            <option value="I" selected>Inactivo</option>
+                        }
+                        </select>                        
                     </td>
                     <td>
                         <button type="submit"
@@ -109,55 +119,159 @@ else
 
 
 
+Con el index de Agencias
 
-@model CAUAdministracion.Models.MensajeModel
+
+@model CAUAdministracion.Models.AgenciaIndexViewModel
+@using X.PagedList.Mvc.Core
 @using Microsoft.AspNetCore.Mvc.Rendering
 
 @{
-    ViewData["Title"] = "Agregar Mensaje";
-    var agencias = ViewBag.Agencias as List<SelectListItem>;
+    ViewData["Title"] = "Mantenimiento de Agencias";
+    var lista = Model.Lista;
+    var agenciaEditar = Model.AgenciaEnEdicion;
+    var codccoSel = Model.CodccoSeleccionado;
 }
 
-<h2 class="text-danger">@ViewData["Title"]</h2>
+<h2 class="text-danger mb-4">@ViewData["Title"]</h2>
 
-@if (!string.IsNullOrEmpty(ViewBag.Mensaje))
+@if (TempData["Mensaje"] != null)
 {
     <div class="alert alert-info alert-dismissible fade show" role="alert">
-        @ViewBag.Mensaje
+        @TempData["Mensaje"]
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 }
 
-<form asp-action="Agregar" asp-controller="Messages" method="post">
-    @Html.AntiForgeryToken()
-
-    <div class="mb-3">
-        <label for="codcco" class="form-label">Agencia</label>
-        <select id="codcco" name="Codcco" class="form-select" required>
-            <option value="">Seleccione una agencia</option>
-            @if (agencias != null)
+<!-- Filtro -->
+<div class="mb-3">
+    <form method="get" asp-controller="Agencias" asp-action="Index">
+        <label for="codcco">Agencia:</label>
+@*         <select name="codcco" class="form-select" style="width: 300px; display:inline-block;" onchange="this.form.submit()">
+            <option value="">-- Seleccione Agencia --</option>
+            @foreach (var agencia in Model.AgenciasFiltro)
             {
-                foreach (var a in agencias)
-                {
-                    <option value="@a.Value">@a.Text</option>
-                }
+                var selected = (agencia.Value == codccoSel) ? "selected" : "";
+                @:<option value="@agencia.Value" @selected>@agencia.Text</option>
+            }
+        </select> *@
+
+        <select name="codcco" class="form-select" style="width: 300px; display:inline-block;" onchange="this.form.submit()">
+            <option value="">-- Seleccione Agencia --</option>
+            @foreach (var agencia in Model.AgenciasFiltro)
+            {
+                var selected = (agencia.Value == Model.CodccoSeleccionado) ? "selected" : "";
+                @:<option value="@agencia.Value" @selected>@agencia.Text</option>
             }
         </select>
-    </div>
+    </form>
+</div>
 
-    <div class="mb-3">
-        <label for="mensaje" class="form-label">Mensaje</label>
-        <textarea id="mensaje" name="Mensaje" class="form-control" rows="4" required>@Model?.Mensaje</textarea>
-    </div>
+<!-- Tabla -->
+<table class="table table-bordered table-hover table-striped">
+    <thead class="table-dark text-center align-middle">
+        <tr>
+            <th>Código</th>
+            <th>Nombre</th>
+            <th>Zona</th>
+            <th>Marquesina</th>
+            <th>RST Branch</th>
+            <th>IP Server</th>
+            <th>Nom. Server</th>
+            <th>Base Datos</th>
+            <th style="width: 120px">Acciones</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in lista)
+        {
+            if (agenciaEditar != null && item.Codcco == agenciaEditar.Codcco)
+            {
+                <tr>
+                    <form asp-action="GuardarEdicion" method="post">
+                        <td>
+                            <input type="hidden" asp-for="AgenciaEnEdicion.Codcco" />
+                            @agenciaEditar.Codcco
+                        </td>
+                        <td><input asp-for="AgenciaEnEdicion.NomAge" class="form-control" /></td>
+                        <td>
+                            <select asp-for="AgenciaEnEdicion.Zona" class="form-select" required>
+                                <option value="1">CENTRO SUR</option>
+                                <option value="2">NOR OCCIDENTE</option>
+                                <option value="3">NOR ORIENTE</option>
+                            </select>
+                        </td>
+                        <td>
+                            <select asp-for="AgenciaEnEdicion.Marquesina" class="form-select" required>
+                                <option value="SI" selected="@(agenciaEditar.Marquesina == "SI")">SI</option>
+                                <option value="NO" selected="@(agenciaEditar.Marquesina == "NO")">NO</option>
+                            </select>
+                        </td>
+                        <td>
+                            <select asp-for="AgenciaEnEdicion.RstBranch" class="form-select" required>
+                                <option value="SI" selected="@(agenciaEditar.RstBranch == "SI")">SI</option>
+                                <option value="NO" selected="@(agenciaEditar.RstBranch == "NO")">NO</option>
+                            </select>
+                        </td>
+                        <td><input asp-for="AgenciaEnEdicion.IpSer" class="form-control" /></td>
+                        <td><input asp-for="AgenciaEnEdicion.NomSer" class="form-control" /></td>
+                        <td><input asp-for="AgenciaEnEdicion.NomBD" class="form-control" /></td>
+                        <td class="text-center">
+                            <button type="submit" class="btn btn-success btn-sm me-1">Guardar</button>
+                            <a asp-action="Index" class="btn btn-secondary btn-sm">Cancelar</a>
+                        </td>
+                    </form>
+                </tr>
+            }
+            else
+            {
+                <tr>
+                    <td>@item.Codcco</td>
+                    <td>@item.NomAge</td>
+                    <td>@(item.Zona switch {
+                        1 => "CENTRO SUR",
+                        2 => "NOR OCCIDENTE",
+                        3 => "NOR ORIENTE",
+                        _ => "DESCONOCIDA"
+                    })</td>
+                    <td>@item.Marquesina</td>
+                    <td>@item.RstBranch</td>
+                    <td>@item.IpSer</td>
+                    <td>@item.NomSer</td>
+                    <td>@item.NomBD</td>
+                    <td class="text-center">
+                        <a asp-action="Index" asp-route-editId="@item.Codcco" asp-route-codcco="@codccoSel" class="btn btn-warning btn-sm me-1">Editar</a>
+                        <form asp-action="Eliminar" asp-route-id="@item.Codcco" method="post" class="d-inline" onsubmit="return confirm('¿Está seguro de eliminar esta agencia?');">
+                            <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        }
+    </tbody>
+</table>
 
-    <div class="mb-3">
-        <label for="estado" class="form-label">Estado</label>
-        <select id="estado" name="Estado" class="form-select" required>
-            <option value="A" selected>Activo</option>
-            <option value="I">Inactivo</option>
-        </select>
+<!-- Paginación -->
+@if (lista != null && lista.PageCount > 1)
+{
+    <div class="d-flex justify-content-center">
+        @Html.PagedListPager(
+            lista,
+            page => Url.Action("Index", new { page, codcco = codccoSel }),
+            new PagedListRenderOptions
+            {
+                UlElementClasses = new[] { "pagination", "justify-content-center" },
+                LiElementClasses = new[] { "page-item" },
+                PageClasses = new[] { "page-link" }
+            }
+        )
     </div>
+}
 
-    <button type="submit" class="btn btn-primary">Guardar</button>
-    <a asp-controller="Messages" asp-action="Index" class="btn btn-secondary ms-2">Cancelar</a>
-</form>
+<!-- Botón agregar -->
+<div class="mt-4">
+    <a asp-action="Agregar" class="btn btn-primary">Agregar Nueva Agencia</a>
+</div>
+
+
+Se puede ver que hay una columna eliminar y editar, esa columna se debe de agregar a la de mensajes para que sea consistente.
