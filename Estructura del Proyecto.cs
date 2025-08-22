@@ -1,180 +1,247 @@
-Tengo estos codigos de la versión antigua
+using System.ComponentModel.DataAnnotations;
 
-using System;
-using System.Data;
-using System.Collections.Generic;
-using System.Linq;
-using System.Web;
-using System.Web.UI;
-using System.Web.UI.WebControls;
-
-public partial class Administracion : System.Web.UI.Page
+namespace CAUAdministracion.Models
 {
-    string qry = string.Empty;
-    string _error = string.Empty;
-
-    protected void Page_Load(object sender, EventArgs e)
+    public class UsuarioModel
     {
-        if (Session["usuario"] == null)
-            Response.Redirect("Default.aspx");
-    }
-    protected void btnAgregarNuevo_Click(object sender, EventArgs e)
-    {
-        Response.Redirect("AgregarNvoUser.aspx");
-    }
+        [Required, MaxLength(32)]
+        public string Usuario { get; set; } = string.Empty;
 
-    protected void btnMenu_Click(object sender, EventArgs e)
-    {
-        Response.Redirect("Mnu_Configuracion.aspx");
-    }
+        /// <summary>1 = Administrador, 2 = Admin. Videos, 3 = Admin. Mensajes</summary>
+        [Range(1, 3)]
+        public int TipoUsuario { get; set; }
 
-    protected void gvUsuarios_RowDeleting(object sender, GridViewDeleteEventArgs e)
-    {
-        if (e.RowIndex > -1)
-        {
-            string usuario = string.Empty;
-
-            TableCell celda = null;
-            GridViewRow tmpFila = this.gvUsuarios.Rows[e.RowIndex];
-
-            celda = tmpFila.Cells[2];
-            usuario = celda.Text;
-
-            if (eliminarEntradadeDB(usuario))
-            {
-                string msg = "Se ha eliminado el usuario: " + usuario + "!";
-                ClientScript.RegisterStartupScript(this.GetType(), "Exito", "alert('" + msg + "');", true);
-            }            
-        }
-
-        Response.Redirect("Administracion.aspx");
-    }
-
-    private bool eliminarEntradadeDB(string usuario)
-    {
-        if (!validarUnicoUsuario())
-        {
-            qry = "DELETE FROM BCAH96DTA.USUADMIN WHERE usuario = '" + usuario + "'";
-
-            DBDataSourceOperaciones.DeleteCommand = qry;
-
-            if (DBDataSourceOperaciones.Delete() > 0)
-                return true;
-            else
-                return false;
-        }
-        else
-        {
-            _error = "El usuario que intenta eliminar es el único en el sistema, debe existir al menos un usuario";            
-            return false;
-        }
-
-    }
-
-    protected void gvUsuarios_RowUpdating(object sender, GridViewUpdateEventArgs e)
-    {
-        if (e.RowIndex > -1)
-        {
-            string usuario = string.Empty; //Usuario
-            string estado = string.Empty; //Estado del usuario
-            string perfil = string.Empty; //Tipo de usuario
-
-            GridViewRow tmpFila = this.gvUsuarios.Rows[e.RowIndex];
-            TableCell celda = null;
-
-            celda = tmpFila.Cells[2];
-            usuario = celda.Text;
-
-            perfil = ((DropDownList)(tmpFila.Cells[3].Controls[1])).SelectedValue.ToString(); //celda.Text;
-            estado = ((DropDownList)(tmpFila.Cells[4].Controls[1])).SelectedValue.ToString(); //celda.Text;            
-
-            if (ActualizarUsuario(usuario, estado, perfil))
-            {
-                string msg = "Se ha editado el usuario: " + usuario + "!";
-                ClientScript.RegisterStartupScript(this.GetType(), "Exito", "alert('" + msg + "');", true);
-            }            
-        }
-    }
-
-    private bool ActualizarUsuario(string usuario, string estado, string perfil)
-    {
-        if (estado.Equals("I") || !estado.Equals("1"))
-        {
-            if (!validarUnicoUsuario())
-            {
-                qry = "UPDATE BCAH96DTA.USUADMIN " +
-                      "SET estado= '" + estado + "', TIPUSU = '" + perfil + "'" +
-                      "WHERE usuario = '" + usuario + "'";
-
-                //DBDataSourceOperaciones.UpdateCommand = qry;
-                this.DBDataSourceUsuarios.UpdateCommand = qry;
-                try
-                {
-                    if (DBDataSourceUsuarios.Update() > 0)
-                        return true;
-                    else
-                    {
-                        _error = "Fallo en la actualización";
-                        return false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _error = ex.Message;
-                    return false;
-                }
-            }
-            else
-            {
-                this._error = "No puede modificar a Inactivo el usuario dado que es el unico usuario en el sistema, agregue más para poder editar el actual";
-                return false;
-            }
-        }
-        else
-        {
-            qry = "UPDATE BCAH96DTA.USUADMIN " +
-                      "SET estado= '" + estado + "', TIPUSU = '" + perfil + "'" +
-                      "WHERE usuario = '" + usuario + "'";
-
-            DBDataSourceOperaciones.UpdateCommand = qry;
-
-            try
-            {
-                if (DBDataSourceUsuarios.Update() > 0)
-                    return true;
-                else
-                {
-                    _error = "Fallo en la actualización";
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                _error = ex.Message;
-                return false;
-            }
-        }
-    }
-
-    private bool validarUnicoUsuario()
-    {
-        qry = "SELECT count(*) FROM BCAH96DTA.USUADMIN";
-
-        DBDataSourceOperaciones.SelectCommand = qry;
-        DataView tmpDV = (DataView)DBDataSourceOperaciones.Select(DataSourceSelectArguments.Empty);
-
-        object hayUsuarios = tmpDV.Table.Rows[0][0];
-
-        if (hayUsuarios != null && !hayUsuarios.ToString().Equals(string.Empty))
-        {
-            if (int.Parse(hayUsuarios.ToString()) > 1)
-                return false;
-            else
-                return true;
-        }
-        else
-            return true;
+        /// <summary>A = Activo, I = Inactivo</summary>
+        [Required, RegularExpression("A|I")]
+        public string Estado { get; set; } = "A";
     }
 }
 
-Estos metodos hay que integrarlos en la clase UsuarioService y que se consuman desde el controlador, ademas de que las peticiones sql deben hacerse usando la linreria RestUtilities.Connections y RestUtilities.QueryBuilder.
+
+using CAUAdministracion.Models;
+
+namespace CAUAdministracion.Services.Usuarios
+{
+    public interface IUsuarioService
+    {
+        Task<List<UsuarioModel>> BuscarUsuariosAsync(string? q, int? tipo, string? estado);
+        Task<bool> ActualizarUsuarioAsync(string usuario, string estado, int tipoUsuario);
+        Task<bool> EliminarUsuarioAsync(string usuario);
+        Task<int> ContarUsuariosAsync();
+        Task<bool> ExisteMasDeUnUsuarioAsync();
+    }
+}
+
+
+using System.Data;
+using CAUAdministracion.Models;
+using RestUtilities.Connections;
+using RestUtilities.QueryBuilder;
+
+namespace CAUAdministracion.Services.Usuarios
+{
+    public class UsuarioService : IUsuarioService
+    {
+        private readonly string _connName;
+
+        /// <param name="connName">
+        /// Nombre de conexión registrado en RestUtilities.Connections (por ejemplo "AS400").
+        /// </param>
+        public UsuarioService(string connName = "AS400")
+        {
+            _connName = connName;
+        }
+
+        public async Task<List<UsuarioModel>> BuscarUsuariosAsync(string? q, int? tipo, string? estado)
+        {
+            // SELECT USUARIO, TIPUSU, ESTADO FROM BCAH96DTA.USUADMIN WHERE ... ORDER BY USUARIO
+            var qb = new SqlBuilder()
+                .Select("USUARIO", "TIPUSU", "ESTADO")
+                .From("BCAH96DTA.USUADMIN");
+
+            // Filtros
+            if (!string.IsNullOrWhiteSpace(q))
+                qb.Where("UPPER(USUARIO) LIKE @q");
+
+            if (tipo.HasValue)
+                qb.Where("TIPUSU = @tipo");
+
+            if (!string.IsNullOrWhiteSpace(estado))
+                qb.Where("ESTADO = @estado");
+
+            qb.OrderBy("USUARIO");
+
+            using var conn = ConnectionFactory.GetOpenConnection(_connName);
+            using var cmd  = conn.CreateCommand();
+            cmd.CommandText = qb.ToSql();
+
+            // Parámetros
+            if (!string.IsNullOrWhiteSpace(q))
+                AddParam(cmd, "@q", $"%{q.Trim().ToUpper()}%");
+            if (tipo.HasValue)
+                AddParam(cmd, "@tipo", tipo.Value);
+            if (!string.IsNullOrWhiteSpace(estado))
+                AddParam(cmd, "@estado", estado);
+
+            var list = new List<UsuarioModel>();
+            using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync())
+            {
+                list.Add(new UsuarioModel
+                {
+                    Usuario     = rd["USUARIO"]?.ToString() ?? "",
+                    TipoUsuario = Convert.ToInt32(rd["TIPUSU"]),
+                    Estado      = rd["ESTADO"]?.ToString() ?? "A"
+                });
+            }
+            return list;
+        }
+
+        public async Task<bool> ActualizarUsuarioAsync(string usuario, string estado, int tipoUsuario)
+        {
+            // UPDATE BCAH96DTA.USUADMIN SET ESTADO=@estado, TIPUSU=@tipo WHERE USUARIO=@usuario
+            var qb = new SqlBuilder()
+                .Update("BCAH96DTA.USUADMIN")
+                .Set("ESTADO", "@estado")
+                .Set("TIPUSU", "@tipo")
+                .Where("USUARIO = @usuario");
+
+            using var conn = ConnectionFactory.GetOpenConnection(_connName);
+            using var cmd  = conn.CreateCommand();
+            cmd.CommandText = qb.ToSql();
+            AddParam(cmd, "@estado", estado);
+            AddParam(cmd, "@tipo",   tipoUsuario);
+            AddParam(cmd, "@usuario", usuario);
+
+            var rows = await cmd.ExecuteNonQueryAsync();
+            return rows > 0;
+        }
+
+        public async Task<bool> EliminarUsuarioAsync(string usuario)
+        {
+            // Validación: no eliminar si es el único usuario del sistema
+            if (!await ExisteMasDeUnUsuarioAsync())
+                return false;
+
+            var qb = new SqlBuilder()
+                .DeleteFrom("BCAH96DTA.USUADMIN")
+                .Where("USUARIO = @usuario");
+
+            using var conn = ConnectionFactory.GetOpenConnection(_connName);
+            using var cmd  = conn.CreateCommand();
+            cmd.CommandText = qb.ToSql();
+            AddParam(cmd, "@usuario", usuario);
+
+            var rows = await cmd.ExecuteNonQueryAsync();
+            return rows > 0;
+        }
+
+        public async Task<int> ContarUsuariosAsync()
+        {
+            // SELECT COUNT(*) FROM BCAH96DTA.USUADMIN
+            var qb = new SqlBuilder()
+                .Select("COUNT(*) AS CNT")
+                .From("BCAH96DTA.USUADMIN");
+
+            using var conn = ConnectionFactory.GetOpenConnection(_connName);
+            using var cmd  = conn.CreateCommand();
+            cmd.CommandText = qb.ToSql();
+
+            var scalar = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(scalar);
+        }
+
+        public async Task<bool> ExisteMasDeUnUsuarioAsync()
+        {
+            var total = await ContarUsuariosAsync();
+            return total > 1;
+        }
+
+        // --------------------------------------
+        // Helpers
+        // --------------------------------------
+        private static void AddParam(IDbCommand cmd, string name, object? value)
+        {
+            var p = cmd.CreateParameter();
+            p.ParameterName = name;
+            p.Value = value ?? DBNull.Value;
+            cmd.Parameters.Add(p);
+        }
+    }
+}
+
+using CAUAdministracion.Models;
+using CAUAdministracion.Services.Usuarios;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using X.PagedList;
+
+namespace CAUAdministracion.Controllers
+{
+    [Authorize]
+    public class UsuariosController : Controller
+    {
+        private readonly IUsuarioService _svc;
+
+        public UsuariosController(IUsuarioService svc)
+        {
+            _svc = svc;
+        }
+
+        // Listado + filtros + paginación + modo edición por fila
+        [HttpGet]
+        public async Task<IActionResult> Index(int? page, string? q, int? tipo, string? estado, string? editUser)
+        {
+            var datos = await _svc.BuscarUsuariosAsync(q, tipo, estado);
+            var pageSize = 10;
+            var pageNumber = page ?? 1;
+
+            ViewBag.Q        = q;
+            ViewBag.TipoSel  = tipo?.ToString();
+            ViewBag.EstadoSel= estado;
+            ViewBag.EditUser = editUser;
+
+            return View(datos.ToPagedList(pageNumber, pageSize));
+        }
+
+        // Actualiza una fila (usuario, estado y tipo)
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Actualizar(string usuario, string estado, int tipoUsuario, string? q, int? tipo, string? filtroEstado, int? page)
+        {
+            // Si intenta inactivar y es el único, bloquear
+            if (string.Equals(estado, "I", StringComparison.OrdinalIgnoreCase)
+                && !await _svc.ExisteMasDeUnUsuarioAsync())
+            {
+                TempData["Mensaje"] = "No puede inactivar/eliminar al único usuario del sistema.";
+                return RedirectToAction("Index", new { page, q, tipo, estado = filtroEstado });
+            }
+
+            var ok = await _svc.ActualizarUsuarioAsync(usuario, estado, tipoUsuario);
+            TempData["Mensaje"] = ok ? "Usuario actualizado." : "No se pudo actualizar el usuario.";
+
+            return RedirectToAction("Index", new { page, q, tipo, estado = filtroEstado });
+        }
+
+        // Elimina una fila
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Eliminar(string usuario, string? q, int? tipo, string? estado, int? page)
+        {
+            var ok = await _svc.EliminarUsuarioAsync(usuario);
+
+            TempData["Mensaje"] = ok
+                ? $"Usuario '{usuario}' eliminado."
+                : "No se pudo eliminar. Debe existir al menos un usuario en el sistema.";
+
+            return RedirectToAction("Index", new { page, q, tipo, estado });
+        }
+
+        // (Opcional) Navegar a “Crear”
+        [HttpGet]
+        public IActionResult Crear() => View();
+    }
+}
+
+
+
