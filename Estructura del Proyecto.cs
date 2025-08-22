@@ -2,216 +2,211 @@
 namespace MonitoringApi.Data
 {
     /// <summary>
-    /// Respuestas JSON en duro para el segmento de Catálogo de Servicios.
+    /// Respuestas JSON en duro para el segmento de Checks.
     /// </summary>
-    public static class HardcodedServicesPayloads
+    public static class HardcodedChecksPayloads
     {
-        // -------- GET /services
+        // -------- GET /services/{serviceId}/checks
         public const string List_Ok = """
-{
-  "items": [
-    {
-      "serviceId": "payments-api",
-      "name": "Payments API",
-      "env": "PROD",
-      "kind": "HTTP",
-      "endpoint": "https://api.example.com/health",
-      "ttlSec": 30,
-      "timeoutSec": 3,
-      "enabled": true,
-      "tags": ["payments","critical"]
-    },
-    {
-      "serviceId": "invoice-worker",
-      "name": "Invoice Worker",
-      "env": "PROD",
-      "kind": "MQ",
-      "endpoint": "topic:payments",
-      "ttlSec": 30,
-      "timeoutSec": 3,
-      "enabled": true,
-      "tags": ["billing"]
-    }
-  ],
-  "meta": { "page": 1, "size": 50, "total": 120 }
-}
+[
+  {
+    "checkId": "c1",
+    "probeType": "GET",
+    "operation": "/health",
+    "assertions": { "expectStatus": 200 },
+    "retries": 0,
+    "warnLatencyMs": 300,
+    "errorLatencyMs": 1000
+  },
+  {
+    "checkId": "c42",
+    "probeType": "SOAP_ACTION",
+    "operation": "urn:Auth#Login",
+    "assertions": { "xpath": "//ns:Status='OK'" },
+    "retries": 1,
+    "warnLatencyMs": 400,
+    "errorLatencyMs": 1200
+  }
+]
 """;
 
         public const string List_Fail = """
 {
-  "traceId": "bada55aa1100",
+  "traceId": "f00dbabe111",
   "code": "forbidden",
   "title": "No autorizado",
-  "detail": "La llave provista no tiene permisos para listar servicios."
+  "detail": "No tienes permisos para ver los checks de este servicio."
 }
 """;
 
-        // -------- GET /services/{serviceId}
+        // -------- GET /services/{serviceId}/checks/{checkId}
         public const string Get_Ok = """
 {
-  "serviceId": "payments-api",
-  "name": "Payments API",
-  "env": "PROD",
-  "kind": "HTTP",
-  "endpoint": "https://api.example.com/health",
-  "ttlSec": 30,
-  "timeoutSec": 3,
-  "expectedHttp": 200,
-  "enabled": true,
-  "tags": ["payments","critical"]
+  "checkId": "c42",
+  "probeType": "SOAP_ACTION",
+  "operation": "urn:Auth#Login",
+  "headers": { "SOAPAction": "urn:Auth#Login" },
+  "payload": "<soapenv:Envelope>...</soapenv:Envelope>",
+  "assertions": { "xpath": "//ns:Status='OK'" },
+  "retries": 1,
+  "backoffMs": 200,
+  "warnLatencyMs": 300,
+  "errorLatencyMs": 1000
 }
 """;
 
         public const string Get_Fail = """
 {
-  "traceId": "c0ffee123456",
-  "code": "service_not_found",
-  "title": "Servicio no encontrado",
-  "detail": "El serviceId solicitado no existe."
+  "traceId": "a11deadbee",
+  "code": "check_not_found",
+  "title": "Check no encontrado",
+  "detail": "No existe un check con el ID solicitado para este servicio."
 }
 """;
 
-        // -------- POST /services
+        // -------- POST /services/{serviceId}/checks
         public const string Create_Ok = """
 {
-  "serviceId": "new-svc",
+  "checkId": "c99",
   "created": true
 }
 """;
 
         public const string Create_Fail = """
 {
-  "traceId": "deadbeef2024",
-  "code": "conflict",
-  "title": "ID duplicado",
-  "detail": "Ya existe un servicio con 'serviceId' = 'new-svc'."
+  "traceId": "baddad00",
+  "code": "validation_error",
+  "title": "Datos inválidos",
+  "detail": "El campo 'probeType' es requerido."
 }
 """;
 
-        // -------- PUT /services/{serviceId}
+        // -------- PUT /services/{serviceId}/checks/{checkId}
         public const string Update_Ok = """
 {
-  "serviceId": "payments-api",
+  "checkId": "c42",
   "updated": true
 }
 """;
 
         public const string Update_Fail = """
 {
-  "traceId": "badc0de77",
-  "code": "validation_error",
-  "title": "Datos inválidos",
-  "detail": "El campo 'ttlSec' debe ser > 0."
+  "traceId": "c0deba5e",
+  "code": "check_not_found",
+  "title": "Check no encontrado",
+  "detail": "No se puede actualizar; el check no existe."
 }
 """;
 
-        // -------- PATCH /services/{serviceId}/enable
-        public const string Enable_Ok = """
-{
-  "serviceId": "payments-api",
-  "enabled": false
-}
-""";
-
-        public const string Enable_Fail = """
-{
-  "traceId": "faded00d42",
-  "code": "not_allowed",
-  "title": "Operación no permitida",
-  "detail": "No se puede deshabilitar un servicio marcado como 'critical'."
-}
-""";
-
-        // -------- DELETE /services/{serviceId}
+        // -------- DELETE /services/{serviceId}/checks/{checkId}
         public const string Delete_Ok = """
 {
-  "serviceId": "old-svc",
+  "checkId": "c42",
   "deleted": true
 }
 """;
 
         public const string Delete_Fail = """
 {
-  "traceId": "b16b00b5",
+  "traceId": "de1e7e",
   "code": "in_use",
   "title": "No se puede eliminar",
-  "detail": "El servicio tiene dependencias activas."
+  "detail": "El check se usa en una política activa."
+}
+""";
+
+        // -------- POST /services/{serviceId}/checks/{checkId}/dry-run
+        public const string DryRun_Ok = """
+{
+  "result": { "status": "Healthy", "latencyMs": 180, "statusCode": 200 },
+  "logs": ["Resolved DNS", "Connected in 50ms", "HTTP 200 OK"]
+}
+""";
+
+        public const string DryRun_Fail = """
+{
+  "traceId": "5ca1ab1e",
+  "code": "connect_timeout",
+  "title": "Tiempo de conexión agotado",
+  "detail": "No fue posible conectar al endpoint remoto en 3 segundos."
 }
 """;
     }
 }
 
 
+CheckDtos
 #nullable enable
 using System.ComponentModel.DataAnnotations;
 
 namespace MonitoringApi.Models
 {
     /// <summary>
-    /// DTO para crear un servicio en el catálogo (mock).
+    /// Modelo para crear un check (HTTP/SOAP/gRPC/MQ/TCP/etc.).
+    /// Campos específicos pueden omitirse en el mock.
     /// </summary>
-    public class CreateServiceRequest
+    public class CreateCheckRequest
     {
-        /// <summary>ID lógico único del servicio.</summary>
+        /// <summary>Tipo de probe (GET, POST, SOAP_ACTION, GRPC_CALL, TCP_CONNECT, etc.).</summary>
         [Required]
-        public string ServiceId { get; set; } = string.Empty;
+        public string ProbeType { get; set; } = "GET";
 
-        /// <summary>Nombre visible.</summary>
-        [Required]
-        public string Name { get; set; } = string.Empty;
+        /// <summary>Operación lógica (endpoint/acción/rpc/cola/ruta).</summary>
+        public string? Operation { get; set; }
 
-        /// <summary>Entorno (DEV/UAT/PROD...).</summary>
-        [Required]
-        public string Env { get; set; } = "DEV";
+        /// <summary>Cabeceras a utilizar (si aplica).</summary>
+        public Dictionary<string, string>? Headers { get; set; }
 
-        /// <summary>Tipo: HTTP, SOAP, GRPC, MQ, JOB, SFTP, TCP, CUSTOM.</summary>
-        [Required]
-        public string Kind { get; set; } = "HTTP";
+        /// <summary>Payload de la solicitud (si aplica).</summary>
+        public string? Payload { get; set; }
 
-        /// <summary>Endpoint o destino lógico (url, cola, etc.).</summary>
-        [Required]
-        public string Endpoint { get; set; } = string.Empty;
+        /// <summary>Reglas de validación/assertions (status esperado, xpath, jsonpath, etc.).</summary>
+        public CheckAssertions? Assertions { get; set; }
 
-        /// <summary>TTL en segundos para cachear el estado (mock, no usado).</summary>
-        public int TtlSec { get; set; } = 30;
+        /// <summary>Reintentos ante fallo.</summary>
+        public int Retries { get; set; } = 0;
 
-        /// <summary>Timeout de probe en segundos (mock, no usado).</summary>
-        public int TimeoutSec { get; set; } = 3;
+        /// <summary>Backoff entre reintentos en milisegundos.</summary>
+        public int? BackoffMs { get; set; }
+
+        /// <summary>Umbral de alerta (warning) de latencia (ms).</summary>
+        public int? WarnLatencyMs { get; set; }
+
+        /// <summary>Umbral de error de latencia (ms).</summary>
+        public int? ErrorLatencyMs { get; set; }
     }
 
     /// <summary>
-    /// DTO para actualizar metadatos de un servicio.
+    /// Modelo para actualizar un check (todos opcionales).
     /// </summary>
-    public class UpdateServiceRequest
+    public class UpdateCheckRequest
     {
-        /// <summary>Nombre visible.</summary>
-        public string? Name { get; set; }
-
-        /// <summary>Etiquetas operativas.</summary>
-        public List<string>? Tags { get; set; }
-
-        /// <summary>Criticidad (Low/Medium/High).</summary>
-        public string? Criticality { get; set; }
-
-        /// <summary>TTL en segundos para cachear el estado.</summary>
-        public int? TtlSec { get; set; }
-
-        /// <summary>Timeout de probe en segundos.</summary>
-        public int? TimeoutSec { get; set; }
+        public string? ProbeType { get; set; }
+        public string? Operation { get; set; }
+        public Dictionary<string, string>? Headers { get; set; }
+        public string? Payload { get; set; }
+        public CheckAssertions? Assertions { get; set; }
+        public int? Retries { get; set; }
+        public int? BackoffMs { get; set; }
+        public int? WarnLatencyMs { get; set; }
+        public int? ErrorLatencyMs { get; set; }
     }
 
     /// <summary>
-    /// DTO para habilitar/deshabilitar un servicio.
+    /// Assertions/validaciones del check.
     /// </summary>
-    public class EnableServiceRequest
+    public class CheckAssertions
     {
-        /// <summary>Indica si el servicio queda habilitado.</summary>
-        public bool Enabled { get; set; } = true;
+        /// <summary>Código HTTP esperado (si aplica).</summary>
+        public int? ExpectStatus { get; set; }
+
+        /// <summary>Expresión JSONPath esperada que debe evaluar a True o valor no nulo.</summary>
+        public string? JsonPath { get; set; }
+
+        /// <summary>Expresión XPath esperada (para XML/SOAP).</summary>
+        public string? Xpath { get; set; }
     }
 }
-
-
-
 
 #nullable enable
 using MonitoringApi.Models;
@@ -219,27 +214,27 @@ using MonitoringApi.Models;
 namespace MonitoringApi.Services
 {
     /// <summary>
-    /// Contrato del servicio del Catálogo (respuestas en duro).
+    /// Contrato de servicio para manejar definiciones de checks (mock).
     /// </summary>
-    public interface IServicesCatalogService
+    public interface IChecksService
     {
-        /// <summary>JSON literal de GET /services.</summary>
-        string GetList(string demo);
+        /// <summary>JSON literal de GET /services/{serviceId}/checks.</summary>
+        string GetList(string serviceId, string demo);
 
-        /// <summary>JSON literal de GET /services/{serviceId}.</summary>
-        string GetById(string serviceId, string demo);
+        /// <summary>JSON literal de GET /services/{serviceId}/checks/{checkId}.</summary>
+        string GetOne(string serviceId, string checkId, string demo);
 
-        /// <summary>JSON literal de POST /services.</summary>
-        string Create(CreateServiceRequest request, string demo);
+        /// <summary>JSON literal de POST /services/{serviceId}/checks.</summary>
+        string Create(string serviceId, CreateCheckRequest request, string demo);
 
-        /// <summary>JSON literal de PUT /services/{serviceId}.</summary>
-        string Update(string serviceId, UpdateServiceRequest request, string demo);
+        /// <summary>JSON literal de PUT /services/{serviceId}/checks/{checkId}.</summary>
+        string Update(string serviceId, string checkId, UpdateCheckRequest request, string demo);
 
-        /// <summary>JSON literal de PATCH /services/{serviceId}/enable.</summary>
-        string Enable(string serviceId, EnableServiceRequest request, string demo);
+        /// <summary>JSON literal de DELETE /services/{serviceId}/checks/{checkId}.</summary>
+        string Delete(string serviceId, string checkId, string demo);
 
-        /// <summary>JSON literal de DELETE /services/{serviceId}.</summary>
-        string Delete(string serviceId, string demo);
+        /// <summary>JSON literal de POST /services/{serviceId}/checks/{checkId}/dry-run.</summary>
+        string DryRun(string serviceId, string checkId, string demo);
     }
 }
 
@@ -254,39 +249,41 @@ namespace MonitoringApi.Services
     /// <summary>
     /// Implementación mock que devuelve JSON literal desde constantes.
     /// </summary>
-    public class ServicesCatalogService : IServicesCatalogService
+    public class ChecksService : IChecksService
     {
-        public string GetList(string demo)
+        public string GetList(string serviceId, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedServicesPayloads.List_Fail
-                : HardcodedServicesPayloads.List_Ok;
+                ? HardcodedChecksPayloads.List_Fail
+                : HardcodedChecksPayloads.List_Ok;
 
-        public string GetById(string serviceId, string demo)
+        public string GetOne(string serviceId, string checkId, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedServicesPayloads.Get_Fail
-                : HardcodedServicesPayloads.Get_Ok;
+                ? HardcodedChecksPayloads.Get_Fail
+                : HardcodedChecksPayloads.Get_Ok;
 
-        public string Create(CreateServiceRequest request, string demo)
+        public string Create(string serviceId, CreateCheckRequest request, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedServicesPayloads.Create_Fail
-                : HardcodedServicesPayloads.Create_Ok;
+                ? HardcodedChecksPayloads.Create_Fail
+                : HardcodedChecksPayloads.Create_Ok;
 
-        public string Update(string serviceId, UpdateServiceRequest request, string demo)
+        public string Update(string serviceId, string checkId, UpdateCheckRequest request, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedServicesPayloads.Update_Fail
-                : HardcodedServicesPayloads.Update_Ok;
+                ? HardcodedChecksPayloads.Update_Fail
+                : HardcodedChecksPayloads.Update_Ok;
 
-        public string Enable(string serviceId, EnableServiceRequest request, string demo)
+        public string Delete(string serviceId, string checkId, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedServicesPayloads.Enable_Fail
-                : HardcodedServicesPayloads.Enable_Ok;
+                ? HardcodedChecksPayloads.Delete_Fail
+                : HardcodedChecksPayloads.Delete_Ok;
 
-        public string Delete(string serviceId, string demo)
+        public string DryRun(string serviceId, string checkId, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedServicesPayloads.Delete_Fail
-                : HardcodedServicesPayloads.Delete_Ok;
+                ? HardcodedChecksPayloads.DryRun_Fail
+                : HardcodedChecksPayloads.DryRun_Ok;
     }
 }
+
+
 
 
 #nullable enable
@@ -297,105 +294,111 @@ using MonitoringApi.Models;
 namespace MonitoringApi.Controllers
 {
     /// <summary>
-    /// Catálogo de servicios/microservicios registrados para monitoreo.
-    /// MOCK: Respuestas en duro controladas por el query param `demo=ok|fail`.
+    /// Endpoints para administrar y probar definiciones de checks de un servicio.
+    /// MOCK: Respuestas en duro usando el parámetro de query ?demo=ok|fail.
     /// </summary>
     [ApiController]
-    [Route("api/v1/services")]
+    [Route("api/v1/services/{serviceId}/checks")]
     [Produces("application/json")]
-    public class ServicesController : ControllerBase
+    public class ChecksController : ControllerBase
     {
-        private readonly IServicesCatalogService _svc;
+        private readonly IChecksService _service;
 
-        public ServicesController(IServicesCatalogService svc)
+        public ChecksController(IChecksService service)
         {
-            _svc = svc;
+            _service = service;
         }
 
         /// <summary>
-        /// Lista los servicios registrados (metadatos).
+        /// Lista las definiciones de checks asociadas a un servicio.
         /// </summary>
-        /// <param name="env">Filtro por entorno (DEV/UAT/PROD...). No aplica en el mock.</param>
-        /// <param name="enabled">Filtra por habilitados/inhabilitados. No aplica en el mock.</param>
+        /// <param name="serviceId">ID lógico del servicio.</param>
         /// <param name="demo">"ok" (default) o "fail" para simular error.</param>
-        /// <returns>JSON literal con items y meta.</returns>
-        /// <remarks>GET /api/v1/services?demo=ok</remarks>
+        /// <returns>JSON literal con el arreglo de checks o error simulado.</returns>
+        /// <remarks>GET /api/v1/services/{serviceId}/checks?demo=ok</remarks>
         [HttpGet]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetMany([FromQuery] string? env, [FromQuery] bool? enabled, [FromQuery] string? demo = "ok")
-            => Content(_svc.GetList(demo ?? "ok"), "application/json");
+        public IActionResult GetChecks([FromRoute] string serviceId, [FromQuery] string? demo = "ok")
+            => Content(_service.GetList(serviceId, demo ?? "ok"), "application/json");
 
         /// <summary>
-        /// Devuelve los metadatos de un servicio por su ID.
+        /// Devuelve la definición de un check por su identificador.
         /// </summary>
-        /// <param name="serviceId">Identificador lógico.</param>
+        /// <param name="serviceId">ID del servicio.</param>
+        /// <param name="checkId">ID del check.</param>
         /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con el servicio o error simulado.</returns>
-        /// <remarks>GET /api/v1/services/payments-api?demo=ok</remarks>
-        [HttpGet("{serviceId}")]
+        /// <returns>JSON literal con el check o error simulado.</returns>
+        /// <remarks>GET /api/v1/services/{serviceId}/checks/{checkId}?demo=ok</remarks>
+        [HttpGet("{checkId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetOne([FromRoute] string serviceId, [FromQuery] string? demo = "ok")
-            => Content(_svc.GetById(serviceId, demo ?? "ok"), "application/json");
+        public IActionResult GetCheck([FromRoute] string serviceId, [FromRoute] string checkId, [FromQuery] string? demo = "ok")
+            => Content(_service.GetOne(serviceId, checkId, demo ?? "ok"), "application/json");
 
         /// <summary>
-        /// Crea un nuevo servicio en el catálogo.
+        /// Crea una nueva definición de check para el servicio indicado.
         /// </summary>
-        /// <param name="request">Datos mínimos del servicio.</param>
+        /// <param name="serviceId">ID del servicio.</param>
+        /// <param name="request">Definición del check.</param>
         /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal indicando creación o error simulado.</returns>
-        /// <remarks>
-        /// POST /api/v1/services?demo=ok
-        /// Body mínimo:
-        /// { "serviceId":"new-svc","name":"New Svc","env":"UAT","kind":"HTTP","endpoint":"https://.../health" }
-        /// </remarks>
+        /// <returns>JSON literal con el ID del check creado o error simulado.</returns>
+        /// <remarks>POST /api/v1/services/{serviceId}/checks?demo=ok</remarks>
         [HttpPost]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult Create([FromBody] CreateServiceRequest request, [FromQuery] string? demo = "ok")
-            => Content(_svc.Create(request, demo ?? "ok"), "application/json");
+        public IActionResult Create([FromRoute] string serviceId, [FromBody] CreateCheckRequest request, [FromQuery] string? demo = "ok")
+            => Content(_service.Create(serviceId, request, demo ?? "ok"), "application/json");
 
         /// <summary>
-        /// Actualiza metadatos de un servicio existente.
+        /// Actualiza una definición de check existente.
         /// </summary>
-        /// <param name="serviceId">ID del servicio a actualizar.</param>
+        /// <param name="serviceId">ID del servicio.</param>
+        /// <param name="checkId">ID del check a actualizar.</param>
         /// <param name="request">Campos a modificar.</param>
         /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con resultado.</returns>
-        /// <remarks>PUT /api/v1/services/{serviceId}?demo=ok</remarks>
-        [HttpPut("{serviceId}")]
+        /// <returns>JSON literal con updated=true o error simulado.</returns>
+        /// <remarks>PUT /api/v1/services/{serviceId}/checks/{checkId}?demo=ok</remarks>
+        [HttpPut("{checkId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult Update([FromRoute] string serviceId, [FromBody] UpdateServiceRequest request, [FromQuery] string? demo = "ok")
-            => Content(_svc.Update(serviceId, request, demo ?? "ok"), "application/json");
+        public IActionResult Update([FromRoute] string serviceId, [FromRoute] string checkId, [FromBody] UpdateCheckRequest request, [FromQuery] string? demo = "ok")
+            => Content(_service.Update(serviceId, checkId, request, demo ?? "ok"), "application/json");
 
         /// <summary>
-        /// Habilita o deshabilita (baja lógica) un servicio.
+        /// Elimina (o deshabilita) una definición de check.
         /// </summary>
         /// <param name="serviceId">ID del servicio.</param>
-        /// <param name="request">Estado deseado.</param>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con enabled final.</returns>
-        /// <remarks>PATCH /api/v1/services/{serviceId}/enable?demo=ok</remarks>
-        [HttpPatch("{serviceId}/enable")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult Enable([FromRoute] string serviceId, [FromBody] EnableServiceRequest request, [FromQuery] string? demo = "ok")
-            => Content(_svc.Enable(serviceId, request, demo ?? "ok"), "application/json");
-
-        /// <summary>
-        /// Elimina (o marca eliminado) un servicio del catálogo.
-        /// </summary>
-        /// <param name="serviceId">ID del servicio.</param>
+        /// <param name="checkId">ID del check.</param>
         /// <param name="demo">"ok" o "fail".</param>
         /// <returns>JSON literal con deleted=true o error simulado.</returns>
-        /// <remarks>DELETE /api/v1/services/{serviceId}?demo=ok</remarks>
-        [HttpDelete("{serviceId}")]
+        /// <remarks>DELETE /api/v1/services/{serviceId}/checks/{checkId}?demo=ok</remarks>
+        [HttpDelete("{checkId}")]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult Delete([FromRoute] string serviceId, [FromQuery] string? demo = "ok")
-            => Content(_svc.Delete(serviceId, demo ?? "ok"), "application/json");
+        public IActionResult Delete([FromRoute] string serviceId, [FromRoute] string checkId, [FromQuery] string? demo = "ok")
+            => Content(_service.Delete(serviceId, checkId, demo ?? "ok"), "application/json");
+
+        /// <summary>
+        /// Ejecuta el check en caliente sin persistir ni cachear (dry-run).
+        /// </summary>
+        /// <param name="serviceId">ID del servicio.</param>
+        /// <param name="checkId">ID del check a probar.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con resultado y logs o error simulado.</returns>
+        /// <remarks>
+        /// POST /api/v1/services/{serviceId}/checks/{checkId}/dry-run?demo=ok
+        /// </remarks>
+        [HttpPost("{checkId}/dry-run")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult DryRun([FromRoute] string serviceId, [FromRoute] string checkId, [FromQuery] string? demo = "ok")
+            => Content(_service.DryRun(serviceId, checkId, demo ?? "ok"), "application/json");
     }
 }
 
 
 
-builder.Services.AddScoped<MonitoringApi.Services.IServicesCatalogService, MonitoringApi.Services.ServicesCatalogService>();
+// Agrega esta línea a tu Program.cs (junto con las de Status/Exec/Services)
+builder.Services.AddScoped<MonitoringApi.Services.IChecksService, MonitoringApi.Services.ChecksService>();
+
+
+
+
 
 
 
