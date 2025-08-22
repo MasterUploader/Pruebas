@@ -1,513 +1,187 @@
-#nullable enable
-namespace MonitoringApi.Data
+@using X.PagedList
+@using X.PagedList.Mvc.Core
+@using X.PagedList.Web.Common
+@model IPagedList<CAUAdministracion.Models.UsuarioModel>
+
+@{
+    ViewData["Title"] = "Administración de Usuarios";
+
+    // Valores actuales de filtro (los puedes pasar por ViewBag desde el controlador)
+    var q         = ViewBag.Q as string;
+    var tipoSel   = ViewBag.TipoSel as string;   // "1","2","3" o null
+    var estadoSel = ViewBag.EstadoSel as string; // "A","I" o null
+
+    // Usuario que está en modo edición (string usuario)
+    var editUser  = ViewBag.EditUser as string;
+}
+
+<h2 class="text-danger mb-3">@ViewData["Title"]</h2>
+
+@if (TempData["Mensaje"] is string msg && !string.IsNullOrWhiteSpace(msg))
 {
-    /// <summary>
-    /// Payloads en duro para /health/* y /metrics.
-    /// </summary>
-    public static class HardcodedHealthPayloads
+    <div class="alert alert-info alert-dismissible fade show" role="alert" id="autoclose-alert">
+        @msg
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<form method="get" asp-controller="Usuarios" asp-action="Index" class="row g-3 mb-3">
+    <div class="col-md-4">
+        <label class="form-label">Usuario</label>
+        <input type="text" name="q" value="@q" class="form-control" placeholder="Buscar por usuario..." />
+    </div>
+
+    <div class="col-md-3">
+        <label class="form-label">Tipo</label>
+        <select name="tipo" class="form-select">
+            <option value="">-- Todos --</option>
+            @if (tipoSel == "1") { @:<option value="1" selected="selected">Administrador</option> } else { @:<option value="1">Administrador</option> }
+            @if (tipoSel == "2") { @:<option value="2" selected="selected">Admin. Videos</option> } else { @:<option value="2">Admin. Videos</option> }
+            @if (tipoSel == "3") { @:<option value="3" selected="selected">Admin. Mensajes</option> } else { @:<option value="3">Admin. Mensajes</option> }
+        </select>
+    </div>
+
+    <div class="col-md-3">
+        <label class="form-label">Estado</label>
+        <select name="estado" class="form-select">
+            <option value="">-- Todos --</option>
+            @if (string.Equals(estadoSel, "A", StringComparison.OrdinalIgnoreCase)) {
+                @:<option value="A" selected="selected">Activo</option>
+                @:<option value="I">Inactivo</option>
+            } else if (string.Equals(estadoSel, "I", StringComparison.OrdinalIgnoreCase)) {
+                @:<option value="A">Activo</option>
+                @:<option value="I" selected="selected">Inactivo</option>
+            } else {
+                @:<option value="A">Activo</option>
+                @:<option value="I">Inactivo</option>
+            }
+        </select>
+    </div>
+
+    <div class="col-md-2 d-grid">
+        <label class="form-label d-none d-md-block">&nbsp;</label>
+        <button type="submit" class="btn btn-primary">Filtrar</button>
+    </div>
+</form>
+
+<div class="mb-3">
+    <a asp-controller="Usuarios" asp-action="Crear" class="btn btn-success">Agregar Nuevo Usuario</a>
+</div>
+
+<table class="table table-bordered table-striped align-middle">
+    <thead class="table-dark">
+        <tr>
+            <th>Usuario</th>
+            <th>Tipo</th>
+            <th>Estado</th>
+            <th style="width:200px">Acciones</th>
+        </tr>
+    </thead>
+    <tbody>
+    @foreach (var u in Model)
     {
-        // -------- GET /api/v1/health/live
-        public const string Live_Ok = """
-{
-  "status": "Live"
-}
-""";
+        var formUpdateId = $"f-upd-{u.Usuario}";
+        var formDeleteId = $"f-del-{u.Usuario}";
 
-        public const string Live_Fail = """
-{
-  "traceId": "live-err-0001",
-  "code": "app_initializing",
-  "title": "Inicializando",
-  "detail": "El proceso aún no está listo para atender solicitudes."
-}
-""";
+        <!-- Formularios invisibles por cada fila -->
+        <tr class="d-none">
+            <td colspan="4" class="p-0">
+                <form id="@formUpdateId" asp-controller="Usuarios" asp-action="Actualizar" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="usuario" value="@u.Usuario" />
+                </form>
 
-        // -------- GET /api/v1/health/ready
-        public const string Ready_Ok = """
-{
-  "status": "Ready",
-  "checks": {
-    "database": "ok",
-    "cache": "ok"
-  }
-}
-""";
+                <form id="@formDeleteId" asp-controller="Usuarios" asp-action="Eliminar" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="usuario" value="@u.Usuario" />
+                </form>
+            </td>
+        </tr>
 
-        public const string Ready_Fail = """
-{
-  "traceId": "ready-err-0002",
-  "code": "dependency_down",
-  "title": "Dependencia caída",
-  "detail": "Fallo de conectividad hacia la base de datos."
-}
-""";
-
-        // -------- GET /api/v1/metrics (text/plain)
-        public const string Metrics_Text = """
-# HELP api_request_duration_seconds Request duration
-# TYPE api_request_duration_seconds histogram
-api_request_duration_seconds_bucket{le="0.1"} 120
-api_request_duration_seconds_bucket{le="0.3"} 320
-api_request_duration_seconds_bucket{le="1"}  480
-api_request_duration_seconds_bucket{le="+Inf"} 500
-api_request_duration_seconds_sum 85.6
-api_request_duration_seconds_count 500
-
-# HELP api_requests_total Total requests
-# TYPE api_requests_total counter
-api_requests_total 500
-""";
-
-        public const string Metrics_Fail = """
-{
-  "traceId": "metrics-err-0003",
-  "code": "exporter_unavailable",
-  "title": "Exportador no disponible",
-  "detail": "No se pudieron recolectar métricas en este momento."
-}
-""";
-    }
-}
-
-#nullable enable
-namespace MonitoringApi.Data
-{
-    /// <summary>
-    /// Payloads en duro para /config, /validate, /discovery/http y /discovery/tcp.
-    /// </summary>
-    public static class HardcodedUtilitiesPayloads
-    {
-        // -------- GET /api/v1/config
-        public const string Config_Ok = """
-{
-  "defaults": { "ttlSec": 30, "timeoutSec": 3 },
-  "limits": { "liveStreamsPerKey": 10, "maxGroupByFields": 4, "maxWindowDays": 7 },
-  "featureFlags": { "enableDryRun": true, "enableDiscovery": true }
-}
-""";
-
-        public const string Config_Fail = """
-{
-  "traceId": "cfg-deadbeef",
-  "code": "backend_unavailable",
-  "title": "No disponible",
-  "detail": "No fue posible leer la configuración operativa."
-}
-""";
-
-        // -------- POST /api/v1/validate
-        public const string Validate_Ok = """
-{
-  "valid": true,
-  "warnings": [],
-  "errors": []
-}
-""";
-
-        public const string Validate_Fail = """
-{
-  "valid": false,
-  "warnings": ["El endpoint no especifica esquema (http/https); usando https por defecto."],
-  "errors": ["ProbeType inválido: 'XGET'. Valores soportados: GET, POST, SOAP_ACTION, GRPC_CALL, TCP_CONNECT."]
-}
-""";
-
-        // -------- POST /api/v1/discovery/http
-        public const string DiscoveryHttp_Ok = """
-{
-  "proposals": [
-    { "serviceId": "api", "endpoint": "/health", "probeType": "GET" },
-    { "serviceId": "auth", "endpoint": "/.well-known/openid-configuration", "probeType": "GET" }
-  ],
-  "meta": { "bases": ["https://api.example.com","https://auth.example.com"] }
-}
-""";
-
-        public const string DiscoveryHttp_Fail = """
-{
-  "traceId": "disc-http-err01",
-  "code": "not_allowed",
-  "title": "No permitido",
-  "detail": "La base 'http://interna.local' no está en la allow-list."
-}
-""";
-
-        // -------- POST /api/v1/discovery/tcp
-        public const string DiscoveryTcp_Ok = """
-{
-  "open": [
-    { "host": "svc1.local", "port": 443 },
-    { "host": "svc2.local", "port": 8443 }
-  ],
-  "meta": { "hosts": ["svc1.local"], "ports": [443,8443] }
-}
-""";
-
-        public const string DiscoveryTcp_Fail = """
-{
-  "traceId": "disc-tcp-err01",
-  "code": "scan_blocked",
-  "title": "Escaneo bloqueado",
-  "detail": "El rango solicitado se encuentra en la deny-list."
-}
-""";
-    }
-}
-
-
-
-
-UtilitiesDtos
-#nullable enable
-using System.ComponentModel.DataAnnotations;
-
-namespace MonitoringApi.Models
-{
-    /// <summary>
-    /// Solicitud para validación sintáctica semántica (sin persistir/ejecutar).
-    /// </summary>
-    public class ValidateRequest
-    {
-        /// <summary>Definición de servicio (mínima) a validar.</summary>
-        public ServiceDefinitionLite? Service { get; set; }
-
-        /// <summary>Checks propuestos para validar.</summary>
-        public List<CheckDefinitionLite>? Checks { get; set; }
-    }
-
-    /// <summary>
-    /// Definición mínima de servicio para fines de validación.
-    /// </summary>
-    public class ServiceDefinitionLite
-    {
-        [Required] public string ServiceId { get; set; } = string.Empty;
-        [Required] public string Env { get; set; } = "DEV";
-        [Required] public string Kind { get; set; } = "HTTP";
-        [Required] public string Endpoint { get; set; } = string.Empty;
-        public int? TtlSec { get; set; }
-        public int? TimeoutSec { get; set; }
-    }
-
-    /// <summary>
-    /// Definición mínima de check para validación (similar a CreateCheckRequest).
-    /// </summary>
-    public class CheckDefinitionLite
-    {
-        [Required] public string ProbeType { get; set; } = "GET";
-        public string? Operation { get; set; }
-        public Dictionary<string, string>? Headers { get; set; }
-        public string? Payload { get; set; }
-        public CheckAssertionsLite? Assertions { get; set; }
-    }
-
-    /// <summary>Assertions mínimas para validar.</summary>
-    public class CheckAssertionsLite
-    {
-        public int? ExpectStatus { get; set; }
-        public string? JsonPath { get; set; }
-        public string? Xpath { get; set; }
-    }
-
-    /// <summary>
-    /// Solicitud de descubrimiento HTTP.
-    /// </summary>
-    public class DiscoveryHttpRequest
-    {
-        /// <summary>Lista de URLs base (https://...)</summary>
-        [Required] public List<string> Bases { get; set; } = new();
-    }
-
-    /// <summary>
-    /// Solicitud de descubrimiento TCP.
-    /// </summary>
-    public class DiscoveryTcpRequest
-    {
-        /// <summary>Hosts a evaluar (DNS/IPv4/IPv6).</summary>
-        [Required] public List<string> Hosts { get; set; } = new();
-
-        /// <summary>Puertos a verificar.</summary>
-        [Required] public List<int> Ports { get; set; } = new();
-    }
-}
-
-
-
-#nullable enable
-namespace MonitoringApi.Services
-{
-    /// <summary>
-    /// Contrato para salud del API y métricas (mock).
-    /// </summary>
-    public interface IHealthService
-    {
-        /// <summary>JSON literal de GET /api/v1/health/live.</summary>
-        string GetLive(string demo);
-
-        /// <summary>JSON literal de GET /api/v1/health/ready.</summary>
-        string GetReady(string demo);
-
-        /// <summary>Texto de métricas (Prometheus) para ok.</summary>
-        string GetMetricsOk();
-
-        /// <summary>JSON de error para métricas (fail).</summary>
-        string GetMetricsFail();
-    }
-}
-
-
-
-
-
-#nullable enable
-using MonitoringApi.Data;
-
-namespace MonitoringApi.Services
-{
-    /// <summary>
-    /// Implementación mock para salud y métricas del propio API.
-    /// </summary>
-    public class HealthService : IHealthService
-    {
-        public string GetLive(string demo)
-            => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedHealthPayloads.Live_Fail
-                : HardcodedHealthPayloads.Live_Ok;
-
-        public string GetReady(string demo)
-            => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedHealthPayloads.Ready_Fail
-                : HardcodedHealthPayloads.Ready_Ok;
-
-        public string GetMetricsOk() => HardcodedHealthPayloads.Metrics_Text;
-        public string GetMetricsFail() => HardcodedHealthPayloads.Metrics_Fail;
-    }
-}
-
-
-
-#nullable enable
-using MonitoringApi.Models;
-
-namespace MonitoringApi.Services
-{
-    /// <summary>
-    /// Contrato del módulo de utilidades (mock).
-    /// </summary>
-    public interface IUtilitiesService
-    {
-        /// <summary>JSON literal de GET /api/v1/config.</summary>
-        string GetConfig(string demo);
-
-        /// <summary>JSON literal de POST /api/v1/validate.</summary>
-        string Validate(ValidateRequest request, string demo);
-
-        /// <summary>JSON literal de POST /api/v1/discovery/http.</summary>
-        string DiscoveryHttp(DiscoveryHttpRequest request, string demo);
-
-        /// <summary>JSON literal de POST /api/v1/discovery/tcp.</summary>
-        string DiscoveryTcp(DiscoveryTcpRequest request, string demo);
-    }
-}
-
-
-
-#nullable enable
-using MonitoringApi.Data;
-using MonitoringApi.Models;
-
-namespace MonitoringApi.Services
-{
-    /// <summary>
-    /// Implementación mock que retorna JSON literal desde constantes.
-    /// </summary>
-    public class UtilitiesService : IUtilitiesService
-    {
-        public string GetConfig(string demo)
-            => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedUtilitiesPayloads.Config_Fail
-                : HardcodedUtilitiesPayloads.Config_Ok;
-
-        public string Validate(ValidateRequest request, string demo)
-            => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedUtilitiesPayloads.Validate_Fail
-                : HardcodedUtilitiesPayloads.Validate_Ok;
-
-        public string DiscoveryHttp(DiscoveryHttpRequest request, string demo)
-            => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedUtilitiesPayloads.DiscoveryHttp_Fail
-                : HardcodedUtilitiesPayloads.DiscoveryHttp_Ok;
-
-        public string DiscoveryTcp(DiscoveryTcpRequest request, string demo)
-            => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedUtilitiesPayloads.DiscoveryTcp_Fail
-                : HardcodedUtilitiesPayloads.DiscoveryTcp_Ok;
-    }
-}
-
-
-
-#nullable enable
-using Microsoft.AspNetCore.Mvc;
-using MonitoringApi.Services;
-
-namespace MonitoringApi.Controllers
-{
-    /// <summary>
-    /// Exposición de métricas del propio API (formato Prometheus o texto plano).
-    /// MOCK: Devuelve texto en duro; en fail devuelve JSON de error.
-    /// </summary>
-    [ApiController]
-    public class MetricsController : ControllerBase
-    {
-        private readonly IHealthService _svc;
-
-        public MetricsController(IHealthService svc)
+        if (string.Equals(editUser, u.Usuario, StringComparison.OrdinalIgnoreCase))
         {
-            _svc = svc;
+            <!-- Fila en edición -->
+            <tr>
+                <td><strong>@u.Usuario</strong></td>
+                <td>
+                    <select name="tipoUsuario" form="@formUpdateId" class="form-select">
+                        @if (u.TipoUsuario == 1) { <option value="1" selected="selected">Administrador</option> } else { <option value="1">Administrador</option> }
+                        @if (u.TipoUsuario == 2) { <option value="2" selected="selected">Admin. Videos</option> } else { <option value="2">Admin. Videos</option> }
+                        @if (u.TipoUsuario == 3) { <option value="3" selected="selected">Admin. Mensajes</option> } else { <option value="3">Admin. Mensajes</option> }
+                    </select>
+                </td>
+                <td>
+                    @if (string.Equals(u.Estado, "A", StringComparison.OrdinalIgnoreCase)) {
+                        <select name="estado" form="@formUpdateId" class="form-select">
+                            <option value="A" selected="selected">Activo</option>
+                            <option value="I">Inactivo</option>
+                        </select>
+                    } else {
+                        <select name="estado" form="@formUpdateId" class="form-select">
+                            <option value="A">Activo</option>
+                            <option value="I" selected="selected">Inactivo</option>
+                        </select>
+                    }
+                </td>
+                <td class="text-nowrap">
+                    <button type="submit" form="@formUpdateId" class="btn btn-success btn-sm me-2">Guardar</button>
+                    <a class="btn btn-secondary btn-sm"
+                       asp-controller="Usuarios" asp-action="Index"
+                       asp-route-q="@q" asp-route-tipo="@tipoSel" asp-route-estado="@estadoSel">Cancelar</a>
+                </td>
+            </tr>
         }
-
-        /// <summary>
-        /// Métricas del API (Prometheus exposition format simulado).
-        /// </summary>
-        /// <param name="demo">"ok" (default) para texto de métricas; "fail" para error JSON.</param>
-        /// <returns>text/plain en ok; application/json en fail.</returns>
-        /// <remarks>GET /api/v1/metrics?demo=ok</remarks>
-        [HttpGet]
-        [Route("api/v1/metrics")]
-        public IActionResult Metrics([FromQuery] string? demo = "ok")
+        else
         {
-            if ((demo ?? "ok").ToLowerInvariant() == "fail")
-                return Content(_svc.GetMetricsFail(), "application/json");
-
-            return Content(_svc.GetMetricsOk(), "text/plain");
+            <!-- Fila normal -->
+            <tr>
+                <td>@u.Usuario</td>
+                <td>@(u.TipoUsuario == 1 ? "Administrador" : u.TipoUsuario == 2 ? "Admin. Videos" : "Admin. Mensajes")</td>
+                <td>@(string.Equals(u.Estado, "A", StringComparison.OrdinalIgnoreCase) ? "Activo" : "Inactivo")</td>
+                <td class="text-nowrap">
+                    <a class="btn btn-warning btn-sm me-2"
+                       asp-controller="Usuarios" asp-action="Index"
+                       asp-route-editUser="@u.Usuario"
+                       asp-route-q="@q" asp-route-tipo="@tipoSel" asp-route-estado="@estadoSel">
+                        Editar
+                    </a>
+                    <button type="submit" form="@formDeleteId"
+                            class="btn btn-danger btn-sm"
+                            onclick="return confirm('¿Eliminar el usuario @u.Usuario?');">
+                        Eliminar
+                    </button>
+                </td>
+            </tr>
         }
     }
-}
+    </tbody>
+</table>
 
-
-#nullable enable
-using Microsoft.AspNetCore.Mvc;
-using MonitoringApi.Services;
-
-namespace MonitoringApi.Controllers
+@if (Model != null && Model.PageCount > 1)
 {
-    /// <summary>
-    /// Endpoints de salud del propio API (liveness/readiness).
-    /// MOCK: Respuestas en duro con ?demo=ok|fail.
-    /// </summary>
-    [ApiController]
-    [Route("api/v1/health")]
-    [Produces("application/json")]
-    public class HealthController : ControllerBase
-    {
-        private readonly IHealthService _svc;
-
-        public HealthController(IHealthService svc)
-        {
-            _svc = svc;
-        }
-
-        /// <summary>Liveness: solo verifica que el proceso esté arriba.</summary>
-        /// <param name="demo">"ok" (default) o "fail".</param>
-        /// <returns>JSON literal {"status":"Live"} o error simulado.</returns>
-        /// <remarks>GET /api/v1/health/live?demo=ok</remarks>
-        [HttpGet("live")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult Live([FromQuery] string? demo = "ok")
-            => Content(_svc.GetLive(demo ?? "ok"), "application/json");
-
-        /// <summary>
-        /// Readiness: verifica conectividad a BD/caché y dependencias mínimas del API.
-        /// </summary>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal {"status":"Ready"} o error simulado.</returns>
-        /// <remarks>GET /api/v1/health/ready?demo=ok</remarks>
-        [HttpGet("ready")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult Ready([FromQuery] string? demo = "ok")
-            => Content(_svc.GetReady(demo ?? "ok"), "application/json");
-    }
+    <div class="d-flex justify-content-center">
+        @Html.PagedListPager(
+            Model,
+            page => Url.Action("Index", new { page, q, tipo = tipoSel, estado = estadoSel }),
+            new PagedListRenderOptions {
+                UlElementClasses = new[] { "pagination", "justify-content-center" },
+                LiElementClasses = new[] { "page-item" },
+                PageClasses = new[] { "page-link" },
+                DisplayLinkToFirstPage = PagedListDisplayMode.Always,
+                DisplayLinkToLastPage = PagedListDisplayMode.Always,
+                DisplayLinkToPreviousPage = PagedListDisplayMode.Always,
+                DisplayLinkToNextPage = PagedListDisplayMode.Always,
+                MaximumPageNumbersToDisplay = 7
+            })
+    </div>
 }
 
-
-
-#nullable enable
-using Microsoft.AspNetCore.Mvc;
-using MonitoringApi.Services;
-using MonitoringApi.Models;
-
-namespace MonitoringApi.Controllers
-{
-    /// <summary>
-    /// Utilidades generales: configuración visible, validación de definiciones
-    /// y descubrimiento asistido de endpoints/puertos.
-    /// MOCK: Respuestas en duro usando ?demo=ok|fail.
-    /// </summary>
-    [ApiController]
-    [Route("api/v1")]
-    [Produces("application/json")]
-    public class UtilitiesController : ControllerBase
-    {
-        private readonly IUtilitiesService _svc;
-
-        public UtilitiesController(IUtilitiesService svc)
-        {
-            _svc = svc;
-        }
-
-        /// <summary>
-        /// Devuelve configuración operativa no sensible del API.
-        /// </summary>
-        /// <param name="demo">"ok" (default) o "fail".</param>
-        /// <returns>JSON literal con defaults/limits o error simulado.</returns>
-        /// <remarks>GET /api/v1/config?demo=ok</remarks>
-        [HttpGet("config")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetConfig([FromQuery] string? demo = "ok")
-            => Content(_svc.GetConfig(demo ?? "ok"), "application/json");
-
-        /// <summary>
-        /// Valida definiciones (linting) sin persistir ni ejecutar.
-        /// </summary>
-        /// <param name="request">Definición de servicio y checks (parcial).</param>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con valid=true/false y warnings/errors.</returns>
-        /// <remarks>POST /api/v1/validate?demo=ok</remarks>
-        [HttpPost("validate")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult Validate([FromBody] ValidateRequest request, [FromQuery] string? demo = "ok")
-            => Content(_svc.Validate(request, demo ?? "ok"), "application/json");
-
-        /// <summary>
-        /// Descubre endpoints HTTP públicos/permitidos a partir de bases.
-        /// </summary>
-        /// <param name="request">Listado de URLs base para escanear con reglas de allow-list.</param>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con proposals (no se persiste).</returns>
-        /// <remarks>POST /api/v1/discovery/http?demo=ok</remarks>
-        [HttpPost("discovery/http")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult DiscoveryHttp([FromBody] DiscoveryHttpRequest request, [FromQuery] string? demo = "ok")
-            => Content(_svc.DiscoveryHttp(request, demo ?? "ok"), "application/json");
-
-        /// <summary>
-        /// Descubre puertos/servicios TCP en hosts permitidos.
-        /// </summary>
-        /// <param name="request">Hosts y puertos a verificar (con allow/deny-lists).</param>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con open[].</returns>
-        /// <remarks>POST /api/v1/discovery/tcp?demo=ok</remarks>
-        [HttpPost("discovery/tcp")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult DiscoveryTcp([FromBody] DiscoveryTcpRequest request, [FromQuery] string? demo = "ok")
-            => Content(_svc.DiscoveryTcp(request, demo ?? "ok"), "application/json");
+@section Scripts{
+<script>
+  // Cierra alert en 5s
+  setTimeout(() => {
+    const a = document.getElementById('autoclose-alert');
+    if (a) a.remove();
+  }, 5000);
+</script>
     }
-}
-
-
-
-builder.Services.AddScoped<MonitoringApi.Services.IUtilitiesService, MonitoringApi.Services.UtilitiesService>();
-builder.Services.AddScoped<MonitoringApi.Services.IHealthService, MonitoringApi.Services.HealthService>();
-
-
-
