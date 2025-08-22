@@ -1,141 +1,27 @@
-Quedo así
-
-using CAUAdministracion.Helpers;
-using CAUAdministracion.Models;
-using CAUAdministracion.Services.Agencias;
-using CAUAdministracion.Services.Menssages;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Rendering;
-
-namespace CAUAdministracion.Controllers;
-
-
-[Authorize]
-public class MessagesController : Controller
+[AutorizarPorTipoUsuario("1", "3")]
+[HttpGet]
+public async Task<IActionResult> Index(int? editId, int? editSeq, string codcco = null)
 {
-    private readonly IMensajeService _mensajeService;
+    // Agencias para el filtro
+    var agencias = _mensajeService.ObtenerAgenciasSelectList();
+    ViewBag.Agencias = agencias;
 
-    public MessagesController(IMensajeService mensajeService)
-    {
-        _mensajeService = mensajeService;
-    }
+    // Mantener selección actual del filtro
+    ViewBag.CodccoSeleccionado = codcco;
 
- 
+    // Pasar identificador de fila en edición (CodMsg + Seq)
+    ViewBag.EditId = editId;
+    ViewBag.EditSeq = editSeq;
 
+    // Cargar mensajes (y filtrar por agencia si corresponde)
+    var mensajes = await _mensajeService.ObtenerMensajesAsync();
+    if (!string.IsNullOrEmpty(codcco))
+        mensajes = mensajes.Where(m => m.Codcco == codcco).ToList();
 
-    // =======================================
-    //     1. AGREGAR NUEVO MENSAJE
-    // =======================================
-    [AutorizarPorTipoUsuario("1", "3")]
-    [HttpGet]
-    public IActionResult Agregar()
-    {
-        // Cargar la lista de agencias para el selector
-        var agencias = _mensajeService.ObtenerAgenciasSelectList();
-        ViewBag.Agencias = agencias;
-
-        return View();
-    }
-
-    [AutorizarPorTipoUsuario("1", "3")]
-    [HttpPost]
-    public IActionResult Agregar(MensajeModel model)
-    {
-        // Validar datos obligatorios básicos
-        if (string.IsNullOrWhiteSpace(model.Codcco) || string.IsNullOrWhiteSpace(model.Mensaje))
-        {
-            ModelState.AddModelError("", "Debe completar todos los campos.");
-        }
-
-        // Obtener secuencia antes de validar
-        model.Seq = _mensajeService.GetSecuencia(model.Codcco); // <- Aquí estableces la secuencia
-
-        // Si el modelo aún no es válido, regresar la vista
-        if (!ModelState.IsValid)
-        {
-            ViewBag.Agencias = _mensajeService.ObtenerAgenciasSelectList();
-            return View(model);
-        }
-
-        // Insertar mensaje
-        bool ok = _mensajeService.InsertarMensaje(model);
-
-        if (ok)
-            return RedirectToAction("Index");
-
-        ViewBag.Mensaje = "Error al guardar el mensaje.";
-        ViewBag.Agencias = _mensajeService.ObtenerAgenciasSelectList();
-        return View(model);
-    }
-
-    // =======================================
-    //     2. MANTENIMIENTO DE MENSAJES
-    // =======================================
-
-    [AutorizarPorTipoUsuario("1", "3")]
-    [HttpGet]
-    public async Task<IActionResult> Index( int? editId, string codcco = null )
-    {
-
-        // Obtener todas las agencias para el filtro
-        var agencias = _mensajeService.ObtenerAgenciasSelectList();
-        ViewBag.Agencias = agencias;
-        ViewBag.CodigoAgenciaSeleccionado = codcco;
-        ViewBag.EditId = editId;
-
-        // Obtener mensajes filtrados si hay código de agencia
-        var mensajes = await _mensajeService.ObtenerMensajesAsync();
-        if (!string.IsNullOrEmpty(codcco))
-            mensajes = mensajes.Where(m => m.Codcco == codcco).ToList();
-
-        
-
-        return View(mensajes);
-    }
-
-    [AutorizarPorTipoUsuario("1", "3")]
-    [HttpPost]
-    public IActionResult Actualizar(int codMsg, string codcco, string mensaje, string estado, int seq)
-    {
-        var model = new MensajeModel
-        {
-            CodMsg = codMsg,
-            Codcco = codcco,
-            Mensaje = mensaje,
-            Estado = estado,
-            Seq = seq
-        };
-
-        var actualizado = _mensajeService.ActualizarMensaje(model);
-
-        TempData["Mensaje"] = actualizado
-            ? "Mensaje actualizado correctamente."
-            : "Error al actualizar el mensaje.";
-
-        return RedirectToAction("Index", new { codcco = codcco });
-    }
-
-    [AutorizarPorTipoUsuario("1", "3")]
-    [HttpPost]
-    public IActionResult Eliminar(int codMsg, string codcco)
-    {
-        // Validar si el mensaje tiene dependencias
-        if (_mensajeService.TieneDependencia(codcco, codMsg))
-        {
-            TempData["Mensaje"] = "No se puede eliminar el mensaje porque tiene dependencias.";
-            return RedirectToAction("Index", new { codcco = codcco });
-        }
-
-        var eliminado = _mensajeService.EliminarMensaje(codMsg);
-
-        TempData["Mensaje"] = eliminado
-            ? "Mensaje eliminado correctamente."
-            : "Error al eliminar el mensaje.";
-
-        return RedirectToAction("Index", new { codcco = 0 });
-    }
+    return View(mensajes);
 }
+
+
 
 
 @model List<CAUAdministracion.Models.MensajeModel>
@@ -145,7 +31,10 @@ public class MessagesController : Controller
     ViewData["Title"] = "Mantenimiento de Mensajes";
     var agencias = ViewBag.Agencias as List<SelectListItem>;
     var codccoSel = ViewBag.CodccoSeleccionado as string;
+
+    // Edit key: CodMsg + Seq
     int? editId = ViewBag.EditId as int?;
+    int? editSeq = ViewBag.EditSeq as int?;
 }
 
 <h2 class="text-danger">@ViewData["Title"]</h2>
@@ -183,8 +72,9 @@ public class MessagesController : Controller
         <tbody>
             @foreach (var item in Model)
             {
-                var formUpdateId = $"f-upd-{item.Codcco}-{item.CodMsg}";
-                var formDeleteId = $"f-del-{item.Codcco}-{item.CodMsg}";
+                // IDs únicos por fila, ahora considerando también la SEQ
+                var formUpdateId = $"f-upd-{item.Codcco}-{item.CodMsg}-{item.Seq}";
+                var formDeleteId = $"f-del-{item.Codcco}-{item.CodMsg}-{item.Seq}";
 
                 <!-- Formularios “invisibles” por fila -->
                 <tr class="d-none">
@@ -193,6 +83,7 @@ public class MessagesController : Controller
                             @Html.AntiForgeryToken()
                             <input type="hidden" name="Codcco" value="@item.Codcco" />
                             <input type="hidden" name="CodMsg" value="@item.CodMsg" />
+                            <input type="hidden" name="Seq"    value="@item.Seq" />
                         </form>
 
                         <form id="@formDeleteId" asp-controller="Messages" asp-action="Eliminar" method="post">
@@ -203,9 +94,9 @@ public class MessagesController : Controller
                     </td>
                 </tr>
 
-                @if (editId.HasValue && editId.Value == item.CodMsg)
+                @if (editId.HasValue && editSeq.HasValue && editId.Value == item.CodMsg && editSeq.Value == item.Seq)
                 {
-                    <!-- Fila en modo edición -->
+                    <!-- Fila en modo edición (única, por CodMsg + Seq) -->
                     <tr>
                         <td>@item.CodMsg</td>
                         <td>@item.Seq</td>
@@ -218,17 +109,9 @@ public class MessagesController : Controller
                         </td>
                         <td>
                             <select name="Estado" form="@formUpdateId" class="form-select form-select-sm">
-                            @if (item.Estado == "A")
-                        {
-                            <option value="A" selected>Activo</option>
-                            <option value="I">Inactivo</option>
-                        }
-                        else
-                        {
-                            <option value="A">Activo</option>
-                            <option value="I" selected>Inactivo</option>
-                        }
-                        </select>
+                                <option value="A" @(item.Estado == "A" ? "selected" : "")>Activo</option>
+                                <option value="I" @(item.Estado == "I" ? "selected" : "")>Inactivo</option>
+                            </select>
                         </td>
                         <td class="text-nowrap">
                             <button type="submit"
@@ -259,7 +142,8 @@ public class MessagesController : Controller
                                asp-controller="Messages"
                                asp-action="Index"
                                asp-route-codcco="@codccoSel"
-                               asp-route-editId="@item.CodMsg">
+                               asp-route-editId="@item.CodMsg"
+                               asp-route-editSeq="@item.Seq">
                                 Editar
                             </a>
 
@@ -282,7 +166,3 @@ else
 }
 
 <a href="@Url.Action("Agregar", "Messages")" class="btn btn-primary">Agregar Nuevo Mensaje</a>
-
-
-Pero al seleccionar una fila carga todas las que tenga el mismo codigo, la seleccion se debe de realizar por codigo y secuencia para evitar seleccionar 2 filas o más.
-    
