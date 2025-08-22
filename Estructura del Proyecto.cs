@@ -1,81 +1,109 @@
-Fijate que la logica de Agregar antigua acá la tengo, para que te bases en ella y no crees los nuevos metodos desde cero
+Esta es la clase que uso para la encriptación y desencriptacion
 
+using System.Security.Cryptography;
+using System.Text;
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Web;
-using System.Web.UI;
-using System.Web.UI.WebControls;
+namespace CAUAdministracion.Helpers;
 
-public partial class AgregarNvoUser : System.Web.UI.Page
+/// <summary> 
+/// Clase utilitaria para encriptar y desencriptar cadenas compatibles con el sistema anterior. 
+/// /// </summary> 
+public static class OperacionesVarias
 {
-    protected void Page_Load(object sender, EventArgs e)
+    /// <summary>
+    /// Clase utilitaria para encriptar y desencriptar cadenas. 
+    /// Soporta formato antiguo (Base64 Unicode) y moderno (AES). 
+    /// </summary> 
+    /// 
+    private static readonly string aesKey = "TuClaveAES128Bits"; // 16 caracteres
+    private static readonly string aesIV = "VectorInicialAES";   // 16 caracteres
+
+    public static string EncriptarCadena(string cadenaEncriptar)
     {
-        if (Session["usuario"] == null)
-            Response.Redirect("Default.aspx");
+        byte[] encrypted = Encoding.Unicode.GetBytes(cadenaEncriptar);
+        return Convert.ToBase64String(encrypted);
     }
-    protected void btnAceptar_Click(object sender, EventArgs e)
+
+    public static string DesencriptarCadena(string cadenaDesencriptar)
     {
-        if (this.txtUsuario.Text.Equals(string.Empty)) //El usuario esta vacio ?
+        try
         {
-            this.lblError.Text = "Debe Ingresar Usuario";
-            this.lblError.Visible = true;
-            return;
-        }            
-        else
+            byte[] decrypted = Convert.FromBase64String(cadenaDesencriptar);
+            return Encoding.Unicode.GetString(decrypted);
+        }
+        catch
         {
-            if (this.txtClave.Text.Equals(string.Empty)) //Alguna de los campos de las claves esta vacio?
-            {
-                this.lblError.Text = "Las Claves no pueden estar vacias";
-                this.lblError.Visible = true;
-                return;
-            }
-            else
-            {
-                if (!this.txtClave.Text.Equals(this.txtConfirmarClave.Text)) //Las claves no coinciden?
-                {
-                    this.lblError.Text = "Las Claves Ingresadas no Coinciden";
-                    this.lblError.Visible = true;
-                    return;
-                }
-                else //Si todo va bien 
-                {
-                    string claveEncriptada = this.encriptarClave(this.txtClave.Text);
-
-                    string qry = "insert into bcah96dta.USUADMIN values('" + this.txtUsuario.Text +  
-                                                                        "','" + claveEncriptada + "'," + ddlTipoUsuario.SelectedValue.ToString() + ",'" + 
-                                                                        this.ddlEstado.SelectedValue.ToString() + "')";
-                    DB2DataSource3.InsertCommand = qry;
-
-                    try
-                    {
-                        DB2DataSource3.Insert();
-                        this.txtUsuario.Text = string.Empty;
-                        this.txtClave.Text = string.Empty;
-                        this.txtConfirmarClave.Text = string.Empty;
-
-                        string msg = "Se ha agregado exitosamente el usuario: " + this.txtUsuario.Text + "!";
-                        ClientScript.RegisterStartupScript(this.GetType(), "Exito", "alert('" + msg + "');", true);                        
-                        
-                    }
-                    catch (Exception ex)
-                    {
-                        this.lblError.Text = ex.Message;
-                        this.lblError.Visible = true;
-                    }
-                }
-            }
+            return string.Empty;
         }
     }
-    protected void btnCancelar_Click(object sender, EventArgs e)
+
+    public static string EncriptarCadenaAES(string textoPlano)
     {
-        Response.Redirect("Administracion.aspx");
+        using Aes aes = Aes.Create();
+        aes.Key = Encoding.UTF8.GetBytes(aesKey);
+        aes.IV = Encoding.UTF8.GetBytes(aesIV);
+
+        ICryptoTransform encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
+        byte[] inputBytes = Encoding.UTF8.GetBytes(textoPlano);
+
+        using var ms = new System.IO.MemoryStream();
+        using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
+        {
+            cs.Write(inputBytes, 0, inputBytes.Length);
+            cs.FlushFinalBlock();
+            return Convert.ToBase64String(ms.ToArray());
+        }
     }
 
-    private string encriptarClave(string clave)
+    public static string DesencriptarCadenaAES(string textoEncriptado)
     {
-        OperacionesVarias opVarias = new OperacionesVarias();
-        return opVarias.encriptarCadena(clave);        
+        try
+        {
+            using Aes aes = Aes.Create();
+            aes.Key = Encoding.UTF8.GetBytes(aesKey);
+            aes.IV = Encoding.UTF8.GetBytes(aesIV);
+
+            ICryptoTransform decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
+            byte[] inputBytes = Convert.FromBase64String(textoEncriptado);
+
+            using var ms = new System.IO.MemoryStream(inputBytes);
+            using var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read);
+            using var reader = new System.IO.StreamReader(cs);
+            return reader.ReadToEnd();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Detecta automáticamente si la contraseña está en formato viejo o nuevo y la desencripta.
+    /// </summary>
+    public static string DesencriptarAuto(string cadena)
+    {
+        string desencriptado = DesencriptarCadenaAES(cadena);
+        if (!string.IsNullOrWhiteSpace(desencriptado))
+            return desencriptado;
+
+        desencriptado = DesencriptarCadena(cadena);
+        return desencriptado;
+    }
+
+    /// <summary>
+    /// Detecta si una cadena parece ser AES (nuevo formato) por su tamaño y contenido.
+    /// </summary>
+    public static bool EsFormatoNuevo(string cadena)
+    {
+        try
+        {
+            string intento = DesencriptarCadenaAES(cadena);
+            return !string.IsNullOrWhiteSpace(intento);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
+
