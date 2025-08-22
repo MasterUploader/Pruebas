@@ -1,240 +1,85 @@
-@using X.PagedList
-@using X.PagedList.Mvc.Core
-@using X.PagedList.Web.Common
-@model IPagedList<object>  @* Usa object para evitar errores de tipo si tu UsuarioModel no coincide *@
+using CAUAdministracion.Helpers;
+using CAUAdministracion.Models;
+using CAUAdministracion.Services.Usuarios; // <- tu interfaz/servicio de usuarios
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
-@{
-    ViewData["Title"] = "Administración de Usuarios";
-
-    // Filtros que envía el controlador en ViewBag
-    var q         = ViewBag.Q as string;
-    var tipoSel   = ViewBag.TipoSel?.ToString();
-    var estadoSel = ViewBag.EstadoSel?.ToString();
-}
-
-<h2 class="text-danger">@ViewData["Title"]</h2>
-
-@if (TempData["Mensaje"] != null)
+public class UsuariosController : Controller
 {
-    <div id="autoclose-alert" class="alert alert-info alert-dismissible fade show" role="alert">
-        @TempData["Mensaje"]
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-}
+    private readonly IUsuarioService _usuarioService;
 
-<form method="get" asp-controller="Usuarios" asp-action="Index" class="row g-3 mb-3">
-    <div class="col-md-4">
-        <label class="form-label">Usuario</label>
-        <input type="text" name="q" value="@(q ?? "")" class="form-control" placeholder="Buscar por usuario..." />
-    </div>
-
-    <div class="col-md-3">
-        <label class="form-label">Tipo</label>
-        <select name="tipo" class="form-select">
-            <option value="">-- Todos --</option>
-            @* Sin C# en atributos; usamos if/else para “selected” *@
-            @if (tipoSel == "1")
-            { <option value="1" selected>Administrador</option> }
-            else
-            { <option value="1">Administrador</option> }
-
-            @if (tipoSel == "2")
-            { <option value="2" selected>Admin. Videos</option> }
-            else
-            { <option value="2">Admin. Videos</option> }
-
-            @if (tipoSel == "3")
-            { <option value="3" selected>Admin. Mensajes</option> }
-            else
-            { <option value="3">Admin. Mensajes</option> }
-        </select>
-    </div>
-
-    <div class="col-md-3">
-        <label class="form-label">Estado</label>
-        <select name="estado" class="form-select">
-            <option value="">-- Todos --</option>
-            @if (estadoSel == "A")
-            { <option value="A" selected>Activo</option> }
-            else
-            { <option value="A">Activo</option> }
-
-            @if (estadoSel == "I")
-            { <option value="I" selected>Inactivo</option> }
-            else
-            { <option value="I">Inactivo</option> }
-        </select>
-    </div>
-
-    <div class="col-md-2 d-grid">
-        <label class="form-label d-none d-md-block">&nbsp;</label>
-        <button type="submit" class="btn btn-primary">Filtrar</button>
-    </div>
-</form>
-
-<div class="mb-3">
-    <a asp-controller="Usuarios" asp-action="Agregar" class="btn btn-success">Agregar nuevo usuario</a>
-</div>
-
-@if (Model != null && Model.Any())
-{
-    <table class="table table-bordered table-striped align-middle">
-        <thead class="table-dark">
-        <tr>
-            <th>Usuario</th>
-            <th>Tipo</th>
-            <th>Estado</th>
-            <th style="width:160px">Acciones</th>
-        </tr>
-        </thead>
-        <tbody>
-        @foreach (var u in Model)
-        {
-            // ==== Lectura segura de propiedades (evita errores si tu POCO difiere) ====
-            var t = u.GetType();
-
-            string usuario  = t.GetProperty("Usuario")?.GetValue(u)?.ToString() ?? "";
-            int    tipoInt  = 0;
-            var    pTipo    = t.GetProperty("TipoUsu") ?? t.GetProperty("TipUsu") ?? t.GetProperty("TipoUsuario");
-            if (pTipo != null)
-            {
-                var tmp = pTipo.GetValue(u);
-                if (tmp != null && int.TryParse(tmp.ToString(), out var v)) tipoInt = v;
-            }
-
-            string estado   = t.GetProperty("Estado")?.GetValue(u)?.ToString() ?? "";
-
-            string tipoTxt = tipoInt switch
-            {
-                1 => "Administrador",
-                2 => "Admin. Videos",
-                3 => "Admin. Mensajes",
-                _ => $"Tipo {tipoInt}"
-            };
-            string estadoTxt = (estado == "A") ? "Activo" : "Inactivo";
-            // ==========================================================================
-
-            <tr>
-                <td>@usuario</td>
-                <td>@tipoTxt</td>
-                <td>@estadoTxt</td>
-                <td class="text-nowrap">
-                    <a asp-controller="Usuarios"
-                       asp-action="Editar"
-                       asp-route-usuario="@usuario"
-                       class="btn btn-sm btn-warning me-2">Editar</a>
-
-                    <form asp-controller="Usuarios"
-                          asp-action="Eliminar"
-                          asp-route-usuario="@usuario"
-                          method="post"
-                          class="d-inline"
-                          onsubmit="return confirm('¿Eliminar el usuario @usuario?');">
-                        @Html.AntiForgeryToken()
-                        <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
-                    </form>
-                </td>
-            </tr>
-        }
-        </tbody>
-    </table>
-
-    <div class="d-flex justify-content-center">
-        @Html.PagedListPager(
-            Model,
-            page => Url.Action("Index", new { page, q, tipo = tipoSel, estado = estadoSel }),
-            new PagedListRenderOptions {
-                UlElementClasses = new[] { "pagination", "justify-content-center" },
-                LiElementClasses = new[] { "page-item" },
-                PageClasses      = new[] { "page-link" },
-                DisplayLinkToFirstPage   = PagedListDisplayMode.Always,
-                DisplayLinkToLastPage    = PagedListDisplayMode.Always,
-                DisplayLinkToPreviousPage= PagedListDisplayMode.Always,
-                DisplayLinkToNextPage    = PagedListDisplayMode.Always,
-                MaximumPageNumbersToDisplay = 7
-            })
-    </div>
-}
-else
-{
-    <div class="alert alert-info">No se encontraron usuarios con los criterios seleccionados.</div>
-}
-
-@section Scripts{
-<script>
-    // Cierra alerts en 5s
-    setTimeout(function(){
-        var el = document.getElementById('autoclose-alert');
-        if (el) { var alert = bootstrap.Alert.getOrCreateInstance(el); alert.close(); }
-    }, 5000);
-</script>
+    public UsuariosController(IUsuarioService usuarioService)
+    {
+        _usuarioService = usuarioService;
     }
 
+    // ========= AGREGAR =========
 
-@* No hacemos binding fuerte a propiedades específicas para evitar errores de compilación
-   si tu POCO usa nombres distintos. Solo usamos names de formulario. *@
-@{
-    ViewData["Title"] = "Agregar nuevo usuario";
+    // Formulario
+    [AutorizarPorTipoUsuario("1")]
+    [HttpGet]
+    public IActionResult Agregar()
+    {
+        return View();
+    }
 
-    // Rehidrata valores en repost si hubo errores
-    string vUsuario = Context.Request.HasFormContentType ? Context.Request.Form["Usuario"].ToString() : "";
-    string vTipo    = Context.Request.HasFormContentType ? Context.Request.Form["TipoUsu"].ToString() : "1";
-    string vEstado  = Context.Request.HasFormContentType ? Context.Request.Form["Estado"].ToString() : "A";
+    // Guardar
+    [AutorizarPorTipoUsuario("1")]
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Agregar(
+        [FromForm] string Usuario,
+        [FromForm] int    TipoUsu,
+        [FromForm] string Estado,
+        [FromForm] string Clave,
+        [FromForm] string ConfirmarClave)
+    {
+        // --- Validaciones básicas del lado servidor ---
+        if (string.IsNullOrWhiteSpace(Usuario))
+            ModelState.AddModelError(nameof(Usuario), "El usuario es obligatorio.");
+
+        if (TipoUsu < 1 || TipoUsu > 3)
+            ModelState.AddModelError(nameof(TipoUsu), "Tipo de usuario inválido.");
+
+        if (Estado != "A" && Estado != "I")
+            ModelState.AddModelError(nameof(Estado), "Estado inválido.");
+
+        if (string.IsNullOrWhiteSpace(Clave) || string.IsNullOrWhiteSpace(ConfirmarClave))
+            ModelState.AddModelError(nameof(Clave), "Debe indicar la clave y su confirmación.");
+
+        if (!string.Equals(Clave, ConfirmarClave))
+            ModelState.AddModelError(nameof(ConfirmarClave), "Las claves no coinciden.");
+
+        // Usuario duplicado
+        if (await _usuarioService.ExisteUsuarioAsync(Usuario))
+            ModelState.AddModelError(nameof(Usuario), "El usuario ya existe.");
+
+        if (!ModelState.IsValid)
+            return View(); // la vista rehidrata desde Request.Form
+
+        // --- Construcción del modelo de dominio ---
+        var nuevo = new UsuarioModel
+        {
+            Usuario = Usuario,
+            TipoUsu = TipoUsu,
+            Estado  = Estado
+        };
+
+        // --- Creación en base de datos ---
+        // Usa el método que ya tienes en tu servicio.
+        // Si tu servicio expone otro nombre/firma (p.ej. InsertarUsuarioAsync),
+        // sustituye la línea siguiente.
+        var ok = await _usuarioService.CrearUsuarioAsync(nuevo, Clave);
+
+        if (!ok)
+        {
+            ModelState.AddModelError(string.Empty, "No se pudo crear el usuario.");
+            return View();
+        }
+
+        TempData["Mensaje"] = $"Usuario {Usuario} creado correctamente.";
+        return RedirectToAction(nameof(Index));
+    }
+
+    // ... (resto de endpoints del controlador)
 }
-
-<h2 class="text-danger">@ViewData["Title"]</h2>
-
-@if (TempData["Mensaje"] != null)
-{
-    <div class="alert alert-info alert-dismissible fade show" role="alert">
-        @TempData["Mensaje"]
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-}
-
-<form asp-controller="Usuarios" asp-action="Agregar" method="post" class="row g-3">
-    @Html.AntiForgeryToken()
-
-    <div class="col-md-6">
-        <label class="form-label">Usuario</label>
-        <input type="text" name="Usuario" value="@vUsuario" maxlength="32" class="form-control" required />
-    </div>
-
-    <div class="col-md-3">
-        <label class="form-label">Tipo de usuario</label>
-        <select name="TipoUsu" class="form-select" required>
-            @if (vTipo == "1") { <option value="1" selected>Administrador</option> } else { <option value="1">Administrador</option> }
-            @if (vTipo == "2") { <option value="2" selected>Admin. Videos</option> } else { <option value="2">Admin. Videos</option> }
-            @if (vTipo == "3") { <option value="3" selected>Admin. Mensajes</option> } else { <option value="3">Admin. Mensajes</option> }
-        </select>
-    </div>
-
-    <div class="col-md-3">
-        <label class="form-label">Estado</label>
-        <select name="Estado" class="form-select" required>
-            @if (vEstado == "A") { <option value="A" selected>Activo</option> } else { <option value="A">Activo</option> }
-            @if (vEstado == "I") { <option value="I" selected>Inactivo</option> } else { <option value="I">Inactivo</option> }
-        </select>
-    </div>
-
-    <div class="col-md-6">
-        <label class="form-label">Clave</label>
-        <input type="password" name="Clave" maxlength="10" class="form-control" required />
-    </div>
-
-    <div class="col-md-6">
-        <label class="form-label">Confirmar clave</label>
-        <input type="password" name="ConfirmarClave" maxlength="10" class="form-control" required />
-    </div>
-
-    <div class="col-12 text-danger">
-        @Html.ValidationSummary(excludePropertyErrors: true)
-    </div>
-
-    <div class="col-12">
-        <button type="submit" class="btn btn-primary">Guardar</button>
-        <a asp-controller="Usuarios" asp-action="Index" class="btn btn-secondary ms-2">Cancelar</a>
-    </div>
-</form>
-
-
