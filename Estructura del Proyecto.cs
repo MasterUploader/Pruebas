@@ -1,128 +1,212 @@
-// DI de servicios
-builder.Services.AddScoped<MonitoringApi.Services.IStatusService, MonitoringApi.Services.StatusService>();
-builder.Services.AddScoped<MonitoringApi.Services.IExecService, MonitoringApi.Services.ExecService>();
+#nullable enable
+namespace MonitoringApi.Data
+{
+    /// <summary>
+    /// Respuestas JSON en duro para el segmento de Catálogo de Servicios.
+    /// </summary>
+    public static class HardcodedServicesPayloads
+    {
+        // -------- GET /services
+        public const string List_Ok = """
+{
+  "items": [
+    {
+      "serviceId": "payments-api",
+      "name": "Payments API",
+      "env": "PROD",
+      "kind": "HTTP",
+      "endpoint": "https://api.example.com/health",
+      "ttlSec": 30,
+      "timeoutSec": 3,
+      "enabled": true,
+      "tags": ["payments","critical"]
+    },
+    {
+      "serviceId": "invoice-worker",
+      "name": "Invoice Worker",
+      "env": "PROD",
+      "kind": "MQ",
+      "endpoint": "topic:payments",
+      "ttlSec": 30,
+      "timeoutSec": 3,
+      "enabled": true,
+      "tags": ["billing"]
+    }
+  ],
+  "meta": { "page": 1, "size": 50, "total": 120 }
+}
+""";
 
+        public const string List_Fail = """
+{
+  "traceId": "bada55aa1100",
+  "code": "forbidden",
+  "title": "No autorizado",
+  "detail": "La llave provista no tiene permisos para listar servicios."
+}
+""";
+
+        // -------- GET /services/{serviceId}
+        public const string Get_Ok = """
+{
+  "serviceId": "payments-api",
+  "name": "Payments API",
+  "env": "PROD",
+  "kind": "HTTP",
+  "endpoint": "https://api.example.com/health",
+  "ttlSec": 30,
+  "timeoutSec": 3,
+  "expectedHttp": 200,
+  "enabled": true,
+  "tags": ["payments","critical"]
+}
+""";
+
+        public const string Get_Fail = """
+{
+  "traceId": "c0ffee123456",
+  "code": "service_not_found",
+  "title": "Servicio no encontrado",
+  "detail": "El serviceId solicitado no existe."
+}
+""";
+
+        // -------- POST /services
+        public const string Create_Ok = """
+{
+  "serviceId": "new-svc",
+  "created": true
+}
+""";
+
+        public const string Create_Fail = """
+{
+  "traceId": "deadbeef2024",
+  "code": "conflict",
+  "title": "ID duplicado",
+  "detail": "Ya existe un servicio con 'serviceId' = 'new-svc'."
+}
+""";
+
+        // -------- PUT /services/{serviceId}
+        public const string Update_Ok = """
+{
+  "serviceId": "payments-api",
+  "updated": true
+}
+""";
+
+        public const string Update_Fail = """
+{
+  "traceId": "badc0de77",
+  "code": "validation_error",
+  "title": "Datos inválidos",
+  "detail": "El campo 'ttlSec' debe ser > 0."
+}
+""";
+
+        // -------- PATCH /services/{serviceId}/enable
+        public const string Enable_Ok = """
+{
+  "serviceId": "payments-api",
+  "enabled": false
+}
+""";
+
+        public const string Enable_Fail = """
+{
+  "traceId": "faded00d42",
+  "code": "not_allowed",
+  "title": "Operación no permitida",
+  "detail": "No se puede deshabilitar un servicio marcado como 'critical'."
+}
+""";
+
+        // -------- DELETE /services/{serviceId}
+        public const string Delete_Ok = """
+{
+  "serviceId": "old-svc",
+  "deleted": true
+}
+""";
+
+        public const string Delete_Fail = """
+{
+  "traceId": "b16b00b5",
+  "code": "in_use",
+  "title": "No se puede eliminar",
+  "detail": "El servicio tiene dependencias activas."
+}
+""";
+    }
+}
 
 
 #nullable enable
-using Microsoft.AspNetCore.Mvc;
-using MonitoringApi.Services;
-using System.Text;
+using System.ComponentModel.DataAnnotations;
 
-namespace MonitoringApi.Controllers
+namespace MonitoringApi.Models
 {
     /// <summary>
-    /// Endpoints de analítica de ejecuciones (APIs y microservicios).
-    /// Todas las respuestas son simuladas con JSON literal (modo demo).
+    /// DTO para crear un servicio en el catálogo (mock).
     /// </summary>
-    [ApiController]
-    [Route("api/v1/exec")]
-    [Produces("application/json")]
-    public class ExecController : ControllerBase
+    public class CreateServiceRequest
     {
-        private readonly IExecService _service;
+        /// <summary>ID lógico único del servicio.</summary>
+        [Required]
+        public string ServiceId { get; set; } = string.Empty;
 
-        public ExecController(IExecService service)
-        {
-            _service = service;
-        }
+        /// <summary>Nombre visible.</summary>
+        [Required]
+        public string Name { get; set; } = string.Empty;
 
-        /// <summary>
-        /// Lista ejecuciones individuales (crudo reciente) con paginación.
-        /// </summary>
-        /// <param name="demo">"ok" (default) para respuesta buena, "fail" para respuesta de error simulada.</param>
-        /// <returns>JSON literal con items y meta de paginación.</returns>
-        /// <remarks>GET /api/v1/exec/recent?demo=ok</remarks>
-        [HttpGet("recent")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetRecent([FromQuery] string? demo = "ok")
-            => Content(_service.GetRecent(demo ?? "ok"), "application/json");
+        /// <summary>Entorno (DEV/UAT/PROD...).</summary>
+        [Required]
+        public string Env { get; set; } = "DEV";
 
-        /// <summary>
-        /// Serie temporal agregada por intervalos (buckets).
-        /// </summary>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con buckets y meta (from/to/step).</returns>
-        /// <remarks>GET /api/v1/exec/timeseries?demo=ok</remarks>
-        [HttpGet("timeseries")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetTimeseries([FromQuery] string? demo = "ok")
-            => Content(_service.GetTimeseries(demo ?? "ok"), "application/json");
+        /// <summary>Tipo: HTTP, SOAP, GRPC, MQ, JOB, SFTP, TCP, CUSTOM.</summary>
+        [Required]
+        public string Kind { get; set; } = "HTTP";
 
-        /// <summary>
-        /// KPI agregados por grupo (serviceId, interface, operation, verb, env).
-        /// </summary>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con arreglo de grupos y sus métricas.</returns>
-        /// <remarks>GET /api/v1/exec/summary?demo=ok</remarks>
-        [HttpGet("summary")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetSummary([FromQuery] string? demo = "ok")
-            => Content(_service.GetSummary(demo ?? "ok"), "application/json");
+        /// <summary>Endpoint o destino lógico (url, cola, etc.).</summary>
+        [Required]
+        public string Endpoint { get; set; } = string.Empty;
 
-        /// <summary>
-        /// Top N por métrica (latencia, errorRate, throughput).
-        /// </summary>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con lista ordenada por la métrica solicitada.</returns>
-        /// <remarks>GET /api/v1/exec/top?demo=ok</remarks>
-        [HttpGet("top")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetTop([FromQuery] string? demo = "ok")
-            => Content(_service.GetTop(demo ?? "ok"), "application/json");
+        /// <summary>TTL en segundos para cachear el estado (mock, no usado).</summary>
+        public int TtlSec { get; set; } = 30;
 
-        /// <summary>
-        /// Distribución de latencias/duración (histograma).
-        /// </summary>
-        /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con bins.</returns>
-        /// <remarks>GET /api/v1/exec/distribution?demo=ok</remarks>
-        [HttpGet("distribution")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetDistribution([FromQuery] string? demo = "ok")
-            => Content(_service.GetDistribution(demo ?? "ok"), "application/json");
+        /// <summary>Timeout de probe en segundos (mock, no usado).</summary>
+        public int TimeoutSec { get; set; } = 3;
+    }
 
-        /// <summary>
-        /// Stream SSE (Server-Sent Events) de estadísticas en vivo.
-        /// Produce 2 eventos de muestra según el modo (agg o raw).
-        /// </summary>
-        /// <param name="mode">"agg" (default) o "raw".</param>
-        /// <param name="demo">"ok" o "fail". En fail emite un evento "error".</param>
-        /// <returns>Stream SSE con 1 línea de retry y 2 eventos.</returns>
-        /// <remarks>
-        /// GET /api/v1/exec/live?mode=agg&amp;demo=ok  
-        /// Header: Accept: text/event-stream
-        /// </remarks>
-        [HttpGet("live")]
-        public async Task Live([FromQuery] string? mode = "agg", [FromQuery] string? demo = "ok")
-        {
-            Response.Headers["Cache-Control"] = "no-cache";
-            Response.Headers["X-Accel-Buffering"] = "no";
-            Response.ContentType = "text/event-stream; charset=utf-8";
+    /// <summary>
+    /// DTO para actualizar metadatos de un servicio.
+    /// </summary>
+    public class UpdateServiceRequest
+    {
+        /// <summary>Nombre visible.</summary>
+        public string? Name { get; set; }
 
-            // retry para auto-reconexión del cliente
-            await Response.WriteAsync("retry: 3000\n\n");
+        /// <summary>Etiquetas operativas.</summary>
+        public List<string>? Tags { get; set; }
 
-            if ((demo ?? "ok").ToLowerInvariant() == "fail")
-            {
-                await Response.WriteAsync(Data.HardcodedExecPayloads.SSE_Error);
-                await Response.Body.FlushAsync();
-                return;
-            }
+        /// <summary>Criticidad (Low/Medium/High).</summary>
+        public string? Criticality { get; set; }
 
-            if ((mode ?? "agg").Equals("raw", StringComparison.OrdinalIgnoreCase))
-            {
-                await Response.WriteAsync(Data.HardcodedExecPayloads.SSE_Raw_1);
-                await Response.WriteAsync(Data.HardcodedExecPayloads.SSE_Raw_2);
-            }
-            else
-            {
-                await Response.WriteAsync(Data.HardcodedExecPayloads.SSE_Agg_1);
-                await Response.WriteAsync(Data.HardcodedExecPayloads.SSE_Agg_2);
-            }
+        /// <summary>TTL en segundos para cachear el estado.</summary>
+        public int? TtlSec { get; set; }
 
-            await Response.Body.FlushAsync();
-        }
+        /// <summary>Timeout de probe en segundos.</summary>
+        public int? TimeoutSec { get; set; }
+    }
+
+    /// <summary>
+    /// DTO para habilitar/deshabilitar un servicio.
+    /// </summary>
+    public class EnableServiceRequest
+    {
+        /// <summary>Indica si el servicio queda habilitado.</summary>
+        public bool Enabled { get; set; } = true;
     }
 }
 
@@ -130,27 +214,32 @@ namespace MonitoringApi.Controllers
 
 
 #nullable enable
+using MonitoringApi.Models;
+
 namespace MonitoringApi.Services
 {
     /// <summary>
-    /// Contrato para proveer respuestas simuladas de los endpoints /exec/*.
+    /// Contrato del servicio del Catálogo (respuestas en duro).
     /// </summary>
-    public interface IExecService
+    public interface IServicesCatalogService
     {
-        /// <summary>JSON literal de /exec/recent.</summary>
-        string GetRecent(string demo);
+        /// <summary>JSON literal de GET /services.</summary>
+        string GetList(string demo);
 
-        /// <summary>JSON literal de /exec/timeseries.</summary>
-        string GetTimeseries(string demo);
+        /// <summary>JSON literal de GET /services/{serviceId}.</summary>
+        string GetById(string serviceId, string demo);
 
-        /// <summary>JSON literal de /exec/summary.</summary>
-        string GetSummary(string demo);
+        /// <summary>JSON literal de POST /services.</summary>
+        string Create(CreateServiceRequest request, string demo);
 
-        /// <summary>JSON literal de /exec/top.</summary>
-        string GetTop(string demo);
+        /// <summary>JSON literal de PUT /services/{serviceId}.</summary>
+        string Update(string serviceId, UpdateServiceRequest request, string demo);
 
-        /// <summary>JSON literal de /exec/distribution.</summary>
-        string GetDistribution(string demo);
+        /// <summary>JSON literal de PATCH /services/{serviceId}/enable.</summary>
+        string Enable(string serviceId, EnableServiceRequest request, string demo);
+
+        /// <summary>JSON literal de DELETE /services/{serviceId}.</summary>
+        string Delete(string serviceId, string demo);
     }
 }
 
@@ -158,232 +247,155 @@ namespace MonitoringApi.Services
 
 #nullable enable
 using MonitoringApi.Data;
+using MonitoringApi.Models;
 
 namespace MonitoringApi.Services
 {
     /// <summary>
-    /// Implementación mock de IExecService que retorna JSON literal desde constantes.
+    /// Implementación mock que devuelve JSON literal desde constantes.
     /// </summary>
-    public class ExecService : IExecService
+    public class ServicesCatalogService : IServicesCatalogService
     {
-        public string GetRecent(string demo)
+        public string GetList(string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedExecPayloads.Recent_Fail
-                : HardcodedExecPayloads.Recent_Ok;
+                ? HardcodedServicesPayloads.List_Fail
+                : HardcodedServicesPayloads.List_Ok;
 
-        public string GetTimeseries(string demo)
+        public string GetById(string serviceId, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedExecPayloads.Timeseries_Fail
-                : HardcodedExecPayloads.Timeseries_Ok;
+                ? HardcodedServicesPayloads.Get_Fail
+                : HardcodedServicesPayloads.Get_Ok;
 
-        public string GetSummary(string demo)
+        public string Create(CreateServiceRequest request, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedExecPayloads.Summary_Fail
-                : HardcodedExecPayloads.Summary_Ok;
+                ? HardcodedServicesPayloads.Create_Fail
+                : HardcodedServicesPayloads.Create_Ok;
 
-        public string GetTop(string demo)
+        public string Update(string serviceId, UpdateServiceRequest request, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedExecPayloads.Top_Fail
-                : HardcodedExecPayloads.Top_Ok;
+                ? HardcodedServicesPayloads.Update_Fail
+                : HardcodedServicesPayloads.Update_Ok;
 
-        public string GetDistribution(string demo)
+        public string Enable(string serviceId, EnableServiceRequest request, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedExecPayloads.Distribution_Fail
-                : HardcodedExecPayloads.Distribution_Ok;
+                ? HardcodedServicesPayloads.Enable_Fail
+                : HardcodedServicesPayloads.Enable_Ok;
+
+        public string Delete(string serviceId, string demo)
+            => (demo?.ToLowerInvariant() == "fail")
+                ? HardcodedServicesPayloads.Delete_Fail
+                : HardcodedServicesPayloads.Delete_Ok;
     }
 }
-
 
 
 #nullable enable
-namespace MonitoringApi.Data
+using Microsoft.AspNetCore.Mvc;
+using MonitoringApi.Services;
+using MonitoringApi.Models;
+
+namespace MonitoringApi.Controllers
 {
     /// <summary>
-    /// JSON literal y eventos SSE simulados para los endpoints /exec/*.
+    /// Catálogo de servicios/microservicios registrados para monitoreo.
+    /// MOCK: Respuestas en duro controladas por el query param `demo=ok|fail`.
     /// </summary>
-    public static class HardcodedExecPayloads
+    [ApiController]
+    [Route("api/v1/services")]
+    [Produces("application/json")]
+    public class ServicesController : ControllerBase
     {
-        // ----------------- /exec/recent -----------------
-        public const string Recent_Ok = """
-{
-  "items": [
-    {
-      "timestampUtc": "2025-08-11T16:59:58Z",
-      "serviceId": "invoice-worker",
-      "env": "PROD",
-      "interface": "MQ",
-      "operation": "topic:payments",
-      "verb": "CONSUME",
-      "statusCode": 0,
-      "success": true,
-      "latencyMs": 45,
-      "lag": 12,
-      "traceId": "a13f0c29dd5c4b0e"
-    },
-    {
-      "timestampUtc": "2025-08-11T16:59:32Z",
-      "serviceId": "payments-api",
-      "env": "PROD",
-      "interface": "HTTP",
-      "endpoint": "/payments/{id}",
-      "method": "GET",
-      "statusCode": 200,
-      "success": true,
-      "latencyMs": 142,
-      "traceId": "7b2c7f2d9d2e4a1a"
-    }
-  ],
-  "meta": { "page": 1, "size": 50, "total": 980 }
-}
-""";
+        private readonly IServicesCatalogService _svc;
 
-        public const string Recent_Fail = """
-{
-  "traceId": "deadbeefcafef00d",
-  "code": "invalid_request",
-  "title": "Parámetro inválido",
-  "detail": "El filtro 'from' debe ser anterior a 'to'."
-}
-""";
+        public ServicesController(IServicesCatalogService svc)
+        {
+            _svc = svc;
+        }
 
-        // ----------------- /exec/timeseries -----------------
-        public const string Timeseries_Ok = """
-{
-  "series": [
-    {
-      "bucketStartUtc": "2025-08-11T16:00:00Z",
-      "bucketEndUtc": "2025-08-11T16:01:00Z",
-      "count": 1820,
-      "success": 1779,
-      "errors": 41,
-      "errorRate": 0.0225,
-      "latency": { "avgMs": 210, "p50Ms": 120, "p95Ms": 480, "p99Ms": 920 },
-      "throughputRps": 30.33
-    }
-  ],
-  "meta": { "from": "2025-08-11T16:00:00Z", "to": "2025-08-11T17:00:00Z", "step": "1m" }
-}
-""";
+        /// <summary>
+        /// Lista los servicios registrados (metadatos).
+        /// </summary>
+        /// <param name="env">Filtro por entorno (DEV/UAT/PROD...). No aplica en el mock.</param>
+        /// <param name="enabled">Filtra por habilitados/inhabilitados. No aplica en el mock.</param>
+        /// <param name="demo">"ok" (default) o "fail" para simular error.</param>
+        /// <returns>JSON literal con items y meta.</returns>
+        /// <remarks>GET /api/v1/services?demo=ok</remarks>
+        [HttpGet]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult GetMany([FromQuery] string? env, [FromQuery] bool? enabled, [FromQuery] string? demo = "ok")
+            => Content(_svc.GetList(demo ?? "ok"), "application/json");
 
-        public const string Timeseries_Fail = """
-{
-  "traceId": "ff12aa90c0ffee77",
-  "code": "range_too_wide",
-  "title": "Ventana temporal muy grande",
-  "detail": "La ventana máxima permitida es de 7 días."
-}
-""";
+        /// <summary>
+        /// Devuelve los metadatos de un servicio por su ID.
+        /// </summary>
+        /// <param name="serviceId">Identificador lógico.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con el servicio o error simulado.</returns>
+        /// <remarks>GET /api/v1/services/payments-api?demo=ok</remarks>
+        [HttpGet("{serviceId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult GetOne([FromRoute] string serviceId, [FromQuery] string? demo = "ok")
+            => Content(_svc.GetById(serviceId, demo ?? "ok"), "application/json");
 
-        // ----------------- /exec/summary -----------------
-        public const string Summary_Ok = """
-{
-  "groups": [
-    {
-      "key": { "serviceId": "auth-soap", "interface": "SOAP", "operation": "urn:Auth#Login", "verb": "CALL" },
-      "count": 3200,
-      "success": 3187,
-      "errors": 13,
-      "errorRate": 0.0041,
-      "latency": { "avgMs": 180, "p50Ms": 110, "p95Ms": 420, "p99Ms": 800 },
-      "firstSeenUtc": "2025-08-11T15:00:12Z",
-      "lastSeenUtc": "2025-08-11T16:59:58Z"
-    }
-  ],
-  "meta": { "from": "2025-08-11T15:00:00Z", "to": "2025-08-11T17:00:00Z", "groupBy": ["serviceId","interface","operation","verb"] }
-}
-""";
+        /// <summary>
+        /// Crea un nuevo servicio en el catálogo.
+        /// </summary>
+        /// <param name="request">Datos mínimos del servicio.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal indicando creación o error simulado.</returns>
+        /// <remarks>
+        /// POST /api/v1/services?demo=ok
+        /// Body mínimo:
+        /// { "serviceId":"new-svc","name":"New Svc","env":"UAT","kind":"HTTP","endpoint":"https://.../health" }
+        /// </remarks>
+        [HttpPost]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult Create([FromBody] CreateServiceRequest request, [FromQuery] string? demo = "ok")
+            => Content(_svc.Create(request, demo ?? "ok"), "application/json");
 
-        public const string Summary_Fail = """
-{
-  "traceId": "beadfeedabcd0001",
-  "code": "too_many_groups",
-  "title": "Exceso de cardinalidad",
-  "detail": "Reduce groupBy o aplica más filtros."
-}
-""";
+        /// <summary>
+        /// Actualiza metadatos de un servicio existente.
+        /// </summary>
+        /// <param name="serviceId">ID del servicio a actualizar.</param>
+        /// <param name="request">Campos a modificar.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con resultado.</returns>
+        /// <remarks>PUT /api/v1/services/{serviceId}?demo=ok</remarks>
+        [HttpPut("{serviceId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult Update([FromRoute] string serviceId, [FromBody] UpdateServiceRequest request, [FromQuery] string? demo = "ok")
+            => Content(_svc.Update(serviceId, request, demo ?? "ok"), "application/json");
 
-        // ----------------- /exec/top -----------------
-        public const string Top_Ok = """
-{
-  "items": [
-    {
-      "rank": 1,
-      "key": { "serviceId": "payments-api", "endpoint": "/payments/{id}" },
-      "metric": { "name": "latency", "stat": "p95", "value": 720 },
-      "supporting": { "count": 5320, "errorRate": 0.007, "throughputRps": 14.0 }
-    },
-    {
-      "rank": 2,
-      "key": { "serviceId": "auth-svc", "endpoint": "/token" },
-      "metric": { "name": "latency", "stat": "p95", "value": 680 },
-      "supporting": { "count": 8070, "errorRate": 0.003, "throughputRps": 22.4 }
-    }
-  ],
-  "meta": { "from": "2025-08-11T16:00:00Z", "to": "2025-08-11T17:00:00Z", "by": "latency", "stat": "p95", "limit": 5 }
-}
-""";
+        /// <summary>
+        /// Habilita o deshabilita (baja lógica) un servicio.
+        /// </summary>
+        /// <param name="serviceId">ID del servicio.</param>
+        /// <param name="request">Estado deseado.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con enabled final.</returns>
+        /// <remarks>PATCH /api/v1/services/{serviceId}/enable?demo=ok</remarks>
+        [HttpPatch("{serviceId}/enable")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult Enable([FromRoute] string serviceId, [FromBody] EnableServiceRequest request, [FromQuery] string? demo = "ok")
+            => Content(_svc.Enable(serviceId, request, demo ?? "ok"), "application/json");
 
-        public const string Top_Fail = """
-{
-  "traceId": "c001d00d4444",
-  "code": "invalid_scope",
-  "title": "Scope no soportado",
-  "detail": "Use 'service', 'endpoint', 'method', 'service-endpoint', 'operation' o 'verb'."
-}
-""";
-
-        // ----------------- /exec/distribution -----------------
-        public const string Distribution_Ok = """
-{
-  "histogram": [
-    { "binStartMs": 0, "binEndMs": 50, "count": 820 },
-    { "binStartMs": 50, "binEndMs": 100, "count": 1320 },
-    { "binStartMs": 100, "binEndMs": 150, "count": 980 }
-  ],
-  "meta": { "from": "2025-08-11T16:00:00Z", "to": "2025-08-11T17:00:00Z", "bins": 20, "maxLatencyMs": 3000 }
-}
-""";
-
-        public const string Distribution_Fail = """
-{
-  "traceId": "0badf00dfacefeed",
-  "code": "missing_required",
-  "title": "Parámetros requeridos ausentes",
-  "detail": "Los parámetros 'from' y 'to' son obligatorios."
-}
-""";
-
-        // ----------------- /exec/live (SSE) -----------------
-        public const string SSE_Agg_1 = """
-event: stats
-data: {"windowStartUtc":"2025-08-11T16:05:00Z","windowEndUtc":"2025-08-11T16:05:05Z","count":210,"success":208,"errors":2,"errorRate":0.0095,"latency":{"avgMs":190,"p95Ms":410},"throughputRps":42.0}
-
-""";
-
-        public const string SSE_Agg_2 = """
-event: stats
-data: {"windowStartUtc":"2025-08-11T16:05:05Z","windowEndUtc":"2025-08-11T16:05:10Z","count":195,"success":193,"errors":2,"errorRate":0.0103,"latency":{"avgMs":200,"p95Ms":430},"throughputRps":39.0}
-
-""";
-
-        public const string SSE_Raw_1 = """
-event: exec
-data: {"timestampUtc":"2025-08-11T16:05:02Z","serviceId":"payments-api","endpoint":"/payments/{id}","method":"GET","statusCode":200,"latencyMs":142,"traceId":"7b2c7f2d9d2e4a1a"}
-
-""";
-
-        public const string SSE_Raw_2 = """
-event: exec
-data: {"timestampUtc":"2025-08-11T16:05:03Z","serviceId":"payments-api","endpoint":"/payments","method":"POST","statusCode":500,"latencyMs":910,"traceId":"a13f0c29dd5c4b0e"}
-
-""";
-
-        public const string SSE_Error = """
-event: error
-data: {"traceId":"feedbeef1234","code":"stream_unavailable","title":"Stream no disponible","detail":"Simulación de error en modo demo=fail."}
-
-""";
+        /// <summary>
+        /// Elimina (o marca eliminado) un servicio del catálogo.
+        /// </summary>
+        /// <param name="serviceId">ID del servicio.</param>
+        /// <param name="demo">"ok" o "fail".</param>
+        /// <returns>JSON literal con deleted=true o error simulado.</returns>
+        /// <remarks>DELETE /api/v1/services/{serviceId}?demo=ok</remarks>
+        [HttpDelete("{serviceId}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public IActionResult Delete([FromRoute] string serviceId, [FromQuery] string? demo = "ok")
+            => Content(_svc.Delete(serviceId, demo ?? "ok"), "application/json");
     }
 }
+
+
+
+builder.Services.AddScoped<MonitoringApi.Services.IServicesCatalogService, MonitoringApi.Services.ServicesCatalogService>();
+
 
 
