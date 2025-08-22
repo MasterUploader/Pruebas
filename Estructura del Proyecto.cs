@@ -1,86 +1,103 @@
-Tengo un problema, en esta vista de mensajes siempre esta activado la opción de actualizar cuando deberia dar clic en cual fila deseo actualizar, porque así como esta ahorita siempre toma el primer elemento, a pesar que no es el que quiero actualiza.
-    Te dejo el codigo de la vista para que lo revises:
+@model List<CAUAdministracion.Models.MensajeModel>
+@using Microsoft.AspNetCore.Mvc.Rendering
 
-@model List<MensajeModel>
 @{
     ViewData["Title"] = "Mantenimiento de Mensajes";
-    var codccoActual = Context.Request.Query["codcco"].ToString();
+    var agencias = ViewBag.Agencias as List<SelectListItem>;
+    var codccoSel = ViewBag.CodccoSeleccionado as string;
 }
 
 <h2 class="text-danger">@ViewData["Title"]</h2>
 
+<!-- Filtro por Agencia -->
 <div class="mb-3">
-    <form method="get" asp-controller="Messages" asp-action="Index">
+    <form method="get" asp-controller="Messages" asp-action="Index" class="d-inline">
         <label for="codcco">Agencia:</label>
-        <select name="codcco" class="form-select" style="width: 300px; display:inline-block;" onchange="this.form.submit()">
+        <select id="codcco" name="codcco" class="form-select d-inline-block" style="width: 320px" onchange="this.form.submit()">
             <option value="">-- Seleccione Agencia --</option>
-               @foreach (var agencia in ViewBag.Agencias as List<SelectListItem>)
+            @if (agencias != null)
+            {
+                foreach (var a in agencias)
                 {
-                    var selected = (agencia.Value == ViewBag.CodccoSeleccionado) ? "selected" : "";
-                    @:<option value="@agencia.Value" @selected>@agencia.Text</option>
+                    var selected = (a.Value == codccoSel) ? "selected" : "";
+                    @:<option value="@a.Value" @selected>@a.Text</option>
                 }
+            }
         </select>
     </form>
 </div>
 
 @if (Model != null && Model.Any())
 {
-    <form asp-action="Actualizar" method="post">
-        <table class="table table-bordered table-striped">
-            <thead class="table-dark">
+    <table class="table table-bordered table-striped align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th style="width:110px">Código</th>
+                <th style="width:120px">Secuencia</th>
+                <th>Mensaje</th>
+                <th style="width:160px">Estado</th>
+                <th style="width:120px">Actualizar</th>
+                <th style="width:120px">Eliminar</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model)
+            {
+                var formUpdateId = $"f-upd-{item.Codcco}-{item.CodMsg}";
+                var formDeleteId = $"f-del-{item.Codcco}-{item.CodMsg}";
                 <tr>
-                    <th>Código</th>
-                    <th>Secuencia</th>
-                    <th>Mensaje</th>
-                    <th>Estado</th>
-                    <th>Actualizar</th>
-                    <th>Eliminar</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var item in Model)
-                {
-                    <tr>
-                        <td>
+                    <!-- Formulario de ACTUALIZAR (oculto) -->
+                    <td colspan="6" class="p-0">
+                        <form id="@formUpdateId" asp-controller="Messages" asp-action="Actualizar" method="post">
+                            @Html.AntiForgeryToken()
                             <input type="hidden" name="Codcco" value="@item.Codcco" />
                             <input type="hidden" name="CodMsg" value="@item.CodMsg" />
-                            @item.CodMsg
-                        </td>
-                        <td>
-                            @item.Seq
-                        </td>
-                        <td>
-                            <input type="text" name="Mensaje" value="@item.Mensaje" class="form-control" />
-                        </td>
-                        <td>
-                            <select name="Estado" class="form-select form-select-sm me-2">
-                        @if (item.Estado == "A")
-                        {
-                            <option value="A" selected>Activo</option>
-                            <option value="I">Inactivo</option>
-                        }
-                        else
-                        {
-                            <option value="A">Activo</option>
-                            <option value="I" selected>Inactivo</option>
-                        }
-                    </select>
-                        </td>
-                        <td>
-                            <button type="submit" formaction="@Url.Action("Actualizar", "Messages")" class="btn btn-sm btn-success">Actualizar</button>
-                        </td>
-                        <td>
-                            <form method="post" asp-action="Eliminar">
-                                <input type="hidden" name="CodMsg" value="@item.CodMsg" />
-                                <input type="hidden" name="Codcco" value="@item.Codcco" />
-                                <button type="submit" formaction="@Url.Action("Eliminar", "Messages")" class="btn btn-sm btn-danger" onclick="return confirm('¿Está seguro de eliminar este mensaje?');">Eliminar</button>
-                            </form>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </form>
+                        </form>
+
+                        <!-- Formulario de ELIMINAR (oculto) -->
+                        <form id="@formDeleteId" asp-controller="Messages" asp-action="Eliminar" method="post">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="Codcco" value="@item.Codcco" />
+                            <input type="hidden" name="CodMsg" value="@item.CodMsg" />
+                        </form>
+                    </td>
+                </tr>
+                <tr>
+                    <td>@item.CodMsg</td>
+                    <td>@item.Seq</td>
+                    <td>
+                        <!-- Este input pertenece al form de actualizar de ESTA fila -->
+                        <input type="text"
+                               name="Mensaje"
+                               form="@formUpdateId"
+                               value="@item.Mensaje"
+                               class="form-control" />
+                    </td>
+                    <td>
+                        <select name="Estado" form="@formUpdateId" class="form-select form-select-sm">
+                            <option value="A" @(item.Estado == "A" ? "selected" : "")>Activo</option>
+                            <option value="I" @(item.Estado == "I" ? "selected" : "")>Inactivo</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button type="submit"
+                                form="@formUpdateId"
+                                class="btn btn-sm btn-success w-100">
+                            Actualizar
+                        </button>
+                    </td>
+                    <td>
+                        <button type="submit"
+                                form="@formDeleteId"
+                                class="btn btn-sm btn-danger w-100"
+                                onclick="return confirm('¿Está seguro de eliminar este mensaje?');">
+                            Eliminar
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
 }
 else
 {
@@ -92,7 +109,10 @@ else
 
 
 
+
 @model CAUAdministracion.Models.MensajeModel
+@using Microsoft.AspNetCore.Mvc.Rendering
+
 @{
     ViewData["Title"] = "Agregar Mensaje";
     var agencias = ViewBag.Agencias as List<SelectListItem>;
@@ -108,26 +128,31 @@ else
     </div>
 }
 
-<form asp-action="Agregar" method="post">
+<form asp-action="Agregar" asp-controller="Messages" method="post">
+    @Html.AntiForgeryToken()
+
     <div class="mb-3">
         <label for="codcco" class="form-label">Agencia</label>
-        <select id="codcco" name="Codcco" class="form-select" asp-for="Codcco" required>
+        <select id="codcco" name="Codcco" class="form-select" required>
             <option value="">Seleccione una agencia</option>
-            @foreach (var agencia in agencias)
+            @if (agencias != null)
             {
-                <option value="@agencia.Value">@agencia.Text</option>
+                foreach (var a in agencias)
+                {
+                    <option value="@a.Value">@a.Text</option>
+                }
             }
         </select>
     </div>
 
     <div class="mb-3">
         <label for="mensaje" class="form-label">Mensaje</label>
-        <textarea class="form-control" id="mensaje" name="Mensaje" rows="4" required>@Model?.Mensaje</textarea>
+        <textarea id="mensaje" name="Mensaje" class="form-control" rows="4" required>@Model?.Mensaje</textarea>
     </div>
 
     <div class="mb-3">
         <label for="estado" class="form-label">Estado</label>
-        <select id="estado" name="Estado" class="form-select" asp-for="Estado" required>
+        <select id="estado" name="Estado" class="form-select" required>
             <option value="A" selected>Activo</option>
             <option value="I">Inactivo</option>
         </select>
@@ -136,7 +161,3 @@ else
     <button type="submit" class="btn btn-primary">Guardar</button>
     <a asp-controller="Messages" asp-action="Index" class="btn btn-secondary ms-2">Cancelar</a>
 </form>
-
-
-
-Entregame el codigo corregio completo listo para copiar y pegar
