@@ -2,60 +2,58 @@
 namespace MonitoringApi.Data
 {
     /// <summary>
-    /// Respuestas JSON en duro para el segmento de Histórico.
+    /// Respuestas JSON en duro para el segmento de Seguridad / Referencias.
     /// </summary>
-    public static class HardcodedHistoryPayloads
+    public static class HardcodedAuthRefsPayloads
     {
-        // -------- GET /api/v1/history (vía query serviceId)
-        public const string Query_Ok = """
-{
-  "points": [
-    { "t": "2025-08-11T16:00:00Z", "status": "Healthy",  "latencyMs": 150 },
-    { "t": "2025-08-11T16:05:00Z", "status": "Degraded", "latencyMs": 420 },
-    { "t": "2025-08-11T16:10:00Z", "status": "Healthy",  "latencyMs": 130 }
-  ],
-  "meta": {
-    "serviceId": "payments-api",
-    "from": "2025-08-11T16:00:00Z",
-    "to":   "2025-08-11T17:00:00Z",
-    "downsample": "1m",
-    "note": "El parámetro 'format' es ignorado en el mock (siempre JSON)."
+        // -------- GET /api/v1/auth/refs
+        public const string List_Ok = """
+[
+  {
+    "authRef": "vault:kv/app/payments",
+    "type": "ApiKey",
+    "owner": "Payments",
+    "meta": { "rotation": "30d", "note": "Clave de integraciones externas" }
+  },
+  {
+    "authRef": "vault:kv/app/auth-svc",
+    "type": "Bearer",
+    "owner": "Security",
+    "meta": { "rotation": "90d", "audience": "idp", "scopes": ["openid","profile"] }
+  },
+  {
+    "authRef": "vault:pki/mtls/gateway",
+    "type": "MTLS",
+    "owner": "Core",
+    "meta": { "rotation": "cert:365d", "cn": "gw.internal", "san": ["gw.internal"] }
   }
+]
+""";
+
+        public const string List_Fail = """
+{
+  "traceId": "authrefs-list-err01",
+  "code": "forbidden",
+  "title": "No autorizado",
+  "detail": "Tu credencial no puede listar referencias de autenticación."
 }
 """;
 
-        public const string Query_Fail = """
+        // -------- POST /api/v1/auth/refs (upsert)
+        public const string Upsert_Ok = """
 {
-  "traceId": "histq-bad0001",
-  "code": "invalid_range",
-  "title": "Rango de tiempo no válido",
-  "detail": "'from' debe ser anterior a 'to'."
+  "authRef": "vault:kv/app/auth-svc",
+  "saved": true,
+  "updatedAtUtc": "2025-08-11T17:05:00Z"
 }
 """;
 
-        // -------- GET /api/v1/history/{serviceId}
-        public const string ById_Ok = """
+        public const string Upsert_Fail = """
 {
-  "points": [
-    { "t": "2025-08-11T16:00:00Z", "status": "Healthy", "latencyMs": 150 },
-    { "t": "2025-08-11T16:30:00Z", "status": "Healthy", "latencyMs": 170 },
-    { "t": "2025-08-11T17:00:00Z", "status": "Healthy", "latencyMs": 160 }
-  ],
-  "meta": {
-    "serviceId": "payments-api",
-    "from": "2025-08-11T16:00:00Z",
-    "to":   "2025-08-11T17:00:00Z",
-    "downsample": "1m"
-  }
-}
-""";
-
-        public const string ById_Fail = """
-{
-  "traceId": "histid-deadbeef",
-  "code": "service_not_found",
-  "title": "Servicio no encontrado",
-  "detail": "El serviceId solicitado no existe en el catálogo."
+  "traceId": "authrefs-upsert-err01",
+  "code": "validation_error",
+  "title": "Datos inválidos",
+  "detail": "El campo 'authRef' es requerido y debe iniciar con 'vault:' o 'azurekeyvault:' o 'aws:'."
 }
 """;
     }
@@ -65,18 +63,57 @@ namespace MonitoringApi.Data
 
 
 #nullable enable
+using System.ComponentModel.DataAnnotations;
+
+namespace MonitoringApi.Models
+{
+    /// <summary>
+    /// Solicitud de upsert para una referencia a credencial (solo metadatos).
+    /// </summary>
+    public class UpsertAuthRefRequest
+    {
+        /// <summary>
+        /// Ruta o identificador de la credencial en el gestor de secretos (p.ej. "vault:kv/app/payments").
+        /// </summary>
+        [Required]
+        public string AuthRef { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Tipo de autenticación: ApiKey, Basic, Bearer, MTLS, OAuth2CC (client credentials) o Custom.
+        /// </summary>
+        [Required]
+        public string Type { get; set; } = "ApiKey";
+
+        /// <summary>
+        /// Dueño/equipo responsable de la credencial (p.ej., "Security", "Payments").
+        /// </summary>
+        public string? Owner { get; set; }
+
+        /// <summary>
+        /// Metadatos no sensibles (rotación, audiencia, scopes, descripción, etc.).
+        /// </summary>
+        public Dictionary<string, object>? Meta { get; set; }
+    }
+}
+
+
+
+
+#nullable enable
+using MonitoringApi.Models;
+
 namespace MonitoringApi.Services
 {
     /// <summary>
-    /// Contrato para obtener histórico (mock, JSON en duro).
+    /// Contrato para gestionar referencias de autenticación (metadatos, mock).
     /// </summary>
-    public interface IHistoryService
+    public interface IAuthRefsService
     {
-        /// <summary>JSON literal de GET /api/v1/history (vía query serviceId).</summary>
-        string GetHistory(string? serviceId, string demo);
+        /// <summary>JSON literal para GET /api/v1/auth/refs.</summary>
+        string GetList(string demo);
 
-        /// <summary>JSON literal de GET /api/v1/history/{serviceId}.</summary>
-        string GetHistoryById(string serviceId, string demo);
+        /// <summary>JSON literal para POST /api/v1/auth/refs (upsert).</summary>
+        string Upsert(UpsertAuthRefRequest request, string demo);
     }
 }
 
@@ -85,23 +122,24 @@ namespace MonitoringApi.Services
 
 #nullable enable
 using MonitoringApi.Data;
+using MonitoringApi.Models;
 
 namespace MonitoringApi.Services
 {
     /// <summary>
-    /// Implementación mock que devuelve JSON literal desde constantes.
+    /// Implementación mock que retorna JSON literal desde constantes.
     /// </summary>
-    public class HistoryService : IHistoryService
+    public class AuthRefsService : IAuthRefsService
     {
-        public string GetHistory(string? serviceId, string demo)
+        public string GetList(string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedHistoryPayloads.Query_Fail
-                : HardcodedHistoryPayloads.Query_Ok;
+                ? HardcodedAuthRefsPayloads.List_Fail
+                : HardcodedAuthRefsPayloads.List_Ok;
 
-        public string GetHistoryById(string serviceId, string demo)
+        public string Upsert(UpsertAuthRefRequest request, string demo)
             => (demo?.ToLowerInvariant() == "fail")
-                ? HardcodedHistoryPayloads.ById_Fail
-                : HardcodedHistoryPayloads.ById_Ok;
+                ? HardcodedAuthRefsPayloads.Upsert_Fail
+                : HardcodedAuthRefsPayloads.Upsert_Ok;
     }
 }
 
@@ -111,76 +149,69 @@ namespace MonitoringApi.Services
 #nullable enable
 using Microsoft.AspNetCore.Mvc;
 using MonitoringApi.Services;
+using MonitoringApi.Models;
 
 namespace MonitoringApi.Controllers
 {
     /// <summary>
-    /// Endpoints para consultar histórico de resultados por servicio (series de puntos).
-    /// MOCK: Respuestas en duro controladas por el query param ?demo=ok|fail.
+    /// Administra referencias a credenciales/secretos (metadatos).
+    /// MOCK: respuestas en duro con ?demo=ok|fail. No almacena secretos reales.
     /// </summary>
     [ApiController]
-    [Route("api/v1/history")]
+    [Route("api/v1/auth/refs")]
     [Produces("application/json")]
-    public class HistoryController : ControllerBase
+    public class AuthRefsController : ControllerBase
     {
-        private readonly IHistoryService _service;
+        private readonly IAuthRefsService _service;
 
-        public HistoryController(IHistoryService service)
+        public AuthRefsController(IAuthRefsService service)
         {
             _service = service;
         }
 
         /// <summary>
-        /// Histórico por serviceId vía querystring (atajo flexible).
+        /// Lista referencias a credenciales (solo metadatos, nunca el secreto).
         /// </summary>
-        /// <param name="serviceId">Identificador lógico del servicio.</param>
-        /// <param name="from">Inicio de ventana (ISO-8601 UTC). No se valida en el mock.</param>
-        /// <param name="to">Fin de ventana (ISO-8601 UTC). No se valida en el mock.</param>
-        /// <param name="downsample">1m, 5m, 1h (no aplicado en el mock).</param>
-        /// <param name="format">ndjson|csv (ignorado en el mock; siempre JSON).</param>
-        /// <param name="demo">"ok" (default) o "fail".</param>
-        /// <returns>JSON literal con puntos y meta, o error simulado.</returns>
-        /// <remarks>
-        /// GET /api/v1/history?serviceId=payments-api&amp;from=2025-08-11T16:00:00Z&amp;to=2025-08-11T17:00:00Z&amp;downsample=1m&amp;demo=ok
-        /// </remarks>
+        /// <param name="type">Filtro opcional por tipo (ApiKey, Basic, Bearer, MTLS, OAuth2CC, Custom). No aplica en el mock.</param>
+        /// <param name="owner">Filtro opcional por dueño/equipo. No aplica en el mock.</param>
+        /// <param name="demo">"ok" (default) o "fail" para forzar la respuesta simulada de error.</param>
+        /// <returns>JSON literal con el inventario de referencias o error simulado.</returns>
+        /// <remarks>GET /api/v1/auth/refs?demo=ok</remarks>
         [HttpGet]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetViaQuery(
-            [FromQuery] string? serviceId,
-            [FromQuery] string? from,
-            [FromQuery] string? to,
-            [FromQuery] string? downsample,
-            [FromQuery] string? format,
-            [FromQuery] string? demo = "ok")
-            => Content(_service.GetHistory(serviceId, demo ?? "ok"), "application/json");
+        public IActionResult GetMany([FromQuery] string? type, [FromQuery] string? owner, [FromQuery] string? demo = "ok")
+            => Content(_service.GetList(demo ?? "ok"), "application/json");
 
         /// <summary>
-        /// Histórico por serviceId (ruta dedicada).
+        /// Crea o actualiza (upsert) una referencia (metadatos) a una credencial.
         /// </summary>
-        /// <param name="serviceId">Identificador lógico del servicio.</param>
-        /// <param name="from">Inicio de ventana (ISO-8601 UTC). No se valida en el mock.</param>
-        /// <param name="to">Fin de ventana (ISO-8601 UTC). No se valida en el mock.</param>
-        /// <param name="downsample">1m, 5m, 1h (no aplicado en el mock).</param>
+        /// <param name="request">Datos de la referencia. <b>No enviar secretos reales aquí</b>.</param>
         /// <param name="demo">"ok" o "fail".</param>
-        /// <returns>JSON literal con puntos y meta, o error simulado.</returns>
+        /// <returns>JSON literal con saved=true y marca temporal o error simulado.</returns>
         /// <remarks>
-        /// GET /api/v1/history/payments-api?from=2025-08-11T16:00:00Z&amp;to=2025-08-11T17:00:00Z&amp;downsample=1m&amp;demo=ok
+        /// POST /api/v1/auth/refs?demo=ok
+        /// Body mínimo:
+        /// { "authRef": "vault:kv/app/auth-svc", "type": "Bearer", "owner": "Security" }
         /// </remarks>
-        [HttpGet("{serviceId}")]
+        [HttpPost]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public IActionResult GetByServiceId(
-            [FromRoute] string serviceId,
-            [FromQuery] string? from,
-            [FromQuery] string? to,
-            [FromQuery] string? downsample,
-            [FromQuery] string? demo = "ok")
-            => Content(_service.GetHistoryById(serviceId, demo ?? "ok"), "application/json");
+        public IActionResult Upsert([FromBody] UpsertAuthRefRequest request, [FromQuery] string? demo = "ok")
+            => Content(_service.Upsert(request, demo ?? "ok"), "application/json");
     }
 }
 
 
 
-builder.Services.AddScoped<MonitoringApi.Services.IHistoryService, MonitoringApi.Services.HistoryService>();
+
+
+builder.Services.AddScoped<MonitoringApi.Services.IAuthRefsService, MonitoringApi.Services.AuthRefsService>();
+
+
+
+
+
+
+
 
 
 
