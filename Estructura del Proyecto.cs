@@ -536,4 +536,141 @@ namespace QueryBuilder.Builders
             if (caseWhen == null) throw new ArgumentNullException(nameof(caseWhen));
 
             var expression = caseWhen.Build();
-            if (!string.IsNullOrW
+            if (!string.IsNullOrWhiteSpace(alias))
+                expression += $" AS {alias}"; // Se tolera, aunque ORDER BY no requiere alias
+
+            _orderBy.Add((caseWhen.Build(), direction));
+            return this;
+        }
+
+        // ====== Build (SQL final) ======
+
+        /// <summary>
+        /// Construye y retorna el SQL resultante.
+        /// </summary>
+        public QueryResult Build()
+        {
+            var sb = new StringBuilder();
+
+            // WITH / CTEs
+            if (_ctes.Count > 0)
+            {
+                sb.Append("WITH ");
+                sb.Append(string.Join(", ", _ctes.Select(cte => cte.ToString())));
+                sb.AppendLine();
+            }
+
+            // SELECT
+            sb.Append("SELECT ");
+            if (_distinct) sb.Append("DISTINCT ");
+
+            if (_columns.Count == 0)
+            {
+                sb.Append('*');
+            }
+            else
+            {
+                var colParts = _columns.Select(c =>
+                {
+                    // Si ya viene "AS ..." incrustado, respetar
+                    if (HasExplicitAlias(c.Column))
+                        return c.Column;
+
+                    // Si hay alias separado, agregar "AS ..."
+                    if (!string.IsNullOrWhiteSpace(c.Alias))
+                        return $"{c.Column} AS {c.Alias}";
+
+                    // En caso contrario, imprimir literal
+                    return c.Column;
+                });
+
+                sb.Append(string.Join(", ", colParts));
+            }
+
+            // FROM
+            sb.Append(" FROM ");
+            if (_derivedTable != null)
+            {
+                sb.Append(_derivedTable.ToString());
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(_library))
+                    sb.Append($"{_library}.");
+                sb.Append(_tableName);
+                if (!string.IsNullOrWhiteSpace(_tableAlias))
+                    sb.Append($" {_tableAlias}");
+            }
+
+            // JOINs
+            foreach (var join in _joins)
+            {
+                sb.Append(' ');
+                sb.Append(join.JoinType);
+                sb.Append(" JOIN ");
+                if (!string.IsNullOrWhiteSpace(join.Library))
+                    sb.Append($"{join.Library}.");
+
+                sb.Append(join.TableName);
+
+                if (!string.IsNullOrWhiteSpace(join.Alias))
+                    sb.Append($" {join.Alias}");
+
+                // Condición ON
+                if (!string.IsNullOrWhiteSpace(join.LeftColumn) && !string.IsNullOrWhiteSpace(join.RightColumn))
+                {
+                    sb.Append(" ON ");
+                    sb.Append($"{join.LeftColumn} = {join.RightColumn}");
+                }
+            }
+
+            // WHERE
+            if (!string.IsNullOrWhiteSpace(WhereClause))
+            {
+                sb.Append(" WHERE ");
+                sb.Append(WhereClause);
+            }
+
+            // GROUP BY
+            if (_groupBy.Count > 0)
+            {
+                sb.Append(" GROUP BY ");
+                sb.Append(string.Join(", ", _groupBy));
+            }
+
+            // HAVING
+            if (!string.IsNullOrWhiteSpace(HavingClause))
+            {
+                sb.Append(" HAVING ");
+                sb.Append(HavingClause);
+            }
+
+            // ORDER BY
+            if (_orderBy.Count > 0)
+            {
+                sb.Append(" ORDER BY ");
+                sb.Append(string.Join(", ", _orderBy.Select(o =>
+                {
+                    // Si la dirección es None, no imprimimos ASC/DESC
+                    return o.Direction == SortDirection.None
+                        ? o.Column
+                        : $"{o.Column} {(o.Direction == SortDirection.Desc ? "DESC" : "ASC")}";
+                })));
+            }
+
+            // Paginación (OFFSET / FETCH) para motores que lo soporten (AS400 / DB2 iSeries soporta FETCH FIRST)
+            if (_offset.HasValue)
+                sb.Append($" OFFSET {_offset.Value} ROWS");
+
+            if (_fetch.HasValue)
+                sb.Append($" FETCH NEXT {_fetch.Value} ROWS ONLY");
+            else if (_limit.HasValue)
+                sb.Append($" FETCH FIRST {_limit.Value} ROWS ONLY");
+
+            return new QueryResult
+            {
+                Sql = sb.ToString()
+            };
+        }
+    }
+}
