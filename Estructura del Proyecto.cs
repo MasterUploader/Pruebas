@@ -1,185 +1,124 @@
-Sigue sin funcionar
-Este es el modelo que quiero utilizar, solo le faltaria Agregar PASS
+using System.ComponentModel.DataAnnotations;
 
-    [Required, MaxLength(32)]
-    public string Usuario { get; set; } = string.Empty;
-
-    /// <summary>1 = Administrador, 2 = Admin. Videos, 3 = Admin. Mensajes</summary>
-    [Range(1, 3)]
-    public int TipoUsuario { get; set; }
-
-    /// <summary>A = Activo, I = Inactivo</summary>
-    [Required, RegularExpression("A|I")]
-    public string Estado { get; set; } = "A";
-
-
-Este es el Index.cshtml
-@using X.PagedList
-@using X.PagedList.Mvc.Core
-@model IPagedList<object>  
-@* Usa object para evitar errores de tipo si tu UsuarioModel no coincide *@
-
-@{
-    ViewData["Title"] = "Administración de Usuarios";
-
-    // Filtros que envía el controlador en ViewBag
-    var q         = ViewBag.Q as string;
-    var tipoSel   = ViewBag.TipoSel?.ToString();
-    var estadoSel = ViewBag.EstadoSel?.ToString();
-}
-
-<h2 class="text-danger">@ViewData["Title"]</h2>
-
-@if (TempData["Mensaje"] != null)
+namespace CAUAdministracion.Models
 {
-    <div id="autoclose-alert" class="alert alert-info alert-dismissible fade show" role="alert">
-        @TempData["Mensaje"]
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-}
+    /// <summary>Modelo de edición para USUADMIN.</summary>
+    public class UsuarioEditModel
+    {
+        [Required, MaxLength(32)]
+        public string Usuario { get; set; } = string.Empty;
 
-<form method="get" asp-controller="Usuarios" asp-action="Index" class="row g-3 mb-3">
-    <div class="col-md-4">
-        <label class="form-label">Usuario</label>
-        <input type="text" name="q" value="@(q ?? "")" class="form-control" placeholder="Buscar por usuario..." />
-    </div>
+        /// <summary>1 = Administrador, 2 = Admin. Videos, 3 = Admin. Mensajes</summary>
+        [Range(1, 3)]
+        public int TipoUsuario { get; set; }
 
-    <div class="col-md-3">
-        <label class="form-label">Tipo</label>
-        <select name="tipo" class="form-select">
-            <option value="">-- Todos --</option>
-            @* Sin C# en atributos; usamos if/else para “selected” *@
-            @if (tipoSel == "1")
-            { <option value="1" selected>Administrador</option> }
-            else
-            { <option value="1">Administrador</option> }
+        /// <summary>A = Activo, I = Inactivo</summary>
+        [Required, RegularExpression("A|I")]
+        public string Estado { get; set; } = "A";
 
-            @if (tipoSel == "2")
-            { <option value="2" selected>Admin. Videos</option> }
-            else
-            { <option value="2">Admin. Videos</option> }
-
-            @if (tipoSel == "3")
-            @if (tipoSel == "3")
-            { <option value="3" selected>Admin. Mensajes</option> }
-            else
-            { <option value="3">Admin. Mensajes</option> }
-        </select>
-    </div>
-
-    <div class="col-md-3">
-        <label class="form-label">Estado</label>
-        <select name="estado" class="form-select">
-            <option value="">-- Todos --</option>
-            @if (estadoSel == "A")
-            { <option value="A" selected>Activo</option> }
-            else
-            { <option value="A">Activo</option> }
-
-            @if (estadoSel == "I")
-            { <option value="I" selected>Inactivo</option> }
-            else
-            { <option value="I">Inactivo</option> }
-        </select>
-    </div>
-
-    <div class="col-md-2 d-grid">
-        <label class="form-label d-none d-md-block">&nbsp;</label>
-        <button type="submit" class="btn btn-primary">Filtrar</button>
-    </div>
-</form>
-
-<div class="mb-3">
-    <a asp-controller="Usuarios" asp-action="Agregar" class="btn btn-success">Agregar nuevo usuario</a>
-</div>
-
-@if (Model != null && Model.Any())
-{
-    <table class="table table-bordered table-striped align-middle">
-        <thead class="table-dark">
-        <tr>
-            <th>Usuario</th>
-            <th>Tipo</th>
-            <th>Estado</th>
-            <th style="width:160px">Acciones</th>
-        </tr>
-        </thead>
-        <tbody>
-        @foreach (var u in Model)
-        {
-            // ==== Lectura segura de propiedades ====
-            var t = u.GetType();
-
-            string usuario  = t.GetProperty("Usuario")?.GetValue(u)?.ToString() ?? "";
-            int    tipoInt  = 0;
-            var    pTipo    = t.GetProperty("TipoUsu") ?? t.GetProperty("TipUsu") ?? t.GetProperty("TipoUsuario");
-            if (pTipo != null)
-            {
-                var tmp = pTipo.GetValue(u);
-                if (tmp != null && int.TryParse(tmp.ToString(), out var v)) tipoInt = v;
-            }
-
-            string estado   = t.GetProperty("Estado")?.GetValue(u)?.ToString() ?? "";
-
-            string tipoTxt = tipoInt switch
-            {
-                1 => "Administrador",
-                2 => "Admin. Videos",
-                3 => "Admin. Mensajes",
-                _ => $"Tipo {tipoInt}"
-            };
-            string estadoTxt = (estado == "A") ? "Activo" : "Inactivo";
-            // ==========================================================================
-
-            <tr>
-                <td>@usuario</td>
-                <td>@tipoTxt</td>
-                <td>@estadoTxt</td>
-                <td class="text-nowrap">
-                       <a asp-controller="Usuarios" asp-action="Actualizar" asp-route-id="@usuario"  class="btn btn-sm btn-warning me-2">Editar</a>
-
-                    <form asp-controller="Usuarios"
-                          asp-action="Eliminar"
-                          asp-route-usuario="@usuario"
-                          method="post"
-                          class="d-inline"
-                          onsubmit="return confirm('¿Eliminar el usuario @usuario?');">
-                        @Html.AntiForgeryToken()
-                        <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
-                    </form>
-                </td>
-            </tr>
-        }
-        </tbody>
-    </table>
-
-    <div class="d-flex justify-content-center">
-        @Html.PagedListPager(
-            Model,
-            page => Url.Action("Index", new { page, q, tipo = tipoSel, estado = estadoSel }),
-            new PagedListRenderOptions {
-                UlElementClasses = new[] { "pagination", "justify-content-center" },
-                LiElementClasses = new[] { "page-item" },
-                PageClasses      = new[] { "page-link" },
-                DisplayLinkToFirstPage   = PagedListDisplayMode.Always,
-                DisplayLinkToLastPage    = PagedListDisplayMode.Always,
-                DisplayLinkToPreviousPage= PagedListDisplayMode.Always,
-                DisplayLinkToNextPage    = PagedListDisplayMode.Always,
-                MaximumPageNumbersToDisplay = 7
-            })
-    </div>
-}
-else
-{
-    <div class="alert alert-info">No se encontraron usuarios con los criterios seleccionados.</div>
-}
-
-@section Scripts{
-<script>
-    // Cierra alerts en 5s
-    setTimeout(function(){
-        var el = document.getElementById('autoclose-alert');
-        if (el) { var alert = bootstrap.Alert.getOrCreateInstance(el); alert.close(); }
-    }, 5000);
-</script>
+        /// <summary>Contraseña nueva (opcional). Si viene vacía, no se actualiza.</summary>
+        [MaxLength(128)]
+        public string? PASS { get; set; }
     }
+}
+
+
+// GET: /Usuarios/Actualizar?usuario=alguien
+[HttpGet, AutorizarPorTipoUsuario("1")]
+public IActionResult Actualizar(string usuario)
+{
+    var model = _usuarioService.ObtenerPorId(usuario);
+    if (model == null) return NotFound();
+    return View(model);
+}
+
+// POST: /Usuarios/Actualizar
+[HttpPost, ValidateAntiForgeryToken, AutorizarPorTipoUsuario("1")]
+public async Task<IActionResult> Actualizar(UsuarioEditModel model)
+{
+    if (!ModelState.IsValid) return View(model);
+
+    var ok = await _usuarioService.Actualizar(model);
+    TempData["Mensaje"] = ok ? "Usuario actualizado." : "No se pudo actualizar.";
+    TempData["MensajeTipo"] = ok ? "success" : "danger";
+    return RedirectToAction("Index");
+}
+
+
+public UsuarioEditModel? ObtenerPorId(string usuario)
+{
+    try
+    {
+        _as400.Open();
+        if (!_as400.IsConnected) return null;
+
+        using var command = _as400.GetDbCommand(_httpContextAccessor.HttpContext!);
+
+        var query = QueryBuilder.Core.QueryBuilder
+            .From("USUADMIN", "BCAH96DTA")
+            .Select("USUARIO", "TIPUSU", "ESTADO")
+            .WhereRaw($"USUARIO = '{usuario}'")
+            .Build();
+
+        command.CommandText = query.Sql;
+        if (command.Connection?.State == System.Data.ConnectionState.Closed)
+            command.Connection.Open();
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+
+        return new UsuarioEditModel
+        {
+            Usuario     = reader["USUARIO"]?.ToString() ?? "",
+            TipoUsuario = Convert.ToInt32(reader["TIPUSU"]),
+            Estado      = reader["ESTADO"]?.ToString() ?? "A",
+            PASS        = null // por seguridad, no se expone
+        };
+    }
+    catch { return null; }
+    finally { _as400.Close(); }
+}
+
+
+public async Task<bool> Actualizar(UsuarioEditModel model)
+{
+    if (model is null || string.IsNullOrWhiteSpace(model.Usuario)) return false;
+    if (model.TipoUsuario is < 1 or > 3) return false;
+    if (model.Estado is not ("A" or "I")) return false;
+
+    // ¿Hay nueva clave?
+    if (!string.IsNullOrWhiteSpace(model.PASS))
+    {
+        var passCifrada = OperacionesVarias.EncriptarCadena(model.PASS);
+
+        try
+        {
+            _as400.Open();
+            if (!_as400.IsConnected) return false;
+
+            using var command = _as400.GetDbCommand(_httpContextAccessor.HttpContext!);
+
+            var update = new UpdateQueryBuilder("USUADMIN", "BCAH96DTA")
+                .Set("PASS",   $"'{passCifrada}'")
+                .Set("TIPUSU", model.TipoUsuario.ToString())
+                .Set("ESTADO", $"'{model.Estado}'")
+                .WhereRaw($"USUARIO = '{model.Usuario}'")
+                .Build();
+
+            command.CommandText = update.Sql;
+            if (command.Connection?.State == System.Data.ConnectionState.Closed)
+                command.Connection.Open();
+
+            var rows = await command.ExecuteNonQueryAsync();
+            return rows > 0;
+        }
+        catch { return false; }
+        finally { _as400.Close(); }
+    }
+    else
+    {
+        // Reutiliza tu método existente para no tocar PASS
+        return await ActualizarUsuarioAsync(model.Usuario, model.Estado, model.TipoUsuario);
+    }
+}
+
