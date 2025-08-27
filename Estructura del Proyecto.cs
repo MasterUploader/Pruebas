@@ -1,14 +1,30 @@
-CREATE TABLE ApiStatusLog (
-    Id INT IDENTITY(1,1) PRIMARY KEY,            -- Identificador único
-    ApiName NVARCHAR(100) NOT NULL,              -- Nombre de la API
-    Endpoint NVARCHAR(255) NOT NULL,             -- Endpoint específico
-    HttpMethod NVARCHAR(10) NOT NULL,            -- Método HTTP (GET, POST, PUT, DELETE)
-    HttpStatusCode INT NOT NULL,                 -- Código HTTP (200, 404, 500, etc.)
-    StatusMessage NVARCHAR(255) NULL,            -- Mensaje opcional (OK, Error, Timeout, etc.)
-    ResponseTimeMs INT NULL,                     -- Tiempo de respuesta en milisegundos
-    ClientIp NVARCHAR(45) NULL,                  -- IP del cliente que consumió el endpoint
-    UserAgent NVARCHAR(255) NULL,                -- Información del cliente/navegador/app
-    CorrelationId UNIQUEIDENTIFIER NULL,         -- Identificador para rastreo de la petición
-    LoggedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME(),  -- Fecha y hora del registro
-    Environment NVARCHAR(50) NULL                -- DEV, QA, UAT, PROD
-);
+1. Crear un usuario de servicio en el servidor destino
+
+En el servidor donde está la carpeta compartida, crea un usuario local o de dominio dedicado (ej: svcWebUpload).
+
+Dale solo permisos NTFS mínimos (lectura/escritura) sobre la carpeta compartida, no sobre todo el servidor.
+
+En el compartido de red (\\ServidorDestino\CarpetaCompartida), dale también permisos de Share → Change (modificar) y Read.
+
+
+> ⚠️ Importante: No uses Everyone ni Usuarios autenticados. Solo ese usuario de servicio.
+
+
+
+
+---
+
+2. Configurar IIS para usar ese usuario
+
+En el servidor donde corre IIS:
+
+Abre IIS Manager → selecciona tu sitio → clic en Advanced Settings.
+
+En la sección Application Pool, identifica el App Pool que usa tu sitio.
+
+Abre Application Pools → selecciona ese pool → Advanced Settings.
+
+Cambia la propiedad Identity a Custom Account y asigna el usuario de servicio (svcWebUpload) que creaste.
+
+Reinicia el App Pool.
+    
