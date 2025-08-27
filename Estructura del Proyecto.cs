@@ -1,42 +1,14 @@
-@model CAUAdministracion.Models.UsuarioEditModel
-@{
-    ViewData["Title"] = "Editar usuario";
-}
-<h3>@ViewData["Title"]</h3>
-
-<form asp-action="Actualizar" method="post">
-    @Html.AntiForgeryToken()
-
-    <div class="mb-3">
-        <label class="form-label">Usuario</label>
-        <input asp-for="Usuario" class="form-control" readonly />
-    </div>
-
-    <div class="mb-3">
-        <label class="form-label">Tipo de usuario</label>
-        <select asp-for="TipoUsuario" class="form-select">
-            <option value="1">Administrador</option>
-            <option value="2">Admin. Videos</option>
-            <option value="3">Admin. Mensajes</option>
-        </select>
-        <span asp-validation-for="TipoUsuario" class="text-danger"></span>
-    </div>
-
-    <div class="mb-3">
-        <label class="form-label">Estado</label>
-        <select asp-for="Estado" class="form-select">
-            <option value="A">Activo</option>
-            <option value="I">Inactivo</option>
-        </select>
-        <span asp-validation-for="Estado" class="text-danger"></span>
-    </div>
-
-    <div class="mb-3">
-        <label class="form-label">Nueva contraseña (opcional)</label>
-        <input asp-for="PASS" class="form-control" type="password" />
-        <span class="form-text">Si la dejas vacía, no se cambiará.</span>
-    </div>
-
-    <button class="btn btn-primary" type="submit">Guardar</button>
-    <a asp-action="Index" class="btn btn-secondary">Volver</a>
-</form>
+CREATE TABLE ApiStatusLog (
+    Id INT IDENTITY(1,1) PRIMARY KEY,            -- Identificador único
+    ApiName NVARCHAR(100) NOT NULL,              -- Nombre de la API
+    Endpoint NVARCHAR(255) NOT NULL,             -- Endpoint específico
+    HttpMethod NVARCHAR(10) NOT NULL,            -- Método HTTP (GET, POST, PUT, DELETE)
+    HttpStatusCode INT NOT NULL,                 -- Código HTTP (200, 404, 500, etc.)
+    StatusMessage NVARCHAR(255) NULL,            -- Mensaje opcional (OK, Error, Timeout, etc.)
+    ResponseTimeMs INT NULL,                     -- Tiempo de respuesta en milisegundos
+    ClientIp NVARCHAR(45) NULL,                  -- IP del cliente que consumió el endpoint
+    UserAgent NVARCHAR(255) NULL,                -- Información del cliente/navegador/app
+    CorrelationId UNIQUEIDENTIFIER NULL,         -- Identificador para rastreo de la petición
+    LoggedAt DATETIME2 NOT NULL DEFAULT SYSDATETIME(),  -- Fecha y hora del registro
+    Environment NVARCHAR(50) NULL                -- DEV, QA, UAT, PROD
+);
