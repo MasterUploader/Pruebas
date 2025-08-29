@@ -1,7 +1,32 @@
 /// <summary>
-/// Agrega UNA fila desde un objeto decorado con [ColumnName] (en el orden de IntoColumns si se definió,
-/// de lo contrario en el orden de los atributos).
+/// Agrega una fila por posición (parametrizada). El orden debe coincidir con IntoColumns
+/// o, si no se definió, se infiere desde los atributos [ColumnName].
 /// </summary>
+public InsertQueryBuilder Row(params object?[] values)
+{
+    // Inicialización perezosa de columnas:
+    if (_columns.Count == 0)
+    {
+        if (_mappedColumns is { Count: > 0 })
+        {
+            _columns.AddRange(_mappedColumns.Select(c => c.ColumnName));
+        }
+        else
+        {
+            // Último intento: si Row fue llamado sin constructor por Type,
+            // no sabemos de dónde inferir; en ese caso sí lanzamos.
+            throw new InvalidOperationException("Debe llamar primero a IntoColumns(...) antes de Row(...).");
+        }
+    }
+
+    if (values is null || values.Length != _columns.Count)
+        throw new InvalidOperationException($"Se esperaban {_columns.Count} valores, pero se recibieron {values?.Length ?? 0}.");
+
+    _rows.Add(new List<object?>(values));
+    return this;
+}
+
+
 public InsertQueryBuilder FromObject(object entity)
 {
     if (entity is null) return this;
@@ -11,7 +36,6 @@ public InsertQueryBuilder FromObject(object entity)
         ? _mappedColumns
         : ModelInsertMapper.GetColumns(t);
 
-    // Orden objetivo: IntoColumns() si ya lo definiste; si no, atributos.
     var targetCols = _columns.Count > 0
         ? _columns
         : new List<string>(cols.Select(c => c.ColumnName));
@@ -25,7 +49,7 @@ public InsertQueryBuilder FromObject(object entity)
         row[i] = meta.Property.GetValue(entity);
     }
 
-    // 🔧 **Clave**: si no había columnas definidas aún, inicialízalas aquí
+    // Asegura columnas antes de llamar a Row
     if (_columns.Count == 0)
         _columns.AddRange(targetCols);
 
