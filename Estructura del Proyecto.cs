@@ -1,146 +1,94 @@
-Tengo esto actualmente, agrega el fragmento de JSON que falta, o almenos que sea en otro archivo
+Actualmente tengo el DeleteQueryBuilder Asi:
 
+using QueryBuilder.Helpers;
+using QueryBuilder.Models;
+using System;
+using System.Linq.Expressions;
+using System.Text;
+
+namespace QueryBuilder.Builders;
+
+/// <summary>
+/// Generador de sentencias DELETE compatibles con múltiples motores como AS400, SQL Server, etc.
+/// </summary>
+public class DeleteQueryBuilder
 {
-    "code-for-ibmi.connections": [
+    private readonly string _tableName;
+    private readonly string? _library;
+    private string? _whereClause;
+    private string? _comment;
+
+    /// <summary>
+    /// Inicializa una nueva instancia del generador DELETE.
+    /// </summary>
+    /// <param name="tableName">Nombre de la tabla sobre la que se ejecutará el DELETE.</param>
+    /// <param name="library">Nombre de la biblioteca (opcional, usado por ejemplo en AS400).</param>
+    public DeleteQueryBuilder(string tableName, string? library = null)
+    {
+        _tableName = tableName;
+        _library = library;
+    }
+
+    /// <summary>
+    /// Agrega un comentario SQL al inicio de la consulta para trazabilidad.
+    /// </summary>
+    /// <param name="comment">Comentario a incluir.</param>
+    public DeleteQueryBuilder WithComment(string comment)
+    {
+        if (!string.IsNullOrWhiteSpace(comment))
+            _comment = $"-- {comment}";
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula WHERE con condición en formato SQL crudo.
+    /// </summary>
+    /// <param name="sqlWhere">Condición WHERE en formato de texto.</param>
+    public DeleteQueryBuilder Where(string sqlWhere)
+    {
+        _whereClause = sqlWhere;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula WHERE utilizando una expresión lambda tipada.
+    /// </summary>
+    /// <typeparam name="T">Tipo de entidad utilizada en la expresión.</typeparam>
+    /// <param name="expression">Expresión lambda que representa la condición.</param>
+    public DeleteQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
+    {
+        _whereClause = ExpressionToSqlConverter.Convert(expression);
+        return this;
+    }
+
+    /// <summary>
+    /// Construye la consulta DELETE y la encapsula en un objeto <see cref="QueryResult"/>.
+    /// </summary>
+    /// <returns>Objeto con el SQL generado y parámetros asociados.</returns>
+    public QueryResult Build()
+    {
+        if (string.IsNullOrWhiteSpace(_tableName))
+            throw new InvalidOperationException("Debe especificar el nombre de la tabla.");
+
+        var sb = new StringBuilder();
+
+        if (!string.IsNullOrWhiteSpace(_comment))
+            sb.AppendLine(_comment);
+
+        sb.Append("DELETE FROM ");
+        if (!string.IsNullOrWhiteSpace(_library))
+            sb.Append($"{_library}.");
+        sb.Append(_tableName);
+
+        if (!string.IsNullOrWhiteSpace(_whereClause))
+            sb.Append(" WHERE ").Append(_whereClause);
+
+        return new QueryResult
         {
-            "name": "Desarrollo",
-            "host": "DVHNDEV",
-            "port": 22,
-            "username": "TBBANEGA1",
-            "readyTimeout": 20000
-        },
-        {
-            "name": "UAT",
-            "host": "DVHNUAT",
-            "port": 446,
-            "username": "TBBANEGA1",
-            "readyTimeout": 20000
-        }
-    ],
-    "code-for-ibmi.connectionSettings": [
-        {
-            "name": "Desarrollo",
-            "host": "",
-            "objectFilters": [
-                {
-                    "name": "BCAH96",
-                    "filterType": "simple",
-                    "library": "BCAH96",
-                    "object": "QRPGLESRC, QCLSRC, QDDSSRC, ADQUIRENCI",
-                    "types": [
-                        "*SRCPF"
-                    ],
-                    "member": "*",
-                    "memberType": "*",
-                    "protected": false,
-                    "buttons": "SAVE"
-                },
-                {
-                    "name": "BTS",
-                    "filterType": "simple",
-                    "library": "BTS",
-                    "object": "QRPGLESRC, QCLSRC, QDDSSRC",
-                    "types": [
-                        "*SRCPF"
-                    ],
-                    "member": "*",
-                    "memberType": "*",
-                    "protected": false,
-                    "buttons": "SAVE"
-                }
-            ],
-            "libraryList": [
-                "CYBERDTA",
-                "CYBERPGM",
-                "GX",
-                "BCAH96DTA",
-                "BCAH96",
-                "BNKPRD01",
-                "HOMEPGM",
-                "HOMEDTA",
-                "CMBWEBDTA",
-                "CMBWEBPGM",
-                "QGPL",
-                "EVERTECDTA",
-                "EVERTECPGM",
-                "SEASMG3DTA",
-                "SEASMG3PRG",
-                "QSYS2"
-            ],
-            "autoClearTempData": false,
-            "customVariables": [],
-            "connectionProfiles": [],
-            "commandProfiles": [],
-            "ifsShortcuts": [
-                "/home/TBBANEGA1",
-                "/TMP/REMESAS/BTS"
-            ],
-            "autoSortIFSShortcuts": false,
-            "homeDirectory": "/home/TBBANEGA1",
-            "tempLibrary": "ILEDITOR",
-            "tempDir": "/tmp",
-            "currentLibrary": "QGPL",
-            "sourceFileCCSID": "*FILE",
-            "autoConvertIFSccsid": false,
-            "hideCompileErrors": [],
-            "enableSourceDates": false,
-            "sourceDateGutter": false,
-            "encodingFor5250": "default",
-            "terminalFor5250": "default",
-            "setDeviceNameFor5250": false,
-            "connectringStringFor5250": "+uninhibited localhost",
-            "autoSaveBeforeAction": false,
-            "showDescInLibList": false,
-            "debugPort": "8005",
-            "debugSepPort": "8008",
-            "debugUpdateProductionFiles": false,
-            "debugEnableDebugTracing": false,
-            "readOnlyMode": false,
-            "quickConnect": true,
-            "defaultDeploymentMethod": "",
-            "protectedPaths": [],
-            "showHiddenFiles": true,
-            "lastDownloadLocation": "C:\\Users\\93421",
-            "sourceASP": null,
-            "buttons": "save"
-        },
-        {
-            "name": "UAT",
-            "host": "",
-            "objectFilters": [],
-            "libraryList": [],
-            "autoClearTempData": false,
-            "customVariables": [],
-            "connectionProfiles": [],
-            "commandProfiles": [],
-            "ifsShortcuts": [],
-            "autoSortIFSShortcuts": false,
-            "homeDirectory": ".",
-            "tempLibrary": "ILEDITOR",
-            "tempDir": "/tmp",
-            "currentLibrary": "",
-            "sourceFileCCSID": "*FILE",
-            "autoConvertIFSccsid": false,
-            "hideCompileErrors": [],
-            "enableSourceDates": false,
-            "sourceDateGutter": false,
-            "encodingFor5250": "default",
-            "terminalFor5250": "default",
-            "setDeviceNameFor5250": false,
-            "connectringStringFor5250": "+uninhibited localhost",
-            "autoSaveBeforeAction": false,
-            "showDescInLibList": false,
-            "debugPort": "8005",
-            "debugSepPort": "8008",
-            "debugUpdateProductionFiles": false,
-            "debugEnableDebugTracing": false,
-            "readOnlyMode": false,
-            "quickConnect": true,
-            "defaultDeploymentMethod": "",
-            "protectedPaths": [],
-            "showHiddenFiles": true,
-            "lastDownloadLocation": "C:\\Users\\93421"
-        }
-    ],
-    "vscode-db2i.alwaysStartSQLJob": "new"
+            Sql = sb.ToString()
+        };
+    }
 }
+
+
+Por favor agrega los metodos que indicas y cualquier otra mejora que consideres, recuerda siempre agrega comentarios xml detallados sobre de que trata el metodo y la clase, y no elimines funcionalidades.
