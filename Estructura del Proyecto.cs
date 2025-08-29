@@ -1,108 +1,145 @@
-Convierte este metodo privado para que use la nueva versión de Insert
+using System.Data;
+using System.Data.OleDb;
+using QueryBuilder.Builders;
+using QueryBuilder.Enums;
 
- private async Task<bool> InsertarEnIbtSactaAsync(SDEPResponseData response)
- {
-     _databaseConnection.Open();
-     if (!_databaseConnection.IsConnected)
-         return false;
-     if (response?.Deposits == null || response.Deposits.Count == 0)
-         return false;
+private async Task<bool> InsertarEnIbtSactaAsync(SDEPResponseData response)
+{
+    _databaseConnection.Open();
+    if (!_databaseConnection.IsConnected) return false;
+    if (response?.Deposits == null || response.Deposits.Count == 0) return false;
 
-     foreach (var deposit in response.Deposits)
-     {
-         if (deposit?.Data == null) continue;
+    try
+    {
+        // 1) Preparar columnas y builder (DB2 i → placeholders ? + Parameters en orden)
+        var builder = new InsertQueryBuilder("BTSACTA", "BCAH96DTA", SqlDialect.Db2i)
+            .IntoColumns(
+                "INOCONFIR", "IDATRECI", "IHORRECI", "IDATCONF", "IHORCONF", "IDATVAL", "IHORVAL",
+                "IDATPAGO", "IHORPAGO", "IDATACRE", "IHORACRE", "IDATRECH", "IHORRECH",
+                "ITIPPAGO", "ISERVICD", "IDESPAIS", "IDESMONE", "ISAGENCD", "ISPAISCD", "ISTATECD",
+                "IRAGENCD", "ITICUENTA", "INOCUENTA", "INUMREFER", "ISTSREM", "ISTSPRO", "IERR",
+                "IERRDSC", "IDSCRECH", "ACODPAIS", "ACODMONED", "AMTOENVIA", "AMTOCALCU",
+                "AFACTCAMB",
+                "BPRIMNAME", "BSECUNAME", "BAPELLIDO", "BSEGUAPE", "BDIRECCIO", "BCIUDAD",
+                "BESTADO", "BPAIS", "BCODPOST", "BTELEFONO",
+                "CPRIMNAME", "CSECUNAME", "CAPELLIDO", "CSEGUAPE", "CDIRECCIO", "CCIUDAD",
+                "CESTADO", "CPAIS", "CCODPOST", "CTELEFONO",
+                "DTIDENT", "ESALEDT", "EMONREFER", "ETASAREFE", "EMTOREF"
+            );
 
-         // Estatus de proceso basado en opcode
-         string statusProceso = response.OpCode == "1308" ? "RECIBIDA" : "RECH-DENEG";
+        // 2) Cargar filas (una por depósito) usando Row(...) en el mismo orden de IntoColumns
+        foreach (var deposit in response.Deposits)
+        {
+            if (deposit?.Data == null) continue;
 
-         var d = deposit.Data;
+            var d = deposit.Data;
 
-         string CDIRECCIO = d.Recipient.Address.AddressLine.Length > 65 ? d.Recipient.Address.AddressLine[..65] : d.Recipient.Address.AddressLine;
+            // Estatus de proceso basado en opcode (igual a tu código)
+            string statusProceso = response.OpCode == "1308" ? "RECIBIDA" : "RECH-DENEG";
 
-         string BDIRECCIO = d.Sender.Address.AddressLine.Length > 65 ? d.Sender.Address.AddressLine[..65] : d.Sender.Address.AddressLine;
+            // Truncados a 65 chars (igual a tu código)
+            string CDIRECCIO = d.Recipient?.Address?.AddressLine ?? " ";
+            if (CDIRECCIO.Length > 65) CDIRECCIO = CDIRECCIO[..65];
 
-         FieldsQueryL param = new();
+            string BDIRECCIO = d.Sender?.Address?.AddressLine ?? " ";
+            if (BDIRECCIO.Length > 65) BDIRECCIO = BDIRECCIO[..65];
 
-         string insertSql = @"
-         INSERT INTO BCAH96DTA.BTSACTA (
-             INOCONFIR, IDATRECI, IHORRECI, IDATCONF, IHORCONF, IDATVAL, IHORVAL, IDATPAGO, IHORPAGO,
-             IDATACRE, IHORACRE, IDATRECH, IHORRECH, ITIPPAGO, ISERVICD, IDESPAIS, IDESMONE, ISAGENCD,
-             ISPAISCD, ISTATECD, IRAGENCD, ITICUENTA, INOCUENTA, INUMREFER, ISTSREM, ISTSPRO, IERR,
-             IERRDSC, IDSCRECH, ACODPAIS, ACODMONED, AMTOENVIA, AMTOCALCU, AFACTCAMB,
-             BPRIMNAME, BSECUNAME, BAPELLIDO, BSEGUAPE, BDIRECCIO, BCIUDAD, BESTADO, BPAIS,
-             BCODPOST, BTELEFONO, CPRIMNAME, CSECUNAME, CAPELLIDO, CSEGUAPE, CDIRECCIO,
-             CCIUDAD, CESTADO, CPAIS, CCODPOST, CTELEFONO, DTIDENT, ESALEDT, EMONREFER,
-             ETASAREFE, EMTOREF
-         ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-         )";
+            // Tiempos actuales en formato requerido
+            string hoyYmd = DateTime.Now.ToString("yyyyMMdd");
+            string ahoraHmsfff = DateTime.Now.ToString("HHmmssfff");
 
-         using var command = _databaseConnection.GetDbCommand(_httpContextAccessor.HttpContext!);
-         command.CommandText = insertSql;
-         command.CommandType = CommandType.Text;
+            // Helper para evitar nulls en CHAR (tu código usaba " ")
+            string C(object? v) => string.IsNullOrWhiteSpace(v?.ToString()) ? " " : v!.ToString()!;
 
-         // 🔹 Valores conocidos del XML
-         param.AddOleDbParameter(command, "INOCONFIR", OleDbType.Char, d.ConfirmationNumber);
-         param.AddOleDbParameter(command, "IDATRECI", OleDbType.Char, DateTime.Now.ToString("yyyyMMdd"));
-         param.AddOleDbParameter(command, "IHORRECI", OleDbType.Char, DateTime.Now.ToString("HHmmssfff"));
-         param.AddOleDbParameter(command, "IDATCONF", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IHORCONF", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IDATVAL", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IHORVAL", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IDATPAGO", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IHORPAGO", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IDATACRE", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IHORACRE", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IDATRECH", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "IHORRECH", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "ITIPPAGO", OleDbType.Char, d.PaymentTypeCode);
-         param.AddOleDbParameter(command, "ISERVICD", OleDbType.Char, d.ServiceCode);
-         param.AddOleDbParameter(command, "IDESPAIS", OleDbType.Char, d.DestinationCountryCode);
-         param.AddOleDbParameter(command, "IDESMONE", OleDbType.Char, d.DestinationCurrencyCode);
-         param.AddOleDbParameter(command, "ISAGENCD", OleDbType.Char, d.SenderAgentCode);
-         param.AddOleDbParameter(command, "ISPAISCD", OleDbType.Char, d.SenderCountryCode);
-         param.AddOleDbParameter(command, "ISTATECD", OleDbType.Char, d.SenderStateCode);
-         param.AddOleDbParameter(command, "IRAGENCD", OleDbType.Char, d.RecipientAgentCode);
-         param.AddOleDbParameter(command, "ITICUENTA", OleDbType.Char, d.RecipientAccountTypeCode);
-         param.AddOleDbParameter(command, "INOCUENTA", OleDbType.Char, d.RecipientAccountNumber);
-         param.AddOleDbParameter(command, "INUMREFER", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "ISTSREM", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "ISTSPRO", OleDbType.Char, statusProceso);
-         param.AddOleDbParameter(command, "IERR", OleDbType.Char, response.OpCode ?? " ");
-         param.AddOleDbParameter(command, "IERRDSC", OleDbType.Char, response.ProcessMsg ?? " ");
-         param.AddOleDbParameter(command, "IDSCRECH", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "ACODPAIS", OleDbType.Char, d.OriginCountryCode);
-         param.AddOleDbParameter(command, "ACODMONED", OleDbType.Char, d.OriginCurrencyCode);
-         param.AddOleDbParameter(command, "AMTOENVIA", OleDbType.Char, d.OriginAmount);
-         param.AddOleDbParameter(command, "AMTOCALCU", OleDbType.Char, d.DestinationAmount);
-         param.AddOleDbParameter(command, "AFACTCAMB", OleDbType.Char, d.ExchangeRateFx);
-         param.AddOleDbParameter(command, "BPRIMNAME", OleDbType.Char, d.Sender.FirstName);
-         param.AddOleDbParameter(command, "BSECUNAME", OleDbType.Char, d.Sender.MiddleName);
-         param.AddOleDbParameter(command, "BAPELLIDO", OleDbType.Char, d.Sender.LastName);
-         param.AddOleDbParameter(command, "BSEGUAPE", OleDbType.Char, d.Sender.MotherMaidenName);
-         param.AddOleDbParameter(command, "BDIRECCIO", OleDbType.Char, BDIRECCIO);
-         param.AddOleDbParameter(command, "BCIUDAD", OleDbType.Char, d.Sender.Address.City);
-         param.AddOleDbParameter(command, "BESTADO", OleDbType.Char, d.Sender.Address.StateCode);
-         param.AddOleDbParameter(command, "BPAIS", OleDbType.Char, d.Sender.Address.CountryCode);
-         param.AddOleDbParameter(command, "BCODPOST", OleDbType.Char, d.Sender.Address.ZipCode);
-         param.AddOleDbParameter(command, "BTELEFONO", OleDbType.Char, d.Sender.Address.Phone);
-         param.AddOleDbParameter(command, "CPRIMNAME", OleDbType.Char, d.Recipient.FirstName);
-         param.AddOleDbParameter(command, "CSECUNAME", OleDbType.Char, d.Recipient.MiddleName);
-         param.AddOleDbParameter(command, "CAPELLIDO", OleDbType.Char, d.Recipient.LastName);
-         param.AddOleDbParameter(command, "CSEGUAPE", OleDbType.Char, d.Recipient.MotherMaidenName);
-         param.AddOleDbParameter(command, "CDIRECCIO", OleDbType.Char, CDIRECCIO);
-         param.AddOleDbParameter(command, "CCIUDAD", OleDbType.Char, d.Recipient.Address.City);
-         param.AddOleDbParameter(command, "CESTADO", OleDbType.Char, d.Recipient.Address.StateCode);
-         param.AddOleDbParameter(command, "CPAIS", OleDbType.Char, d.Recipient.Address.CountryCode);
-         param.AddOleDbParameter(command, "CCODPOST", OleDbType.Char, d.Recipient.Address.ZipCode);
-         param.AddOleDbParameter(command, "CTELEFONO", OleDbType.Char, d.Recipient.Address.Phone);
-         param.AddOleDbParameter(command, "DTIDENT", OleDbType.Char, " ");
-         param.AddOleDbParameter(command, "ESALEDT", OleDbType.Char, d.SaleDate);
-         param.AddOleDbParameter(command, "EMONREFER", OleDbType.Char, d.MarketRefCurrencyCode);
-         param.AddOleDbParameter(command, "ETASAREFE", OleDbType.Char, d.MarketRefCurrencyFx);
-         param.AddOleDbParameter(command, "EMTOREF", OleDbType.Char, d.MarketRefCurrencyAmount);
+            builder.Row(
+                C(d.ConfirmationNumber),       // INOCONFIR
+                hoyYmd,                        // IDATRECI
+                ahoraHmsfff,                   // IHORRECI
+                " ",                           // IDATCONF
+                " ",                           // IHORCONF
+                " ",                           // IDATVAL
+                " ",                           // IHORVAL
+                " ",                           // IDATPAGO
+                " ",                           // IHORPAGO
+                " ",                           // IDATACRE
+                " ",                           // IHORACRE
+                " ",                           // IDATRECH
+                " ",                           // IHORRECH
+                C(d.PaymentTypeCode),          // ITIPPAGO
+                C(d.ServiceCode),              // ISERVICD
+                C(d.DestinationCountryCode),   // IDESPAIS
+                C(d.DestinationCurrencyCode),  // IDESMONE
+                C(d.SenderAgentCode),          // ISAGENCD
+                C(d.SenderCountryCode),        // ISPAISCD
+                C(d.SenderStateCode),          // ISTATECD
+                C(d.RecipientAgentCode),       // IRAGENCD
+                C(d.RecipientAccountTypeCode), // ITICUENTA
+                C(d.RecipientAccountNumber),   // INOCUENTA
+                " ",                           // INUMREFER
+                " ",                           // ISTSREM
+                statusProceso,                 // ISTSPRO
+                C(response.OpCode),            // IERR
+                C(response.ProcessMsg),        // IERRDSC
+                " ",                           // IDSCRECH
+                C(d.OriginCountryCode),        // ACODPAIS
+                C(d.OriginCurrencyCode),       // ACODMONED
+                C(d.OriginAmount),             // AMTOENVIA
+                C(d.DestinationAmount),        // AMTOCALCU
+                C(d.ExchangeRateFx),           // AFACTCAMB
+                C(d.Sender?.FirstName),        // BPRIMNAME
+                C(d.Sender?.MiddleName),       // BSECUNAME
+                C(d.Sender?.LastName),         // BAPELLIDO
+                C(d.Sender?.MotherMaidenName), // BSEGUAPE
+                C(BDIRECCIO),                  // BDIRECCIO
+                C(d.Sender?.Address?.City),    // BCIUDAD
+                C(d.Sender?.Address?.StateCode),   // BESTADO
+                C(d.Sender?.Address?.CountryCode), // BPAIS
+                C(d.Sender?.Address?.ZipCode),     // BCODPOST
+                C(d.Sender?.Address?.Phone),       // BTELEFONO
+                C(d.Recipient?.FirstName),         // CPRIMNAME
+                C(d.Recipient?.MiddleName),        // CSECUNAME
+                C(d.Recipient?.LastName),          // CAPELLIDO
+                C(d.Recipient?.MotherMaidenName),  // CSEGUAPE
+                C(CDIRECCIO),                  // CDIRECCIO
+                C(d.Recipient?.Address?.City),     // CCIUDAD
+                C(d.Recipient?.Address?.StateCode),// CESTADO
+                C(d.Recipient?.Address?.CountryCode),// CPAIS
+                C(d.Recipient?.Address?.ZipCode),  // CCODPOST
+                C(d.Recipient?.Address?.Phone),    // CTELEFONO
+                " ",                           // DTIDENT
+                C(d.SaleDate),                 // ESALEDT
+                C(d.MarketRefCurrencyCode),    // EMONREFER
+                C(d.MarketRefCurrencyFx),      // ETASAREFE
+                C(d.MarketRefCurrencyAmount)   // EMTOREF
+            );
+        }
 
-         await command.ExecuteNonQueryAsync();
-     }
-     return true;
- }
+        // 3) Construir SQL (INSERT con múltiples filas) + parámetros posicionales
+        var query = builder.Build();
+
+        using var cmd = _databaseConnection.GetDbCommand(_httpContextAccessor.HttpContext!);
+        cmd.CommandText = query.Sql;
+        cmd.CommandType = CommandType.Text;
+
+        // Si tu proveedor NO agrega parámetros automáticamente, los añadimos en orden:
+        // (Evita SQL0313: “Se esperaban N valores, pero se recibieron M”)
+        foreach (var p in query.Parameters)
+        {
+            // DB2 i por OleDb usa parámetros posicionales “?” sin nombre. Add con valor basta.
+            var prm = new OleDbParameter { Value = p ?? (object)DBNull.Value };
+            cmd.Parameters.Add(prm);
+        }
+
+        await cmd.ExecuteNonQueryAsync();
+        return true;
+    }
+    catch
+    {
+        // (opcional) Log de error con tu LoggingService
+        return false;
+    }
+    finally
+    {
+        _databaseConnection.Close();
+    }
+}
