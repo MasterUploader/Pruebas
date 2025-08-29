@@ -1,21 +1,52 @@
-En esta filas tengo la advertencia S3267
-
-// Validaciones
-foreach (var fila in _rows)
+/// <summary>
+/// Agrega un comentario SQL al inicio del comando para trazabilidad.
+/// Se sanea a una sola línea para evitar inyección de comentarios.
+/// </summary>
+public InsertQueryBuilder WithComment(string? comment)
 {
-    if (fila.Count != _columns.Count)
-        throw new InvalidOperationException($"El número de valores ({fila.Count}) no coincide con las columnas ({_columns.Count}).");
+    if (string.IsNullOrWhiteSpace(comment))
+        return this;
+
+    // Saneamos: sin saltos de línea y sin secuencias peligrosas
+    var sanitized = comment
+        .Replace("\r", " ")
+        .Replace("\n", " ")
+        .Replace("--", "- -")
+        .Trim();
+
+    _comment = "-- " + sanitized;
+    return this;
 }
 
-foreach (var fila in _valuesRaw)
+
+// Validar _rows con LINQ puro
+int? badRowIndex = _rows
+    .Select((row, idx) => new { row, idx })
+    .Where(x => x.row == null || x.row.Count != _columns.Count)
+    .Select(x => (int?)x.idx)
+    .FirstOrDefault();
+
+if (badRowIndex.HasValue)
 {
-    if (fila.Count != _columns.Count)
-        throw new InvalidOperationException($"El número de valores RAW ({fila.Count}) no coincide con las columnas ({_columns.Count}).");
+    int idx = badRowIndex.Value;
+    int count = _rows[idx]?.Count ?? 0;
+    throw new InvalidOperationException(
+        $"La fila #{idx} tiene {count} valores; se esperaban {_columns.Count}."
+    );
 }
 
-Mejoralas para que deje de aparecer
+// Validar _valuesRaw con LINQ puro
+int? badRawIndex = _valuesRaw
+    .Select((row, idx) => new { row, idx })
+    .Where(x => x.row == null || x.row.Count != _columns.Count)
+    .Select(x => (int?)x.idx)
+    .FirstOrDefault();
 
-Y En esta Linea:
- public InsertQueryBuilder WithComment(string comment)
- { if (!string.IsNullOrWhiteSpace(comment)) _comment = $"-- {comment}"; return this; }
-me dice advertencia S2681
+if (badRawIndex.HasValue)
+{
+    int idx = badRawIndex.Value;
+    int count = _valuesRaw[idx]?.Count ?? 0;
+    throw new InvalidOperationException(
+        $"La fila RAW #{idx} tiene {count} valores; se esperaban {_columns.Count}."
+    );
+}
