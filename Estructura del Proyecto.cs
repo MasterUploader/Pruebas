@@ -1,81 +1,95 @@
-/// <summary>
-/// Registra información de ejecución de una operación SQL en formato estructurado.
-/// Este método genera una representación textual (a través del formateador)
-/// y la persiste en el archivo de log asociado al ciclo de la petición actual,
-/// garantizando coherencia con el resto de eventos registrados durante la misma solicitud.
-/// </summary>
-/// <param name="model">Datos de la ejecución (duración, SQL, conexiones, filas afectadas, etc.).</param>
-/// <param name="context">
-/// Contexto HTTP actual (opcional). Cuando está presente, permite resolver y reutilizar
-/// el archivo de log asociado al request/endpoint en curso.
-/// </param>
-public void LogDatabaseSuccess(SqlLogModel model, HttpContext? context = null)
-{
-    try
-    {
-        // Construye el bloque en texto plano utilizando el formateador existente,
-        // manteniendo el mismo esquema visual y de campos.
-        var formatted = LogFormatter.FormatDbExecution(model);
+Me genero el log de la siguiente forma
 
-        // Escribe en el MISMO archivo asociado al request/endpoint (si existe contexto),
-        // preservando la coherencia del rastro completo sin crear archivos alternos.
-        WriteLog(context, formatted);
 
-        // Si además llevas métricas/CSV/telemetría separada, hazlo aquí sin duplicar
-        // la escritura del bloque de texto (por ejemplo, llamando a un método explícito
-        // de CSV que no genere otro .txt):
-        // TryWriteCsv(model, context);
-    }
-    catch (Exception loggingEx)
-    {
-        // El logging nunca debe interrumpir el flujo de la aplicación;
-        // registra internamente cualquier fallo de escritura/formateo.
-        LogInternalError(loggingEx);
-    }
-}
+──────────────── SQL COMMAND ────────────────
+SELECT * FROM BCAH96DTA.IETD01LOG ORDER BY LOGA01AID DESC
+──────────────────────────────────────────────
+──────────────── SQL COMMAND ────────────────
+INSERT INTO BCAH96DTA.ETD01LOG (LOGA01AID, LOGA02UID, LOGA03TST,  LOGA04SUC,  LOGA05IPA,  LOGA06MNA,  LOGA07SID,  LOGA08FRE,  LOGA09ACO,  LOGA10UAG,  LOGA11BRO,  LOGA12SOP,  LOGA13DIS) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+──────────────────────────────────────────────
+===== LOG DE EJECUCIÓN SQL =====
+Fecha y Hora      : 2025-09-03 13:33:16.434
+Duración          : 49.5058 ms
+Base de Datos     : Desconocida
+IP                : Desconocida
+Puerto            : 0
+Esquema           : bcah96dta
+Tabla             : bcah96dta.etd01log
+Veces Ejecutado   : 1
+Filas Afectadas   : 1
+SQL:
+INSERT INTO BCAH96DTA.ETD01LOG (LOGA01AID, LOGA02UID, LOGA03TST,  LOGA04SUC,  LOGA05IPA,  LOGA06MNA,  LOGA07SID,  LOGA08FRE,  LOGA09ACO,  LOGA10UAG,  LOGA11BRO,  LOGA12SOP,  LOGA13DIS) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+================================
 
-/// <summary>
-/// Registra información estructurada de una ejecución SQL fallida.
-/// Incluye datos de conexión, sentencia y detalle de la excepción,
-/// y persiste la salida en el archivo asociado al ciclo de la petición actual.
-/// Opcionalmente, puede derivar un rastro de excepción general para análisis transversal.
-/// </summary>
-/// <param name="command">Comando que falló.</param>
-/// <param name="ex">Excepción capturada.</param>
-/// <param name="context">
-/// Contexto HTTP actual (opcional). Cuando está presente, permite resolver y reutilizar
-/// el archivo de log asociado al request/endpoint en curso.
-/// </param>
-public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null)
-{
-    try
-    {
-        // Extrae metadatos disponibles de la conexión para enriquecer el bloque.
-        var connectionInfo = LogHelper.ExtractDbConnectionInfo(command.Connection?.ConnectionString);
-        var tabla = LogHelper.ExtractTableName(command.CommandText);
+──────────────── SQL COMMAND ────────────────
+SELECT * FROM BCAH96DTA.IETD02LOG WHERE LOGB01UID = ?
+──────────────────────────────────────────────
+──────────────── SQL COMMAND ────────────────
+UPDATE BCAH96DTA.IETD02LOG SET LOGB02UIL = ?, LOGB03TIL = ?, LOGB04SEA = ?,  LOGB05UDI = ?, LOGB06UTD = ?, LOGB07UNA = ?, LOGB09UIF = ?, LOGB10TOK = ?  WHERE LOGB01UID = ?
+──────────────────────────────────────────────
+===== LOG DE EJECUCIÓN SQL =====
+Fecha y Hora      : 2025-09-03 13:33:16.539
+Duración          : 34.5957 ms
+Base de Datos     : Desconocida
+IP                : Desconocida
+Puerto            : 0
+Esquema           : bcah96dta
+Tabla             : bcah96dta.ietd02log
+Veces Ejecutado   : 1
+Filas Afectadas   : 1
+SQL:
+UPDATE BCAH96DTA.IETD02LOG SET LOGB02UIL = ?, LOGB03TIL = ?, LOGB04SEA = ?,  LOGB05UDI = ?, LOGB06UTD = ?, LOGB07UNA = ?, LOGB09UIF = ?, LOGB10TOK = ?  WHERE LOGB01UID = ?
+================================
 
-        // Mantiene el mismo formato de error estructurado que ya utilizas.
-        var formatted = LogFormatter.FormatDbExecutionError(
-            nombreBD:   connectionInfo.Database,
-            ip:         connectionInfo.Ip,
-            puerto:     connectionInfo.Port,
-            biblioteca: connectionInfo.Library,
-            tabla:      tabla,
-            sentenciaSQL: command.CommandText,
-            exception:  ex,
-            horaError:  DateTime.Now
-        );
 
-        // Escribe el bloque en el archivo activo del request/endpoint.
-        WriteLog(context, formatted);
+Pero falta en algunos select el LOG DE EJECUCIÓN SQL, como los select no afectan filas al menos deberia de mostrarse así:
 
-        // Además, conserva el rastro de excepción general si tu estrategia lo requiere
-        // (por ejemplo, un canal paralelo de errores globales).
-        AddExceptionLog(ex);
-    }
-    catch (Exception errorAlLoguear)
-    {
-        // Registro defensivo para fallos durante el propio proceso de logging.
-        LogInternalError(errorAlLoguear);
-    }
-}
+===== LOG DE EJECUCIÓN SQL =====
+Fecha y Hora      : 2025-09-03 13:33:16.539
+Duración          : 34.5957 ms
+Base de Datos     : Desconocida
+IP                : Desconocida
+Puerto            : 0
+Esquema           : bcah96dta
+Tabla             : bcah96dta.ietd02log
+Veces Ejecutado   : 1
+SQL:
+
+SELECT * FROM BCAH96DTA.IETD01LOG ORDER BY LOGA01AID DESC
+================================
+
+Y se dan unos caso donde se duplican se ve así:
+
+──────────────── SQL COMMAND ────────────────
+UPDATE BCAH96DTA.IETD02LOG SET LOGB02UIL = ?, LOGB03TIL = ?, LOGB04SEA = ?,  LOGB05UDI = ?, LOGB06UTD = ?, LOGB07UNA = ?, LOGB09UIF = ?, LOGB10TOK = ?  WHERE LOGB01UID = ?
+──────────────────────────────────────────────
+===== LOG DE EJECUCIÓN SQL =====
+Fecha y Hora      : 2025-09-03 13:33:16.539
+Duración          : 34.5957 ms
+Base de Datos     : Desconocida
+IP                : Desconocida
+Puerto            : 0
+Esquema           : bcah96dta
+Tabla             : bcah96dta.ietd02log
+Veces Ejecutado   : 1
+Filas Afectadas   : 1
+SQL:
+UPDATE BCAH96DTA.IETD02LOG SET LOGB02UIL = ?, LOGB03TIL = ?, LOGB04SEA = ?,  LOGB05UDI = ?, LOGB06UTD = ?, LOGB07UNA = ?, LOGB09UIF = ?, LOGB10TOK = ?  WHERE LOGB01UID = ?
+================================
+
+
+Y solo deberia ser así
+
+===== LOG DE EJECUCIÓN SQL =====
+Fecha y Hora      : 2025-09-03 13:33:16.539
+Duración          : 34.5957 ms
+Base de Datos     : Desconocida
+IP                : Desconocida
+Puerto            : 0
+Esquema           : bcah96dta
+Tabla             : bcah96dta.ietd02log
+Veces Ejecutado   : 1
+Filas Afectadas   : 1
+SQL:
+UPDATE BCAH96DTA.IETD02LOG SET LOGB02UIL = ?, LOGB03TIL = ?, LOGB04SEA = ?,  LOGB05UDI = ?, LOGB06UTD = ?, LOGB07UNA = ?, LOGB09UIF = ?, LOGB10TOK = ?  WHERE LOGB01UID = ?
+================================
