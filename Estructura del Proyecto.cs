@@ -2,6 +2,7 @@ using Logging.Abstractions;
 using Logging.Models;
 using Microsoft.AspNetCore.Http;
 using System.Collections;
+using System.Collections.Generic; // <- needed for List<>
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -14,21 +15,15 @@ namespace Logging.Decorators;
 /// <summary>
 /// Decorador para interceptar y registrar información de comandos SQL con alto grado de fidelidad.
 /// - Emite un bloque ESTRUCTURADO por CADA ejecución (ExecuteReader/ExecuteNonQuery/ExecuteScalar).
-/// - Renderiza la sentencia SQL con los VALORES REALES (comillas simples en literales), 
+/// - Renderiza la sentencia SQL con los VALORES REALES (comillas simples en literales),
 ///   sustituyendo parámetros posicionales (?) y nombrados (@p0, :UserId), ignorando ocurrencias dentro de literales.
 /// - Tolera ausencia del servicio de logging sin interrumpir la ejecución.
-/// - Mantiene métricas de duración por ejecución, filas afectadas y conteo.
 /// </summary>
 public class LoggingDbCommandWrapper : DbCommand
 {
     private readonly DbCommand _innerCommand;
     private readonly ILoggingService? _loggingService;
     private readonly IHttpContextAccessor? _httpContextAccessor;
-
-    // Estado básico para métricas agregadas (se mantiene por transparencia, aunque el log es per-exec)
-    private readonly object _lock = new();
-    private int _executionCount = 0;
-    private int _totalAffectedRows = 0;
 
     /// <summary>
     /// Crea el decorador con soporte opcional de servicios de logging y contexto HTTP.
@@ -48,7 +43,6 @@ public class LoggingDbCommandWrapper : DbCommand
     /// <inheritdoc />
     protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
     {
-        // Medimos duración por EJECUCIÓN
         var startedAt = DateTime.Now;
         var sw = Stopwatch.StartNew();
 
@@ -56,8 +50,8 @@ public class LoggingDbCommandWrapper : DbCommand
         {
             var reader = _innerCommand.ExecuteReader(behavior);
 
-            // SELECT/lecturas: para el log usamos filas afectadas = 0
             sw.Stop();
+            // SELECT/lecturas: registramos filas afectadas = 0
             LogOneExecution(
                 startedAt: startedAt,
                 duration: sw.Elapsed,
@@ -71,10 +65,6 @@ public class LoggingDbCommandWrapper : DbCommand
         {
             _loggingService?.LogDatabaseError(_innerCommand, ex, _httpContextAccessor?.HttpContext);
             throw;
-        }
-        finally
-        {
-            RegisterCounters(0); // para métricas internas (SELECT no modifica)
         }
     }
 
@@ -94,7 +84,6 @@ public class LoggingDbCommandWrapper : DbCommand
             sqlRendered: RenderSqlWithParametersSafe(_innerCommand.CommandText, _innerCommand.Parameters)
         );
 
-        RegisterCounters(result);
         return result;
     }
 
@@ -115,7 +104,6 @@ public class LoggingDbCommandWrapper : DbCommand
             sqlRendered: RenderSqlWithParametersSafe(_innerCommand.CommandText, _innerCommand.Parameters)
         );
 
-        RegisterCounters(0);
         return result;
     }
 
@@ -138,7 +126,7 @@ public class LoggingDbCommandWrapper : DbCommand
             var model = new SqlLogModel
             {
                 Sql               = sqlRendered,
-                ExecutionCount    = 1,                  // Bloque por ejecución
+                ExecutionCount    = 1,                  // bloque por ejecución
                 TotalAffectedRows = affectedRows,       // 0 para SELECT/SCALAR
                 StartTime         = startedAt,
                 Duration          = duration,
@@ -153,20 +141,7 @@ public class LoggingDbCommandWrapper : DbCommand
         }
         catch (Exception logEx)
         {
-            // Nunca romper la ejecución por errores de logging
             try { _loggingService?.WriteLog($"[LoggingDbCommandWrapper] Error al escribir el log SQL: {logEx.Message}", _httpContextAccessor?.HttpContext); } catch { }
-        }
-    }
-
-    /// <summary>
-    /// Actualiza contadores internos de ejecuciones y filas afectadas (uso informativo).
-    /// </summary>
-    private void RegisterCounters(int affectedRows)
-    {
-        lock (_lock)
-        {
-            _executionCount++;
-            if (affectedRows > 0) _totalAffectedRows += affectedRows;
         }
     }
 
@@ -178,10 +153,10 @@ public class LoggingDbCommandWrapper : DbCommand
     /// Devuelve el SQL con parámetros sustituidos por sus valores reales (comillas simples en literales).
     /// Ignora placeholders que estén dentro de comillas simples en el propio SQL.
     /// </summary>
-    private static string RenderSqlWithParametersSafe(string sql, DbParameterCollection parameters)
+    private static string RenderSqlWithParametersSafe(string? sql, DbParameterCollection parameters)
     {
         if (string.IsNullOrEmpty(sql) || parameters.Count == 0)
-            return sql;
+            return sql ?? string.Empty;
 
         // 1) Detectamos rangos de literales '...'
         var literalRanges = ComputeSingleQuoteRanges(sql);
@@ -195,7 +170,7 @@ public class LoggingDbCommandWrapper : DbCommand
     }
 
     /// <summary>
-    /// Identifica rangos [start, end] (inclusive) que están dentro de comillas simples, 
+    /// Identifica rangos [start, end] (inclusive) que están dentro de comillas simples,
     /// respetando el escape estándar SQL de comillas duplicadas ('').
     /// </summary>
     private static List<(int start, int end)> ComputeSingleQuoteRanges(string sql)
@@ -204,31 +179,33 @@ public class LoggingDbCommandWrapper : DbCommand
         bool inString = false;
         int start = -1;
 
-        for (int i = 0; i < sql.Length; i++)
+        // Usamos while con índice manual para evitar S127 (no modificar contador de un for dentro del cuerpo)
+        int idx = 0;
+        while (idx < sql.Length)
         {
-            char c = sql[i];
+            char c = sql[idx];
             if (c == '\'')
             {
-                // Doble comilla '' => carácter escapado dentro del literal
-                bool isEscaped = (i + 1 < sql.Length) && sql[i + 1] == '\'';
+                bool isEscaped = (idx + 1 < sql.Length) && sql[idx + 1] == '\'';
 
                 if (!inString)
                 {
                     inString = true;
-                    start = i;
+                    start = idx;
                 }
                 else if (!isEscaped)
                 {
-                    // Cerramos literal
                     inString = false;
-                    ranges.Add((start, i));
+                    ranges.Add((start, idx));
                 }
 
-                if (isEscaped) i++; // saltar el segundo '
+                idx += isEscaped ? 2 : 1;
+                continue;
             }
+
+            idx++;
         }
 
-        // Si quedó abierto, lo ignoramos (sentencia malformada), no agregamos rango.
         return ranges;
     }
 
@@ -275,7 +252,6 @@ public class LoggingDbCommandWrapper : DbCommand
     {
         if (parameters.Count == 0) return sql;
 
-        // Buscamos matches fuera de literales y reemplazamos uno a uno
         string result = sql;
         foreach (DbParameter p in parameters)
         {
@@ -285,11 +261,9 @@ public class LoggingDbCommandWrapper : DbCommand
 
             foreach (var token in new[] { "@" + name, ":" + name })
             {
-                // Regex con bordes de palabra: evita partes de identificadores
                 var rx = new Regex($@"(?<!\w){Regex.Escape(token)}(?!\w)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
                 result = rx.Replace(result, m =>
                 {
-                    // Si el match está dentro de un literal, no reemplazar
                     if (IsInsideAnyRange(m.Index, literalRanges)) return m.Value;
                     return FormatParameterValue(p);
                 });
@@ -316,10 +290,7 @@ public class LoggingDbCommandWrapper : DbCommand
         if (value is null || value == DBNull.Value)
             return "NULL";
 
-        // Manejo IEnumerable (listas para IN); descartar string/byte[]
-        if (value is IEnumerable enumerable &&
-            value is not string &&
-            value is not byte[])
+        if (value is IEnumerable enumerable && value is not string && value is not byte[])
         {
             var parts = new List<string>();
             foreach (var item in enumerable)
@@ -327,21 +298,18 @@ public class LoggingDbCommandWrapper : DbCommand
             return "(" + string.Join(", ", parts) + ")";
         }
 
-        // Escalar normal
         return FormatScalar(value, p.DbType);
     }
 
     /// <summary>
     /// Formateo escalar defensivo con heurística por DbType y/o tipo CLR.
     /// </summary>
-    private static string FormatScalar(object value, DbType? hinted = null)
+    private static string FormatScalar(object? value, DbType? hinted = null)
     {
         if (value is null || value == DBNull.Value) return "NULL";
 
-        // byte[] explícito
         if (value is byte[] bytes) return $"<binary {bytes.Length} bytes>";
 
-        // Si viene DbType, preferimos esa pista
         if (hinted.HasValue)
         {
             switch (hinted.Value)
@@ -382,12 +350,10 @@ public class LoggingDbCommandWrapper : DbCommand
 
                 case DbType.Object:
                 default:
-                    // Fallback a CLR
                     break;
             }
         }
 
-        // Heurística por tipo CLR
         return value switch
         {
             string s           => "'" + EscapeSqlString(s) + "'",
@@ -446,12 +412,13 @@ public class LoggingDbCommandWrapper : DbCommand
 
     #region Delegación al comando interno (transparencia)
 
-    public override string CommandText { get => _innerCommand.CommandText; set => _innerCommand.CommandText = value; }
+    // Ajustes de nullability para coincidir con la firma base y eliminar CS8765:
+    public override string? CommandText { get => _innerCommand.CommandText; set => _innerCommand.CommandText = value; }
     public override int CommandTimeout { get => _innerCommand.CommandTimeout; set => _innerCommand.CommandTimeout = value; }
     public override CommandType CommandType { get => _innerCommand.CommandType; set => _innerCommand.CommandType = value; }
     public override bool DesignTimeVisible { get => _innerCommand.DesignTimeVisible; set => _innerCommand.DesignTimeVisible = value; }
     public override UpdateRowSource UpdatedRowSource { get => _innerCommand.UpdatedRowSource; set => _innerCommand.UpdatedRowSource = value; }
-    protected override DbConnection DbConnection { get => _innerCommand.Connection!; set => _innerCommand.Connection = value; }
+    protected override DbConnection? DbConnection { get => _innerCommand.Connection; set => _innerCommand.Connection = value; } // <- nullable
     protected override DbTransaction? DbTransaction { get => _innerCommand.Transaction; set => _innerCommand.Transaction = value; }
     protected override DbParameterCollection DbParameterCollection => _innerCommand.Parameters;
     public override void Cancel() => _innerCommand.Cancel();
@@ -461,14 +428,11 @@ public class LoggingDbCommandWrapper : DbCommand
     #endregion
 
     /// <summary>
-    /// IMPORTANTE: ya no se emite resumen en Dispose (evita duplicados). 
-    /// Si en el futuro quisieras un "resumen agregado" aparte, se puede 
-    /// añadir aquí condicionándolo a una bandera.
+    /// Importante: el log se emite por ejecución; no imprimimos resumen aquí.
     /// </summary>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
         _innerCommand.Dispose();
-        // No-op: el log se emite per-exec.
     }
 }
