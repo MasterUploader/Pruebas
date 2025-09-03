@@ -1,132 +1,292 @@
-En una prueba que realice me genero dos archivos de logs.
+using Logging.Abstractions;
+using Logging.Models;
+using Microsoft.AspNetCore.Http;
+using System.Data;
+using System.Data.Common;
+using System.Diagnostics;
 
-    El primero es este que deberia ser donde se guarda, y por lo que veo si guardo algo sobre los sql:
+namespace Logging.Decorators;
+
+/// <summary>
+/// Decorador para interceptar y registrar información de comandos SQL.
+/// - Mantiene estadísticas acumuladas y registra un resumen estructurado al finalizar (Dispose).
+/// - Escribe tempranamente el SQL en el archivo del request para asegurar que todo vaya
+///   al MISMO archivo (evitando "GeneralLog_*").
+/// - Tolera la ausencia de servicios de logging sin romper la ejecución.
+/// </summary>
+public class LoggingDbCommandWrapper : DbCommand
+{
+    private readonly DbCommand _innerCommand;
+    private readonly ILoggingService? _loggingService;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly Stopwatch _stopwatch = new();
+    private readonly object _lock = new();
+
+    private int _executionCount = 0;
+    private int _totalAffectedRows = 0;
+    private DateTime _startTime;
+    private string _commandText = string.Empty;
+    private bool _isFinalized = false;
+
+    // Bandera para evitar múltiples escrituras del encabezado del SQL
+    private bool _primedCurrentRequestLog = false;
+
+    /// <summary>
+    /// Crea el decorador.
+    /// </summary>
+    /// <param name="innerCommand">Comando original a decorar.</param>
+    /// <param name="loggingService">Servicio de logging (opcional).</param>
+    /// <param name="httpContextAccessor">Accessor HTTP (opcional).</param>
+    public LoggingDbCommandWrapper(
+        DbCommand innerCommand,
+        ILoggingService? loggingService = null,
+        IHttpContextAccessor? httpContextAccessor = null)
+    {
+        _innerCommand = innerCommand;
+        _loggingService = loggingService;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    /// <inheritdoc />
+    protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
+    {
+        StartIfNeeded();
+        try
+        {
+            return _innerCommand.ExecuteReader(behavior);
+        }
+        catch (Exception ex)
+        {
+            _loggingService?.LogDatabaseError(_innerCommand, ex, _httpContextAccessor?.HttpContext);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public override int ExecuteNonQuery()
+    {
+        StartIfNeeded();
+        var result = _innerCommand.ExecuteNonQuery();
+        RegisterExecution(result);
+        return result;
+    }
+
+    /// <inheritdoc />
+    public override object? ExecuteScalar()
+    {
+        StartIfNeeded();
+        var result = _innerCommand.ExecuteScalar();
+        RegisterExecution(result != null ? 1 : 0);
+        return result;
+    }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        _innerCommand.Dispose();
+        FinalizeAndLog();
+    }
+
+    /// <summary>
+    /// Consolida y guarda el log estructurado (una sola vez) al finalizar la vida del comando.
+    /// </summary>
+    private void FinalizeAndLog()
+    {
+        lock (_lock)
+        {
+            if (_isFinalized || _executionCount == 0 || _loggingService == null)
+                return;
+
+            _stopwatch.Stop();
+            _isFinalized = true;
+
+            try
+            {
+                var connection = _innerCommand.Connection;
+
+                var log = new SqlLogModel
+                {
+                    Sql = _commandText,
+                    ExecutionCount = _executionCount,
+                    TotalAffectedRows = _totalAffectedRows,
+                    StartTime = _startTime,
+                    Duration = _stopwatch.Elapsed,
+                    DatabaseName = connection?.Database ?? "Desconocida",
+                    Ip = connection?.DataSource ?? "Desconocida",
+                    Port = 0,
+                    TableName = ExtraerNombreTablaDesdeSql(_commandText),
+                    Schema = ExtraerEsquemaDesdeSql(_commandText)
+                };
+
+                // Se delega al servicio. Con el ajuste propuesto en LoggingService,
+                // esto irá al mismo archivo del request/endpoint.
+                _loggingService.LogDatabaseSuccess(log, _httpContextAccessor?.HttpContext);
+            }
+            catch (Exception ex)
+            {
+                _loggingService?.LogDatabaseError(_innerCommand, ex, _httpContextAccessor?.HttpContext);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Inicializa mediciones y ancla el archivo de log del request escribiendo el SQL una sola vez.
+    /// </summary>
+    private void StartIfNeeded()
+    {
+        lock (_lock)
+        {
+            if (_executionCount == 0)
+            {
+                _startTime = DateTime.Now;
+                _commandText = _innerCommand.CommandText;
+                _stopwatch.Restart();
+
+                PrimeCurrentRequestLogOnce();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Incrementa contadores internos de ejecución para el resumen final.
+    /// </summary>
+    private void RegisterExecution(int affectedRows)
+    {
+        lock (_lock)
+        {
+            _executionCount++;
+            if (affectedRows > 0)
+                _totalAffectedRows += affectedRows;
+        }
+    }
+
+    /// <summary>
+    /// Escribe una sola vez un encabezado con el SQL al archivo del request, 
+    /// garantizando que el servicio resuelva y recuerde el path correcto.
+    /// </summary>
+    private void PrimeCurrentRequestLogOnce()
+    {
+        if (_primedCurrentRequestLog || _loggingService is null)
+            return;
+
+        try
+        {
+            var header =
+                "──────────────── SQL COMMAND ────────────────\n" +
+                _commandText + "\n" +
+                "──────────────────────────────────────────────";
+
+            _loggingService.WriteLog(header, _httpContextAccessor?.HttpContext);
+            _primedCurrentRequestLog = true;
+        }
+        catch
+        {
+            _primedCurrentRequestLog = true; // evita reintentos ruidosos
+        }
+    }
+
+    /// <summary>Extrae el nombre de la tabla desde la sentencia SQL.</summary>
+    private static string ExtraerNombreTablaDesdeSql(string sql)
+    {
+        try
+        {
+            var tokens = sql.ToLower().Split(' ');
+            var index = Array.FindIndex(tokens, t => t == "into" || t == "from" || t == "update");
+            return index >= 0 && tokens.Length > index + 1 ? tokens[index + 1] : "Desconocida";
+        }
+        catch { return "Desconocida"; }
+    }
+
+    /// <summary>Extrae el esquema (library) desde la sentencia SQL.</summary>
+    private static string ExtraerEsquemaDesdeSql(string sql)
+    {
+        var tabla = ExtraerNombreTablaDesdeSql(sql);
+        var partes = tabla.Split('.');
+        return partes.Length > 1 ? partes[0] : "Desconocida";
+    }
+
+    #region Delegación al comando interno
+
+    public override string CommandText { get => _innerCommand.CommandText; set => _innerCommand.CommandText = value; }
+    public override int CommandTimeout { get => _innerCommand.CommandTimeout; set => _innerCommand.CommandTimeout = value; }
+    public override CommandType CommandType { get => _innerCommand.CommandType; set => _innerCommand.CommandType = value; }
+    public override bool DesignTimeVisible { get => _innerCommand.DesignTimeVisible; set => _innerCommand.DesignTimeVisible = value; }
+    public override UpdateRowSource UpdatedRowSource { get => _innerCommand.UpdatedRowSource; set => _innerCommand.UpdatedRowSource = value; }
+    protected override DbConnection DbConnection { get => _innerCommand.Connection!; set => _innerCommand.Connection = value; }
+    protected override DbTransaction? DbTransaction { get => _innerCommand.Transaction; set => _innerCommand.Transaction = value; }
+    protected override DbParameterCollection DbParameterCollection => _innerCommand.Parameters;
+    public override void Cancel() => _innerCommand.Cancel();
+    protected override DbParameter CreateDbParameter() => _innerCommand.CreateParameter();
+    public override void Prepare() => _innerCommand.Prepare();
+
+    #endregion
+}
 
 
----------------------------Inicio de Log-------------------------
-Inicio: 2025-09-03 11:57:28
--------------------------------------------------------------------
 
----------------------------Enviroment Info-------------------------
-Inicio: 2025-09-03 11:57:28
--------------------------------------------------------------------
-Application: MS_BAN_43_Embosado_Tarjetas_Debito
-Environment: Development
-ContentRoot: C:\Git\MS_BAN_43_EmbosadoTarjetasDebito\BACKEND\MS_BAN_43_Embosado_Tarjetas_Debito
-Execution ID: 0HNFB2CP86H3A:0000000B
-Client IP: ::1
-User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
-Machine Name: HNCSTG015243WAP
-OS: Microsoft Windows NT 10.0.20348.0
-Host: localhost:7275
-Distribución: N/A
-  -- Extras del HttpContext --
-    Scheme              : https
-    Protocol            : HTTP/2
-    Method              : POST
-    Path                : /api/Auth/Login
-    Query               : 
-    ContentType         : application/json
-    ContentLength       : 46
-    ClientPort          : 58493
-    LocalIp             : ::1
-    LocalPort           : 7275
-    ConnectionId        : 0HNFB2CP86H3A
-    Referer             : https://localhost:7275/swagger/index.html
-----------------------------------------------------------------------
----------------------------Enviroment Info-------------------------
-Fin: 2025-09-03 11:57:28
--------------------------------------------------------------------
+using Logging.Abstractions;
+using Logging.Models;
+using Microsoft.AspNetCore.Http;
 
--------------------------------------------------------------------------------
-Controlador: Auth
-Action: Login
-Inicio: 2025-09-03 11:57:28
--------------------------------------------------------------------------------
--------------------------------------------------------------------------------
+public sealed class LoggingService : ILoggingService
+{
+    // ... resto de tu servicio ...
 
-----------------------------------Request Info---------------------------------
-Inicio: 2025-09-03 11:57:28
--------------------------------------------------------------------------------
-Método: POST
-URL: /api/Auth/Login
-Cuerpo:
+    /// <summary>
+    /// Registra un bloque estructurado de éxito de ejecución SQL en el mismo
+    /// archivo del request/endpoint, y ejecuta cualquier otra acción colateral
+    /// (por ejemplo, CSV) que ya tuvieses implementada.
+    /// </summary>
+    /// <param name="model">Datos de la ejecución SQL.</param>
+    /// <param name="httpContext">Contexto HTTP (opcional).</param>
+    public void LogDatabaseSuccess(SqlLogModel model, HttpContext? httpContext = null)
+    {
+        try
+        {
+            // 1) Formateo del bloque estructurado (usa tu formateador actual)
+            var block = LogFormatter.FormatDatabaseSuccess(model);
 
-                              {
-                                "user": "string",
-                                "password": "string"
-                              }
-----------------------------------Request Info---------------------------------
-Fin: 2025-09-03 11:57:28
--------------------------------------------------------------------------------
+            // 2) Escribir en el MISMO archivo del request/endpoint.
+            //    WriteLog -> internamente utiliza GetCurrentLogFile(httpContext)
+            //    que ya lee/recicla HttpContext.Items["LogFileName"].
+            WriteLog(block, httpContext);
 
-──────────────── SQL COMMAND ────────────────
-SELECT * FROM BCAH96DTA.IETD01LOG ORDER BY LOGA01AID DESC
-──────────────────────────────────────────────
-──────────────── SQL COMMAND ────────────────
-INSERT INTO BCAH96DTA.ETD01LOG (LOGA01AID, LOGA02UID, LOGA03TST,  LOGA04SUC,  LOGA05IPA,  LOGA06MNA,  LOGA07SID,  LOGA08FRE,  LOGA09ACO,  LOGA10UAG,  LOGA11BRO,  LOGA12SOP,  LOGA13DIS) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-──────────────────────────────────────────────
-──────────────── SQL COMMAND ────────────────
-SELECT * FROM BCAH96DTA.IETD02LOG WHERE LOGB01UID = ?
-──────────────────────────────────────────────
-──────────────── SQL COMMAND ────────────────
-UPDATE BCAH96DTA.IETD02LOG SET LOGB02UIL = ?, LOGB03TIL = ?, LOGB04SEA = ?,  LOGB05UDI = ?, LOGB06UTD = ?, LOGB07UNA = ?, LOGB09UIF = ?, LOGB10TOK = ?  WHERE LOGB01UID = ?
-──────────────────────────────────────────────
-----------------------------------Response Info---------------------------------
-Inicio: 2025-09-03 11:57:30
--------------------------------------------------------------------------------
-Código Estado: 401
-Cuerpo:
+            // 3) (Opcional) Si generas CSV aparte, mantenlo:
+            // TryWriteCsv(model, httpContext); // si existe en tu servicio
+        }
+        catch
+        {
+            // Nunca romper por el log
+        }
+    }
 
-                              {
-                                "token": {
-                                  "token": "",
-                                  "expiration": "0001-01-01T00:00:00"
-                                },
-                                "activeDirectoryData": {
-                                  "agenciaAperturaCodigo": "",
-                                  "agenciaImprimeCodigo": "",
-                                  "nombreUsuario": "",
-                                  "usuarioICBS": ""
-                                },
-                                "codigo": {
-                                  "status": "Unauthorized",
-                                  "message": "Credenciales Inválidas",
-                                  "timeStamp": "11:57:30 AM",
-                                  "error": "401"
-                                }
-                              }
-----------------------------------Response Info---------------------------------
-Fin: 2025-09-03 11:57:30
--------------------------------------------------------------------------------
--------------------------------------------------------------------------------
-Controlador: Auth
-Action: Login
-Fin: 2025-09-03 11:57:30
--------------------------------------------------------------------------------
+    /// <summary>
+    /// Registra un bloque estructurado de error de ejecución SQL en el mismo archivo del request.
+    /// </summary>
+    /// <param name="command">Comando que falló.</param>
+    /// <param name="ex">Excepción.</param>
+    /// <param name="httpContext">Contexto HTTP (opcional).</param>
+    public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? httpContext = null)
+    {
+        try
+        {
+            var block = LogFormatter.FormatDatabaseError(command, ex);
+            WriteLog(block, httpContext);
+
+            // (Opcional) CSV/telemetría adicional si la tienes:
+            // TryWriteCsvError(command, ex, httpContext);
+        }
+        catch
+        {
+            // Nunca romper por el log
+        }
+    }
+
+    // ---------------------------
+    // Asegúrate de que WriteLog(string, HttpContext?) y GetCurrentLogFile(HttpContext?)
+    // ya existen y usan HttpContext.Items["LogFileName"] si está seteado por el middleware.
+    // ---------------------------
+}
 
 
-[Tiempo Total de Ejecución]: 1765 ms
----------------------------Fin de Log-------------------------
-Final: 2025-09-03 11:57:30
--------------------------------------------------------------------
-
-
-
-
-
-    Y esto lo siguio guardando siempre en el archivo General donde no es correcto, hay que revisar porque una parte se guardo bien, y porque la otra no:
-
-===== LOG DE EJECUCIÓN SQL =====
-Fecha y Hora      : 2025-09-03 11:57:30.116
-Duración          : 34.2678 ms
-Base de Datos     : Desconocida
-IP                : Desconocida
-Puerto            : 0
-Esquema           : bcah96dta
-Tabla             : bcah96dta.ietd02log
-Veces Ejecutado   : 1
-Filas Afectadas   : 1
-SQL:
-UPDATE BCAH96DTA.IETD02LOG SET LOGB02UIL = ?, LOGB03TIL = ?, LOGB04SEA = ?,  LOGB05UDI = ?, LOGB06UTD = ?, LOGB07UNA = ?, LOGB09UIF = ?, LOGB10TOK = ?  WHERE LOGB01UID = ?
-================================
