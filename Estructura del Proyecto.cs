@@ -153,3 +153,11 @@ Eñ código esta excelente pero requiero que la parte que hace este foreach:
             }
 
 Se haga a lo interno del primer foreach en este caso, para evitar tener que hacer 2 recorridos, sino que cree en un solo foreach tanto la asignación de los Row, como la asignación del valor a insertar en cada Row.
+
+Ademas que colocar este código sea opcional, si el usuario no lo coloca a lo interno de la libreria que lo haga:
+
+cmd.CommandText = query.Sql;
+cmd.CommandType = CommandType.Text;
+
+Por el momento solo dime si es posible y no modifiques codigo aun, porque la forma en la que esta el primer foreach no esta mal.
+
