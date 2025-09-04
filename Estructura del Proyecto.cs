@@ -1,609 +1,1588 @@
-using QueryBuilder.Enums;
-using QueryBuilder.Helpers;
-using QueryBuilder.Models;
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Data.Common;
-using System.Linq;
-using System.Runtime.CompilerServices; // ITuple
-using System.Text;
-
-namespace QueryBuilder.Builders
-{
-    /// <summary>
-    /// Generador de sentencias INSERT compatibles con múltiples motores (DB2 for i, SQL Server, MySQL, etc.).
-    /// Para DB2 for i se generan placeholders (?) y <see cref="QueryResult.Parameters"/> con los valores
-    /// en el mismo orden, de modo que puedan ser enlazados con OleDbCommand/DbCommand de forma segura.
-    /// </summary>
-    /// <remarks>
-    /// Características:
-    /// <list type="bullet">
-    /// <item><description>INSERT con columnas definidas vía <see cref="IntoColumns(string[])"/> o inferidas por atributos [ColumnName].</description></item>
-    /// <item><description>Múltiples filas con <see cref="Values((string, object?)[])"/>, <see cref="Row(object?[])"/>, <see cref="Rows(IEnumerable{object?[]})"/>, <see cref="ListValues(object?[][])"/>.</description></item>
-    /// <item><description>Atajos para tuplas: <see cref="ListValuesFromTuples{TTuple}(IEnumerable{TTuple})"/>.</description></item>
-    /// <item><description>Atajos para objetos con atributos: <see cref="FromObject(object)"/>, <see cref="FromObjects{T}(IEnumerable{T})"/>.</description></item>
-    /// <item><description>INSERT ... SELECT con <see cref="FromSelect(SelectQueryBuilder)"/> y <see cref="WhereNotExists(Subquery)"/>.</description></item>
-    /// <item><description>Comentarios de trazabilidad con <see cref="WithComment(string)"/> (sanitizados).</description></item>
-    /// <item><description>Soporte opcional de dialecto para <c>INSERT IGNORE</c> y <c>ON DUPLICATE KEY UPDATE</c> (no DB2 i).</description></item>
-    /// </list>
-    /// </remarks>
-    /// <param name="tableName">Nombre de la tabla (obligatorio).</param>
-    /// <param name="library">Nombre de la librería/esquema (opcional). Para DB2 i suele ser la biblioteca.</param>
-    /// <param name="dialect">Dialecto SQL. Por defecto <see cref="SqlDialect.Db2i"/>.</param>
-    public class InsertQueryBuilder(string tableName, string? library = null, SqlDialect dialect = SqlDialect.Db2i)
-    {
-        private readonly string _tableName = tableName ?? throw new ArgumentNullException(nameof(tableName));
-        private readonly string? _library = library;
-        private readonly SqlDialect _dialect = dialect;
-
-        // Columnas explícitas del INSERT (en orden).
-        private readonly List<string> _columns = [];
-
-        // Filas parametrizadas (modo normal – placeholders + parámetros en Build()).
-        private readonly List<List<object?>> _rows = [];
-
-        // Filas RAW (funciones/expresiones ya formateadas, sin parámetros).
-        private readonly List<List<object>> _valuesRaw = [];
-
-        // Fuente SELECT (INSERT ... SELECT).
-        private SelectQueryBuilder? _selectSource;
-
-        // Opcionales.
-        private string? _comment;
-        private string? _whereClause;
-        private bool _insertIgnore = false; // No se emite en Db2i
-        private readonly Dictionary<string, object?> _onDuplicateUpdate = new(StringComparer.OrdinalIgnoreCase); // No Db2i
-
-        // === Soporte de inferencia por atributos ===
-        private readonly Type? _mappedType;  // si se construye por Type
-        private readonly IReadOnlyList<ModelInsertMapper.ColumnMeta>? _mappedColumns;
-
-        // === (Opcional) Modo streaming: enlaza un DbCommand para agregar parámetros y placeholders en Row(...) ===
-        private DbCommand? _boundCommand;
-        private bool _autoAssignTextWhenEmpty = true;
-        private bool _autoSetCommandTypeText = true;
-        private readonly StringBuilder _valuesSqlSb = []; // Porción incremental de VALUES(...) en modo streaming
-        private int _streamingRowCount = 0;
-
-        /// <summary>
-        /// Crea el builder inferido desde atributos de clase/propiedad. Usará:
-        /// [TableName], [Library] en la clase; [ColumnName] en propiedades.
-        /// </summary>
-        /// <param name="entityType">Tipo del DTO con atributos.</param>
-        /// <param name="dialect">Dialecto (por defecto Db2i).</param>
-        public InsertQueryBuilder(Type entityType, SqlDialect dialect = SqlDialect.Db2i)
-            : this(
-                  ModelInsertMapper.GetTableAndLibrary(entityType).table,
-                  ModelInsertMapper.GetTableAndLibrary(entityType).library,
-                  dialect)
-        {
-            _mappedType = entityType;
-            _mappedColumns = ModelInsertMapper.GetColumns(entityType);
-            // Nota: no agregamos columnas de inmediato; se integran en Build() si el usuario no definió IntoColumns(...)
-        }
-
-        /// <summary>
-        /// Versión genérica inferida por T con atributos.
-        /// </summary>
-        public static InsertQueryBuilder FromType<T>(SqlDialect dialect = SqlDialect.Db2i)
-            => new(typeof(T), dialect);
-
-        /// <summary>
-        /// (Opcional) Enlaza un <see cref="DbCommand"/> para habilitar el modo “streaming”.
-        /// En este modo, cada llamada a <see cref="Row(object?[])"/> agrega los parámetros
-        /// directamente al comando y compone los placeholders en el SQL en el mismo ciclo,
-        /// evitando un segundo recorrido.
-        /// </summary>
-        /// <param name="command">Comando a enlazar (posicional para DB2 i / OleDb con '?').</param>
-        /// <param name="assignTextIfEmpty">
-        /// Si true (por defecto), al hacer <see cref="Build"/> y si <see cref="DbCommand.CommandText"/> está vacío,
-        /// se asignará automáticamente el SQL generado.
-        /// </param>
-        /// <param name="setCommandTypeText">
-        /// Si true (por defecto), al hacer <see cref="Build"/> y si el <see cref="DbCommand.CommandType"/> no fue configurado,
-        /// se forzará a <see cref="CommandType.Text"/>.
-        /// </param>
-        public InsertQueryBuilder BindCommand(DbCommand command, bool assignTextIfEmpty = true, bool setCommandTypeText = true)
-        {
-            _boundCommand = command;
-            _autoAssignTextWhenEmpty = assignTextIfEmpty;
-            _autoSetCommandTypeText = setCommandTypeText;
-            return this;
-        }
-
-        /// <summary>
-        /// Agrega un comentario SQL al inicio del comando (una línea), útil para trazabilidad.
-        /// Se sanitiza para evitar inyección de comentarios.
-        /// </summary>
-        public InsertQueryBuilder WithComment(string? comment)
-        {
-            if (string.IsNullOrWhiteSpace(comment))
-                return this;
-
-            // Sanitización simple de comentarios (S2681 + defensa básica)
-            var sanitized = comment
-                .Replace("\r", " ")
-                .Replace("\n", " ")
-                .Replace("--", "- -")
-                .Trim();
-
-            _comment = "-- " + sanitized;
-            return this;
-        }
-
-        /// <summary>Habilita INSERT IGNORE (solo motores compatibles; no DB2 i).</summary>
-        public InsertQueryBuilder InsertIgnore()
-        { _insertIgnore = true; return this; }
-
-        /// <summary>Define "ON DUPLICATE KEY UPDATE" (solo motores compatibles; no DB2 i).</summary>
-        public InsertQueryBuilder OnDuplicateKeyUpdate(string column, object? value)
-        { _onDuplicateUpdate[column] = value; return this; }
-
-        /// <summary>Define múltiples columnas para "ON DUPLICATE KEY UPDATE" (solo motores compatibles; no DB2 i).</summary>
-        public InsertQueryBuilder OnDuplicateKeyUpdate(Dictionary<string, object?> updates)
-        {
-            if (updates is null) return this;
-            foreach (var kvp in updates) _onDuplicateUpdate[kvp.Key] = kvp.Value;
-            return this;
-        }
-
-        /// <summary>
-        /// Define la lista de columnas para el INSERT. El orden debe coincidir con los valores que se agreguen.
-        /// </summary>
-        /// <param name="columns">Columnas de la tabla, en el orden deseado.</param>
-        /// <exception cref="ArgumentException">Si no se especifica ninguna columna.</exception>
-        public InsertQueryBuilder IntoColumns(params string[] columns)
-        {
-            if (columns == null || columns.Length == 0)
-                throw new ArgumentException("Debe especificar al menos una columna.", nameof(columns));
-
-            _columns.Clear();
-            _columns.AddRange(columns);
-            return this;
-        }
-
-        /// <summary>
-        /// Agrega una fila de valores (modo parametrizado) recibiendo tuplas (columna, valor).
-        /// Si no se definieron columnas, se toma el orden de las tuplas.
-        /// </summary>
-        public InsertQueryBuilder Values(params (string Column, object? Value)[] values)
-        {
-            if (_columns.Count == 0)
-                _columns.AddRange(values.Select(v => v.Column));
-            else if (_columns.Count != values.Length)
-                throw new InvalidOperationException($"Se esperaban {_columns.Count} columnas, pero se recibieron {values.Length}.");
-
-            _rows.Add([.. values.Select(v => v.Value)]);
-            return this;
-        }
-
-        /// <summary>
-        /// Agrega valores RAW (por ejemplo, funciones SQL). Estos valores se insertan sin parametrizar.
-        /// </summary>
-        public InsertQueryBuilder ValuesRaw(params string[] rawValues)
-        {
-            _valuesRaw.Add([.. rawValues.Cast<object>()]);
-            return this;
-        }
-
-        /// <summary>Define un SELECT como origen del INSERT (INSERT ... SELECT).</summary>
-        public InsertQueryBuilder FromSelect(SelectQueryBuilder select)
-        {
-            _selectSource = select;
-            _valuesRaw.Clear();    // Si se usa SELECT, no se mezclan VALUES RAW.
-            _rows.Clear();         // Ni VALUES parametrizados.
-            return this;
-        }
-
-        /// <summary>Condición opcional para INSERT ... SELECT (WHERE NOT EXISTS (...)).</summary>
-        public InsertQueryBuilder WhereNotExists(Subquery subquery)
-        {
-            _whereClause = $"NOT EXISTS ({subquery.Sql})";
-            return this;
-        }
-
-        /// <summary>
-        /// Agrega UNA fila por posición (parametrizada). El orden debe coincidir con IntoColumns o,
-        /// si no se definió, se infiere desde atributos [ColumnName] del tipo mapeado.
-        /// </summary>
-        public InsertQueryBuilder Row(params object?[] values)
-        {
-            // Inicialización perezosa de columnas si no se definieron explícitamente:
-            if (_columns.Count == 0)
-            {
-                if (_mappedColumns is { Count: > 0 })
-                {
-                    _columns.AddRange(_mappedColumns.Select(c => c.ColumnName));
-                }
-                else
-                {
-                    throw new InvalidOperationException("Debe llamar primero a IntoColumns(...) antes de Row(...).");
-                }
-            }
-
-            if (values is null || values.Length != _columns.Count)
-                throw new InvalidOperationException($"Se esperaban {_columns.Count} valores, pero se recibieron {values?.Length ?? 0}.");
-
-            // Si NO hay streaming, guardamos la fila para procesarla en Build().
-            if (_boundCommand is null)
-            {
-                _rows.Add([.. values]);
-                return this;
-            }
-
-            // Si hay streaming: placeholders + parámetros al comando en el mismo ciclo.
-            if (_streamingRowCount == 0)
-                _valuesSqlSb.Append(" VALUES ");
-
-            // Creamos placeholders para la fila y, por cada valor, creamos un parámetro posicional.
-            var placeholders = new string[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                placeholders[i] = "?";
-                var p = _boundCommand.CreateParameter();
-                p.Value = values[i] ?? DBNull.Value;
-                _boundCommand.Parameters.Add(p);
-            }
-
-            if (_streamingRowCount > 0)
-                _valuesSqlSb.Append(", ");
-
-            _valuesSqlSb.Append('(')
-                        .Append(string.Join(", ", placeholders))
-                        .Append(')');
-
-            _streamingRowCount++;
-            return this;
-        }
-
-        /// <summary>Agrega múltiples filas por posición (parametrizadas).</summary>
-        public InsertQueryBuilder Rows(IEnumerable<object?[]> rows)
-        {
-            if (rows is null) return this;
-            foreach (var r in rows) Row(r);
-            return this;
-        }
-
-        /// <summary>Azúcar sintáctico para múltiples filas usando params.</summary>
-        public InsertQueryBuilder ListValues(params object?[][] rows) => Rows(rows);
-
-        /// <summary>
-        /// Agrega múltiples filas a partir de tuplas (ValueTuple). Evita construir arreglos manuales.
-        /// Cada tupla aporta una fila (en orden).
-        /// </summary>
-        public InsertQueryBuilder ListValuesFromTuples<TTuple>(IEnumerable<TTuple> rows)
-        {
-            if (rows is null) return this;
-            foreach (var r in rows)
-            {
-                if (r is not ITuple tpl)
-                    throw new InvalidOperationException("Cada elemento debe ser una tupla (ValueTuple).");
-
-                var values = new object?[tpl.Length];
-                for (int i = 0; i < tpl.Length; i++) values[i] = tpl[i];
-                Row(values);
-            }
-            return this;
-        }
-
-        /// <summary>Azúcar sintáctico (params) para tuplas.</summary>
-        public InsertQueryBuilder ListValuesFromTuples<TTuple>(params TTuple[] rows)
-            => ListValuesFromTuples((IEnumerable<TTuple>)rows);
-
-        /// <summary>
-        /// Agrega UNA fila desde un objeto decorado con [ColumnName] (en el orden de IntoColumns si se definió
-        /// o en el orden de los atributos).
-        /// </summary>
-        public InsertQueryBuilder FromObject(object entity)
-        {
-            if (entity is null) return this;
-
-            var t = entity.GetType();
-            var cols = _mappedType == t && _mappedColumns is { Count: > 0 }
-                ? _mappedColumns
-                : ModelInsertMapper.GetColumns(t);
-
-            var targetCols = _columns.Count > 0
-                ? _columns
-                : new List<string>(cols.Select(c => c.ColumnName));
-
-            var map = cols.ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
-            var row = new object?[targetCols.Count];
-
-            for (int i = 0; i < targetCols.Count; i++)
-            {
-                if (!map.TryGetValue(targetCols[i], out var meta))
-                    throw new InvalidOperationException($"La columna '{targetCols[i]}' no existe como [ColumnName] en {t.Name}.");
-                row[i] = meta.Property.GetValue(entity);
-            }
-
-            if (_columns.Count == 0)
-                _columns.AddRange(targetCols);
-
-            return Row(row);
-        }
-
-        /// <summary>Agrega MÚLTIPLES filas desde objetos decorados con [ColumnName].</summary>
-        public InsertQueryBuilder FromObjects<T>(IEnumerable<T> entities)
-        {
-            if (entities is null) return this;
-            foreach (var e in entities) FromObject(e!);
-            return this;
-        }
-
-        /// <summary>
-        /// Construye el SQL final y la lista de parámetros (para motores con placeholders '?', ej. DB2 i).
-        /// Integra inferencia: si no llamaste a IntoColumns(...) y el builder conoce un tipo mapeado, infiere columnas [ColumnName].
-        /// </summary>
-        public QueryResult Build()
-        {
-            // INFERENCIA de columnas si procede.
-            if (_columns.Count == 0 && _mappedColumns is { Count: > 0 })
-                _columns.AddRange(_mappedColumns.Select(c => c.ColumnName));
-
-            // Validaciones base.
-            if (string.IsNullOrWhiteSpace(_tableName))
-                throw new InvalidOperationException("Debe especificarse el nombre de la tabla para INSERT.");
-            if (_columns.Count == 0)
-                throw new InvalidOperationException("Debe especificar al menos una columna para el INSERT (o usar atributos [ColumnName]).");
-            if (_selectSource != null && (_rows.Count > 0 || _valuesRaw.Count > 0))
-                throw new InvalidOperationException("No se puede usar 'VALUES/RAW' y 'FROM SELECT' al mismo tiempo.");
-            if (_selectSource == null && _rows.Count == 0 && _valuesRaw.Count == 0 && _streamingRowCount == 0)
-                throw new InvalidOperationException("Debe especificar al menos una fila de valores para el INSERT.");
-
-            // Validaciones de filas parametrizadas (solo si NO estamos en streaming).
-            if (_boundCommand is null)
-            {
-                int? badRowIndex = _rows
-                    .Select((row, idx) => new { row, idx })
-                    .Where(x => x.row == null || x.row.Count != _columns.Count)
-                    .Select(x => (int?)x.idx)
-                    .FirstOrDefault();
-
-                if (badRowIndex.HasValue)
-                {
-                    int idx = badRowIndex.Value;
-                    int count = _rows[idx]?.Count ?? 0;
-                    throw new InvalidOperationException($"La fila #{idx} tiene {count} valores; se esperaban {_columns.Count}.");
-                }
-            }
-
-            // Validaciones de filas RAW.
-            int? badRawIndex = _valuesRaw
-                .Select((row, idx) => new { row, idx })
-                .Where(x => x.row == null || x.row.Count != _columns.Count)
-                .Select(x => (int?)x.idx)
-                .FirstOrDefault();
-
-            if (badRawIndex.HasValue)
-            {
-                int idx = badRawIndex.Value;
-                int count = _valuesRaw[idx]?.Count ?? 0;
-                throw new InvalidOperationException($"La fila RAW #{idx} tiene {count} valores; se esperaban {_columns.Count}.");
-            }
-
-            var sb = new StringBuilder();
-            var parameters = new List<object?>(); // Sólo se usa en modo normal.
-
-            if (!string.IsNullOrWhiteSpace(_comment))
-                sb.AppendLine(_comment);
-
-            // Cabecera INSERT
-            sb.Append("INSERT ");
-            if (_insertIgnore && _dialect == SqlDialect.MySql)
-                sb.Append("IGNORE ");
-
-            sb.Append("INTO ");
-            if (!string.IsNullOrWhiteSpace(_library))
-                sb.Append($"{_library}.");
-            sb.Append(_tableName);
-            sb.Append(" (").Append(string.Join(", ", _columns)).Append(')');
-
-            if (_selectSource != null)
-            {
-                var sel = _selectSource.Build();
-                sb.AppendLine().Append(sel.Sql);
-
-                if (!string.IsNullOrWhiteSpace(_whereClause))
-                    sb.Append(" WHERE ").Append(_whereClause);
-            }
-            else
-            {
-                // Si estamos en modo normal: construimos VALUES + parámetros aquí.
-                if (_boundCommand is null)
-                {
-                    sb.Append(" VALUES ");
-
-                    var valueLines = new List<string>();
-
-                    foreach (var row in _rows)
-                    {
-                        var placeholders = new string[row.Count];
-                        for (int i = 0; i < row.Count; i++)
-                        {
-                            placeholders[i] = "?";
-                            parameters.Add(row[i]);
-                        }
-                        valueLines.Add($"({string.Join(", ", placeholders)})");
-                    }
-
-                    foreach (var row in _valuesRaw)
-                        valueLines.Add($"({string.Join(", ", row.Select(SqlHelper.FormatValue))})");
-
-                    sb.Append(string.Join(", ", valueLines));
-                }
-                else
-                {
-                    // En modo streaming, ya se generó la porción VALUES(...) incrementales.
-                    if (_streamingRowCount > 0)
-                        sb.Append(_valuesSqlSb.ToString());
-
-                    // Si además hay filas RAW, se anexan al final.
-                    if (_valuesRaw.Count > 0)
-                    {
-                        if (_streamingRowCount == 0)
-                            sb.Append(" VALUES ");
-                        else
-                            sb.Append(", ");
-
-                        var rawLines = _valuesRaw.Select(r => $"({string.Join(", ", r.Select(SqlHelper.FormatValue))})");
-                        sb.Append(string.Join(", ", rawLines));
-                    }
-                }
-            }
-
-            // UPSERT (solo MySQL; no DB2 i)
-            if (_onDuplicateUpdate.Count > 0 && _dialect == SqlDialect.MySql)
-            {
-                sb.Append(" ON DUPLICATE KEY UPDATE ");
-                sb.Append(string.Join(", ", _onDuplicateUpdate.Select(kv =>
-                    $"{kv.Key} = {SqlHelper.FormatValue(kv.Value)}")));
-            }
-
-            var sql = sb.ToString();
-
-            // Si estamos en streaming y se pidió autoconfigurar el comando:
-            if (_boundCommand != null)
-            {
-                if (_autoAssignTextWhenEmpty && string.IsNullOrWhiteSpace(_boundCommand.CommandText))
-                    _boundCommand.CommandText = sql;
-
-                if (_autoSetCommandTypeText && _boundCommand.CommandType == CommandType.Text)
-                {
-                    // En OleDb suele ser Text por defecto, lo reafirmamos para claridad.
-                    _boundCommand.CommandType = CommandType.Text;
-                }
-
-                // En streaming, los parámetros ya están en el DbCommand.
-                return new QueryResult { Sql = sql, Parameters = [] };
-            }
-
-            // Modo normal: devolvemos SQL y lista de parámetros posicionales.
-            return new QueryResult
-            {
-                Sql = sql,
-                Parameters = parameters
-            };
-        }
-    }
-}
-
-
-
-using Connections.Abstractions;
-using Logging.Abstractions;
-using Logging.Decorators;
-using Microsoft.AspNetCore.Http;
-using QueryBuilder.Models;
-using System;
-using System.Data;
-using System.Data.Common;
-using System.Data.OleDb;
-using System.Runtime.Versioning;
-
-namespace Connections.Providers.Database
-{
-    /// <summary>
-    /// Proveedor de conexión a base de datos AS400 utilizando OleDb.
-    /// Esta implementación permite la ejecución de comandos SQL con o sin logging estructurado.
-    /// </summary>
-    public sealed class AS400ConnectionProvider : IDatabaseConnection, IDisposable
-    {
-        private readonly OleDbConnection _oleDbConnection;
-        private readonly ILoggingService? _loggingService;
-        private readonly IHttpContextAccessor? _httpContextAccessor;
-
-        /// <summary>
-        /// Inicializa una nueva instancia de <see cref="AS400ConnectionProvider"/>.
-        /// </summary>
-        /// <param name="connectionString">Cadena de conexión a AS400 en formato OleDb.</param>
-        /// <param name="loggingService">Servicio de logging estructurado (opcional).</param>
-        /// <param name="httpContextAccessor">Accessor del contexto HTTP (opcional).</param>
-        public AS400ConnectionProvider(
-            string connectionString,
-            ILoggingService? loggingService = null,
-            IHttpContextAccessor? httpContextAccessor = null)
-        {
-            _oleDbConnection = new OleDbConnection(connectionString);
-            _loggingService = loggingService;
-            _httpContextAccessor = httpContextAccessor;
-        }
-
-        /// <inheritdoc />
-        [SupportedOSPlatform("windows")]
-        public void Open()
-        {
-            if (_oleDbConnection.State != ConnectionState.Open)
-                _oleDbConnection.Open();
-        }
-
-        /// <inheritdoc />
-        [SupportedOSPlatform("windows")]
-        public void Close()
-        {
-            if (_oleDbConnection.State != ConnectionState.Closed)
-                _oleDbConnection.Close();
-        }
-
-        /// <inheritdoc />
-        [SupportedOSPlatform("windows")]
-        public bool IsConnected => _oleDbConnection?.State == ConnectionState.Open;
-
-        /// <inheritdoc />
-        [SupportedOSPlatform("windows")]
-        public DbCommand GetDbCommand(HttpContext? context = null)
-        {
-            var command = _oleDbConnection.CreateCommand();
-
-            // Si el servicio de logging está disponible, devolvemos el comando decorado.
-            if (_loggingService != null)
-                return new LoggingDbCommandWrapper(command, _loggingService, _httpContextAccessor);
-
-            // En caso contrario, devolvemos el comando básico.
-            return command;
-        }
-
-        /// <summary>
-        /// Crea un comando configurado con la consulta SQL generada por QueryBuilder y sus parámetros asociados.
-        /// Si el CommandText aún no está definido, lo asigna automáticamente.
-        /// Si el CommandType no fue configurado, se establece en Text.
-        /// </summary>
-        /// <param name="queryResult">Objeto que contiene el SQL generado y la lista de parámetros.</param>
-        /// <param name="context">Contexto HTTP actual para trazabilidad opcional.</param>
-        /// <returns>DbCommand listo para ejecución.</returns>
-        [SupportedOSPlatform("windows")]
-        public DbCommand GetDbCommand(QueryResult queryResult, HttpContext? context)
-        {
-            var command = GetDbCommand(context);
-
-            // Asignación “opcional” para no interferir si ya fue configurado por el consumidor.
-            if (string.IsNullOrWhiteSpace(command.CommandText))
-                command.CommandText = queryResult.Sql;
-
-            if (command.CommandType == CommandType.Text) // por defecto ya es Text; lo reafirmamos
-                command.CommandType = CommandType.Text;
-
-            // Limpiamos y reponemos los parámetros (posicionales) si vienen en QueryResult.
-            command.Parameters.Clear();
-
-            if (queryResult.Parameters is not null && queryResult.Parameters.Count > 0)
-            {
-                foreach (var paramValue in queryResult.Parameters)
-                {
-                    var parameter = command.CreateParameter();
-                    parameter.Value = paramValue ?? DBNull.Value;
-                    command.Parameters.Add(parameter);
-                }
-            }
-
-            return command;
-        }
-
-        /// <inheritdoc />
-        public void Dispose()
-        {
-            _oleDbConnection?.Dispose();
-        }
-    }
-}
+Tenemos que revisar el log, te muestro un log que se genero, todo esta correcto, pero el orden esta mal:
+
+---------------------------Inicio de Log-------------------------
+Inicio: 2025-09-04 09:57:49
+-------------------------------------------------------------------
+
+---------------------------Enviroment Info-------------------------
+Inicio: 2025-09-04 09:57:49
+-------------------------------------------------------------------
+Application: API_1_TERCEROS_REMESADORAS
+Environment: Development
+ContentRoot: C:\Git\Librerias Davivienda\Temporal\API_1_TERCEROS_REMESADORAS
+Execution ID: 0HNFBPF0IM952:0000000B
+Client IP: ::1
+User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
+Machine Name: HNCSTG015243WAP
+OS: Microsoft Windows NT 10.0.20348.0
+Host: localhost:7116
+Distribución: N/A
+  -- Extras del HttpContext --
+    Scheme              : https
+    Protocol            : HTTP/2
+    Method              : POST
+    Path                : /v1/Bts/ReporteriaSDEP
+    Query               : 
+    ContentType         : application/json-patch+json
+    ContentLength       : 401
+    ClientPort          : 54808
+    LocalIp             : ::1
+    LocalPort           : 7116
+    ConnectionId        : 0HNFBPF0IM952
+    Referer             : https://localhost:7116/swagger/index.html
+----------------------------------------------------------------------
+---------------------------Enviroment Info-------------------------
+Fin: 2025-09-04 09:57:49
+-------------------------------------------------------------------
+
+-------------------------------------------------------------------------------
+Controlador: Bts
+Action: ObtenerTransaccionesClienteBts
+Inicio: 2025-09-04 09:57:49
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+
+----------------------------------Request Info---------------------------------
+Inicio: 2025-09-04 09:57:49
+-------------------------------------------------------------------------------
+Método: POST
+URL: /v1/Bts/ReporteriaSDEP
+Cuerpo:
+
+                              {
+                                "header": {
+                                  "h-request-id": "string",
+                                  "h-channel": "string",
+                                  "h-terminal": "string",
+                                  "h-organization": "string",
+                                  "h-user-id": "string",
+                                  "h-provider": "string",
+                                  "h-session-id": "string",
+                                  "h-client-ip": "string",
+                                  "h-timestamp": "string"
+                                },
+                                "body": {
+                                  "execTR": {
+                                    "request": {
+                                      "data": {
+                                        "rowCount": "50"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+----------------------------------Request Info---------------------------------
+Fin: 2025-09-04 09:57:49
+-------------------------------------------------------------------------------
+
+===== LOG DE EJECUCIÓN SQL =====
+Fecha y Hora      : 2025-09-04 09:58:41.943
+Duración          : 142.5798 ms
+Base de Datos     : DVHNDEV
+IP                : 166.178.81.19
+Puerto            : 0
+Esquema           : bcah96dta
+Tabla             : bcah96dta.btsacta
+Veces Ejecutado   : 1
+Filas Afectadas   : 10
+SQL:
+INSERT INTO BCAH96DTA.BTSACTA (INOCONFIR, IDATRECI, IHORRECI, IDATCONF, IHORCONF, IDATVAL, IHORVAL, IDATPAGO, IHORPAGO, IDATACRE, IHORACRE, IDATRECH, IHORRECH, ITIPPAGO, ISERVICD, IDESPAIS, IDESMONE, ISAGENCD, ISPAISCD, ISTATECD, IRAGENCD, ITICUENTA, INOCUENTA, INUMREFER, ISTSREM, ISTSPRO, IERR, IERRDSC, IDSCRECH, ACODPAIS, ACODMONED, AMTOENVIA, AMTOCALCU, AFACTCAMB, BPRIMNAME, BSECUNAME, BAPELLIDO, BSEGUAPE, BDIRECCIO, BCIUDAD, BESTADO, BPAIS, BCODPOST, BTELEFONO, CPRIMNAME, CSECUNAME, CAPELLIDO, CSEGUAPE, CDIRECCIO, CCIUDAD, CESTADO, CPAIS, CCODPOST, CTELEFONO, DTIDENT, ESALEDT, EMONREFER, ETASAREFE, EMTOREF) VALUES ('89901012400', '20250904', '095817398', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'HNL', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '5200342008', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '5400.00', '140754.24', '26.0656000000', 'MIGUEL', 'ANGEL', 'SEPULVEDA', 'HENDERSON', '820 N WILCOX AVE', 'MONTEBELLO', 'CA', 'USA', '90640', '13238873090', 'EUGENIA', 'FATIMA', 'GALEANO', 'DIAZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5045244034', ' ', '20250703', 'USD', '26.0656000000', '5400.00'), ('89901012418', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'HNL', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '3011618679', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '3500.00', '91229.60', '26.0656000000', 'MIGUEL', 'ANGEL', 'MONDRAGON', 'BUSTILLOS', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'FABIOLA', 'PATRICIA', 'BONILLA', 'HERNANDEZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5044161416', ' ', '20250703', 'USD', '26.0656000000', '3500.00'), ('89901012426', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '5200368287', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '2000.00', '2000.00', '1.0000000000', 'MIGUEL', 'ANGEL', 'CHAVARRIA', 'TOLENTINO', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'EUGENIA', 'FATIMA', 'GALEANO', 'DIAZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5048281414', ' ', '20250703', 'USD', '1.0000000000', '2000.00'), ('89901012434', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '6303133567', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '2100.00', '2100.00', '1.0000000000', 'MANUEL', 'ANTONIO', 'ONTIVEROS', 'MARAVILLA', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'FABIOLA', 'PATRICIA', 'BONILLA', 'HERNANDEZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5047321536', ' ', '20250703', 'USD', '1.0000000000', '2100.00'), ('89901012442', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '1041202367', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '2000.00', '2000.00', '1.0000000000', 'MANUEL', 'ANTONIO', 'HENRIQUEZ', 'VILLARREAL', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'CARLOS', 'ROBERTO', 'REYES', 'ARGUETA', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5044443114', ' ', '20250703', 'USD', '1.0000000000', '2000.00'), ('89901012459', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '1041202367', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '2000.00', '2000.00', '1.0000000000', 'MANUEL', 'ANTONIO', 'SOLORZANO', 'VALENZUELA', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'CARLOS', 'ROBERTO', 'REYES', 'ARGUETA', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5048332044', ' ', '20250703', 'USD', '1.0000000000', '2000.00'), ('89901012475', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '5013407495', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '3000.00', '3000.00', '1.0000000000', 'HUGO', 'ERNESTO', 'SANTILLAN', 'VILLALOBOS', '5403 UNIVERSITY AVE', 'SAN DIEGO', 'CA', 'USA', '92105', '+(1)6192-659701', 'ZENIA', 'MARCELA', 'SUAZO', 'LOPEZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5047312313', ' ', '20250703', 'USD', '1.0000000000', '3000.00'), ('89901012467', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '5013407495', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '3000.00', '3000.00', '1.0000000000', 'MANUEL', 'ANTONIO', 'RODRIGUES', 'VILLANUEVA', '527 FAIR AVE', 'SAN ANTONIO', 'TX', 'USA', '78223', 'NONE', 'ZENIA', 'MARCELA', 'SUAZO', 'LOPEZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5044272838', ' ', '20250703', 'USD', '1.0000000000', '3000.00'), ('70908937005', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'HNL', 'BTS', 'USA', 'CA', 'HSH', 'NOT', '7649274531', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '95.02', '2483.81', '26.1398000000', 'CARMELO', 'DE JESUS', 'GUTIERREZ', 'TIRADO', 'ADDRESS DE CLIENTE', 'YUMA', 'AZ', 'USA', '90210', '7476691161852', 'YOSELIN', ' ', 'SANTOS', 'RODRIGUEZ', 'ADDRESS BENEFICIARIO', 'TEGUCIGALPA', 'TEG', 'HND', '80100', ' ', ' ', '20250703', 'USD', '26.1398000000', '95.02'), ('70976846336', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'CA', 'HSH', 'NOT', '7649274531', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '100.00', '100.00', '1.0000000000', 'CARMELO', 'DE JESUS', 'GUTIERREZ', 'TIRADO', 'ADDRESS DE CLIENTE', 'YUMA', 'AZ', 'USA', '90210', '7476691161852', 'YOSELIN', ' ', 'SANTOS', 'RODRIGUEZ', 'ADDRESS BENEFICIARIO', 'TEGUCIGALPA', 'TEG', 'HND', '80100', ' ', ' ', '20250703', 'USD', '1.0000000000', '100.00')
+================================
+
+============= INICIO HTTP CLIENT =============
+TraceId       : 0HNFBPF0IM952:0000000B
+Método        : POST
+URL           : https://test.globalplatform.ws/gpcs/GPTS/transactionservice.asmx
+Código Status : 200
+Duración (ms) : 487
+Encabezados   :
+traceparent: 00-117e89d348247749157f6ba2d98dbe4e-9f1af7e8351fa5aa-00
+
+Cuerpo:
+<?xml version="1.0" encoding="utf-16"?>
+<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:gp="http://www.btsincusa.com/gp/" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Header>
+    <gp:SECURITY>
+      <gp:SESSION_ID />
+      <gp:USER_NAME>GPWSHSBCHND</gp:USER_NAME>
+      <gp:USER_DOMAIN>BTS_AGENTS</gp:USER_DOMAIN>
+      <gp:USER_PASS>HsbcHnd!@#</gp:USER_PASS>
+    </gp:SECURITY>
+    <gp:ADDRESSING>
+      <FROM />
+      <TO />
+    </gp:ADDRESSING>
+  </soapenv:Header>
+  <soapenv:Body xsi:type="soapenv:AuthenticateBody">
+    <gp:ExecTR>
+      <gp:REQUEST>
+        <gp:AGENT_CD>HSH</gp:AGENT_CD>
+        <gp:AGENT_TRANS_TYPE_CODE>USRL</gp:AGENT_TRANS_TYPE_CODE>
+        <gp:DATA />
+      </gp:REQUEST>
+    </gp:ExecTR>
+  </soapenv:Body>
+</soapenv:Envelope>
+Respuesta:
+<?xml version="1.0" encoding="utf-16"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <ExecTRResponse xmlns="http://www.btsincusa.com/gp/">
+      <ExecTRResult>
+        <RESPONSE xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="LOGIN_RESPONSE" xmlns="http://www.btsincusa.com/gp/">
+          <OPCODE>S000</OPCODE>
+          <PROCESS_MSG>AUTHENTICATION SUCCESS.</PROCESS_MSG>
+          <PROCESS_DT>20250904</PROCESS_DT>
+          <PROCESS_TM>105750</PROCESS_TM>
+          <SESSION_ID>kxbnoizqnropbepk2mp1zmwk</SESSION_ID>
+          <SESSION_TIMEOUT>900</SESSION_TIMEOUT>
+        </RESPONSE>
+      </ExecTRResult>
+    </ExecTRResponse>
+  </soap:Body>
+</soap:Envelope>
+============= FIN HTTP CLIENT =============
+
+============= INICIO HTTP CLIENT =============
+TraceId       : 0HNFBPF0IM952:0000000B
+Método        : POST
+URL           : https://test.globalplatform.ws/gpcs/GPTS/transactionservice.asmx
+Código Status : 200
+Duración (ms) : 196
+Encabezados   :
+traceparent: 00-117e89d348247749157f6ba2d98dbe4e-e7ed83090753b533-00
+
+Cuerpo:
+<?xml version="1.0" encoding="utf-16"?>
+<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:gp="http://www.btsincusa.com/gp/" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Header>
+    <gp:SECURITY>
+      <gp:SESSION_ID>kxbnoizqnropbepk2mp1zmwk</gp:SESSION_ID>
+      <gp:USER_NAME>GPWSHSBCHND</gp:USER_NAME>
+      <gp:USER_DOMAIN>BTS_AGENTS</gp:USER_DOMAIN>
+      <gp:USER_PASS>HsbcHnd!@#</gp:USER_PASS>
+    </gp:SECURITY>
+    <gp:ADDRESSING>
+      <FROM />
+      <TO />
+    </gp:ADDRESSING>
+  </soapenv:Header>
+  <soapenv:Body xsi:type="soapenv:SDEPBody">
+    <gp:ExecTR>
+      <gp:REQUEST>
+        <gp:AGENT_CD>HSH</gp:AGENT_CD>
+        <gp:AGENT_TRANS_TYPE_CODE>SDEP</gp:AGENT_TRANS_TYPE_CODE>
+        <gp:DATA>
+          <gp:ROW_COUNT>50</gp:ROW_COUNT>
+        </gp:DATA>
+      </gp:REQUEST>
+    </gp:ExecTR>
+  </soapenv:Body>
+</soapenv:Envelope>
+Respuesta:
+<?xml version="1.0" encoding="utf-16"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <ExecTRResponse xmlns="http://www.btsincusa.com/gp/">
+      <ExecTRResult>
+        <RESPONSE xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="DEPOSITS_LIST" xmlns="http://www.btsincusa.com/gp/">
+          <OPCODE>1308</OPCODE>
+          <PROCESS_MSG>SDEP ACCEPTED ORDER</PROCESS_MSG>
+          <ERROR_PARAM_FULL_NAME />
+          <PROCESS_DT>20250904</PROCESS_DT>
+          <PROCESS_TM>105751</PROCESS_TM>
+          <DEPOSITS />
+        </RESPONSE>
+      </ExecTRResult>
+    </ExecTRResponse>
+  </soap:Body>
+</soap:Envelope>
+============= FIN HTTP CLIENT =============
+
+----------------------------------Response Info---------------------------------
+Inicio: 2025-09-04 09:58:42
+-------------------------------------------------------------------------------
+Código Estado: 200
+Headers: [Content-Type, application/json; charset=utf-8]; [Content-Length, 11969]
+Cuerpo:
+
+                              {
+                                "header": {
+                                  "reponseId": "e688fbe6-65ce-4276-951a-71666fcd49f9",
+                                  "timestamp": "2025-09-04T15:58:42.1088193Z",
+                                  "processingTime": "100ms",
+                                  "statusCode": "1308",
+                                  "message": "SDEP ACCEPTED ORDER",
+                                  "requestHeader": {
+                                    "hRequestId": "string",
+                                    "hChannel": "string",
+                                    "hTerminal": "string",
+                                    "hOrganization": "string",
+                                    "hUserId": "string",
+                                    "hProvider": "string",
+                                    "hSessionId": "string",
+                                    "hClientIp": "string",
+                                    "hTimestamp": "string"
+                                  }
+                                },
+                                "data": {
+                                  "opCode": "1308",
+                                  "processMsg": "SDEP ACCEPTED ORDER",
+                                  "errorParamFullName": "",
+                                  "processDt": "20250728",
+                                  "processTm": "151412",
+                                  "deposits": [
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012400",
+                                        "saleMovementId": "17373378",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "HNL",
+                                        "originAmount": "5400.00",
+                                        "destinationAmount": "140754.24",
+                                        "exchangeRateFx": "26.0656000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "26.0656000000",
+                                        "marketRefCurrencyAmount": "5400.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "5200342008",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MIGUEL",
+                                          "middleName": "ANGEL",
+                                          "lastName": "SEPULVEDA",
+                                          "motherMaidenName": "HENDERSON",
+                                          "address": {
+                                            "addressLine": "820 N WILCOX AVE",
+                                            "city": "MONTEBELLO",
+                                            "stateCode": "CA",
+                                            "countryCode": "USA",
+                                            "zipCode": "90640",
+                                            "phone": "13238873090"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "EUGENIA",
+                                          "middleName": "FATIMA",
+                                          "lastName": "GALEANO",
+                                          "motherMaidenName": "DIAZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5045244034"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012418",
+                                        "saleMovementId": "17373379",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "HNL",
+                                        "originAmount": "3500.00",
+                                        "destinationAmount": "91229.60",
+                                        "exchangeRateFx": "26.0656000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "26.0656000000",
+                                        "marketRefCurrencyAmount": "3500.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "3011618679",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MIGUEL",
+                                          "middleName": "ANGEL",
+                                          "lastName": "MONDRAGON",
+                                          "motherMaidenName": "BUSTILLOS",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "FABIOLA",
+                                          "middleName": "PATRICIA",
+                                          "lastName": "BONILLA",
+                                          "motherMaidenName": "HERNANDEZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5044161416"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012426",
+                                        "saleMovementId": "17373380",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "2000.00",
+                                        "destinationAmount": "2000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "2000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "5200368287",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MIGUEL",
+                                          "middleName": "ANGEL",
+                                          "lastName": "CHAVARRIA",
+                                          "motherMaidenName": "TOLENTINO",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "EUGENIA",
+                                          "middleName": "FATIMA",
+                                          "lastName": "GALEANO",
+                                          "motherMaidenName": "DIAZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5048281414"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012434",
+                                        "saleMovementId": "17373381",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "2100.00",
+                                        "destinationAmount": "2100.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "2100.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "6303133567",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MANUEL",
+                                          "middleName": "ANTONIO",
+                                          "lastName": "ONTIVEROS",
+                                          "motherMaidenName": "MARAVILLA",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "FABIOLA",
+                                          "middleName": "PATRICIA",
+                                          "lastName": "BONILLA",
+                                          "motherMaidenName": "HERNANDEZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5047321536"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012442",
+                                        "saleMovementId": "17373382",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "2000.00",
+                                        "destinationAmount": "2000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "2000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "1041202367",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MANUEL",
+                                          "middleName": "ANTONIO",
+                                          "lastName": "HENRIQUEZ",
+                                          "motherMaidenName": "VILLARREAL",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "CARLOS",
+                                          "middleName": "ROBERTO",
+                                          "lastName": "REYES",
+                                          "motherMaidenName": "ARGUETA",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5044443114"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012459",
+                                        "saleMovementId": "17373383",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "2000.00",
+                                        "destinationAmount": "2000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "2000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "1041202367",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MANUEL",
+                                          "middleName": "ANTONIO",
+                                          "lastName": "SOLORZANO",
+                                          "motherMaidenName": "VALENZUELA",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "CARLOS",
+                                          "middleName": "ROBERTO",
+                                          "lastName": "REYES",
+                                          "motherMaidenName": "ARGUETA",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5048332044"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012475",
+                                        "saleMovementId": "17373385",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "3000.00",
+                                        "destinationAmount": "3000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "3000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "5013407495",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "HUGO",
+                                          "middleName": "ERNESTO",
+                                          "lastName": "SANTILLAN",
+                                          "motherMaidenName": "VILLALOBOS",
+                                          "address": {
+                                            "addressLine": "5403 UNIVERSITY AVE",
+                                            "city": "SAN DIEGO",
+                                            "stateCode": "CA",
+                                            "countryCode": "USA",
+                                            "zipCode": "92105",
+                                            "phone": "+(1)6192-659701"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "ZENIA",
+                                          "middleName": "MARCELA",
+                                          "lastName": "SUAZO",
+                                          "motherMaidenName": "LOPEZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5047312313"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012467",
+                                        "saleMovementId": "17373386",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "3000.00",
+                                        "destinationAmount": "3000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "3000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "5013407495",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MANUEL",
+                                          "middleName": "ANTONIO",
+                                          "lastName": "RODRIGUES",
+                                          "motherMaidenName": "VILLANUEVA",
+                                          "address": {
+                                            "addressLine": "527 FAIR AVE",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78223",
+                                            "phone": "NONE"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "ZENIA",
+                                          "middleName": "MARCELA",
+                                          "lastName": "SUAZO",
+                                          "motherMaidenName": "LOPEZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5044272838"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "70908937005",
+                                        "saleMovementId": "17373486",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "HNL",
+                                        "originAmount": "95.02",
+                                        "destinationAmount": "2483.81",
+                                        "exchangeRateFx": "26.1398000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "26.1398000000",
+                                        "marketRefCurrencyAmount": "95.02",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "CA",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "7649274531",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "CARMELO",
+                                          "middleName": "DE JESUS",
+                                          "lastName": "GUTIERREZ",
+                                          "motherMaidenName": "TIRADO",
+                                          "address": {
+                                            "addressLine": "ADDRESS DE CLIENTE",
+                                            "city": "YUMA",
+                                            "stateCode": "AZ",
+                                            "countryCode": "USA",
+                                            "zipCode": "90210",
+                                            "phone": "7476691161852"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "YOSELIN",
+                                          "middleName": "",
+                                          "lastName": "SANTOS",
+                                          "motherMaidenName": "RODRIGUEZ",
+                                          "address": {
+                                            "addressLine": "ADDRESS BENEFICIARIO",
+                                            "city": "TEGUCIGALPA",
+                                            "stateCode": "TEG",
+                                            "countryCode": "HND",
+                                            "zipCode": "80100",
+                                            "phone": ""
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "70976846336",
+                                        "saleMovementId": "17373487",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "100.00",
+                                        "destinationAmount": "100.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "100.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "CA",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "7649274531",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "CARMELO",
+                                          "middleName": "DE JESUS",
+                                          "lastName": "GUTIERREZ",
+                                          "motherMaidenName": "TIRADO",
+                                          "address": {
+                                            "addressLine": "ADDRESS DE CLIENTE",
+                                            "city": "YUMA",
+                                            "stateCode": "AZ",
+                                            "countryCode": "USA",
+                                            "zipCode": "90210",
+                                            "phone": "7476691161852"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "YOSELIN",
+                                          "middleName": "",
+                                          "lastName": "SANTOS",
+                                          "motherMaidenName": "RODRIGUEZ",
+                                          "address": {
+                                            "addressLine": "ADDRESS BENEFICIARIO",
+                                            "city": "TEGUCIGALPA",
+                                            "stateCode": "TEG",
+                                            "countryCode": "HND",
+                                            "zipCode": "80100",
+                                            "phone": ""
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+----------------------------------Response Info---------------------------------
+Fin: 2025-09-04 09:58:42
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+Controlador: Bts
+Action: ObtenerTransaccionesClienteBts
+Fin: 2025-09-04 09:58:42
+-------------------------------------------------------------------------------
+
+
+[Tiempo Total de Ejecución]: 52364 ms
+---------------------------Fin de Log-------------------------
+Final: 2025-09-04 09:58:42
+-------------------------------------------------------------------
+
+
+
+
+Deberia ser así, puesto que primero se ejecuto el llamado HTTP antes que la inserción SQL, entonces hay que validar que los logs se guarden en la posición correcta si es posible:
+
+---------------------------Inicio de Log-------------------------
+Inicio: 2025-09-04 09:57:49
+-------------------------------------------------------------------
+
+---------------------------Enviroment Info-------------------------
+Inicio: 2025-09-04 09:57:49
+-------------------------------------------------------------------
+Application: API_1_TERCEROS_REMESADORAS
+Environment: Development
+ContentRoot: C:\Git\Librerias Davivienda\Temporal\API_1_TERCEROS_REMESADORAS
+Execution ID: 0HNFBPF0IM952:0000000B
+Client IP: ::1
+User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
+Machine Name: HNCSTG015243WAP
+OS: Microsoft Windows NT 10.0.20348.0
+Host: localhost:7116
+Distribución: N/A
+  -- Extras del HttpContext --
+    Scheme              : https
+    Protocol            : HTTP/2
+    Method              : POST
+    Path                : /v1/Bts/ReporteriaSDEP
+    Query               : 
+    ContentType         : application/json-patch+json
+    ContentLength       : 401
+    ClientPort          : 54808
+    LocalIp             : ::1
+    LocalPort           : 7116
+    ConnectionId        : 0HNFBPF0IM952
+    Referer             : https://localhost:7116/swagger/index.html
+----------------------------------------------------------------------
+---------------------------Enviroment Info-------------------------
+Fin: 2025-09-04 09:57:49
+-------------------------------------------------------------------
+
+-------------------------------------------------------------------------------
+Controlador: Bts
+Action: ObtenerTransaccionesClienteBts
+Inicio: 2025-09-04 09:57:49
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+
+----------------------------------Request Info---------------------------------
+Inicio: 2025-09-04 09:57:49
+-------------------------------------------------------------------------------
+Método: POST
+URL: /v1/Bts/ReporteriaSDEP
+Cuerpo:
+
+                              {
+                                "header": {
+                                  "h-request-id": "string",
+                                  "h-channel": "string",
+                                  "h-terminal": "string",
+                                  "h-organization": "string",
+                                  "h-user-id": "string",
+                                  "h-provider": "string",
+                                  "h-session-id": "string",
+                                  "h-client-ip": "string",
+                                  "h-timestamp": "string"
+                                },
+                                "body": {
+                                  "execTR": {
+                                    "request": {
+                                      "data": {
+                                        "rowCount": "50"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+----------------------------------Request Info---------------------------------
+Fin: 2025-09-04 09:57:49
+-------------------------------------------------------------------------------
+
+============= INICIO HTTP CLIENT =============
+TraceId       : 0HNFBPF0IM952:0000000B
+Método        : POST
+URL           : https://test.globalplatform.ws/gpcs/GPTS/transactionservice.asmx
+Código Status : 200
+Duración (ms) : 487
+Encabezados   :
+traceparent: 00-117e89d348247749157f6ba2d98dbe4e-9f1af7e8351fa5aa-00
+
+Cuerpo:
+<?xml version="1.0" encoding="utf-16"?>
+<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:gp="http://www.btsincusa.com/gp/" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Header>
+    <gp:SECURITY>
+      <gp:SESSION_ID />
+      <gp:USER_NAME>GPWSHSBCHND</gp:USER_NAME>
+      <gp:USER_DOMAIN>BTS_AGENTS</gp:USER_DOMAIN>
+      <gp:USER_PASS>HsbcHnd!@#</gp:USER_PASS>
+    </gp:SECURITY>
+    <gp:ADDRESSING>
+      <FROM />
+      <TO />
+    </gp:ADDRESSING>
+  </soapenv:Header>
+  <soapenv:Body xsi:type="soapenv:AuthenticateBody">
+    <gp:ExecTR>
+      <gp:REQUEST>
+        <gp:AGENT_CD>HSH</gp:AGENT_CD>
+        <gp:AGENT_TRANS_TYPE_CODE>USRL</gp:AGENT_TRANS_TYPE_CODE>
+        <gp:DATA />
+      </gp:REQUEST>
+    </gp:ExecTR>
+  </soapenv:Body>
+</soapenv:Envelope>
+Respuesta:
+<?xml version="1.0" encoding="utf-16"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <ExecTRResponse xmlns="http://www.btsincusa.com/gp/">
+      <ExecTRResult>
+        <RESPONSE xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="LOGIN_RESPONSE" xmlns="http://www.btsincusa.com/gp/">
+          <OPCODE>S000</OPCODE>
+          <PROCESS_MSG>AUTHENTICATION SUCCESS.</PROCESS_MSG>
+          <PROCESS_DT>20250904</PROCESS_DT>
+          <PROCESS_TM>105750</PROCESS_TM>
+          <SESSION_ID>kxbnoizqnropbepk2mp1zmwk</SESSION_ID>
+          <SESSION_TIMEOUT>900</SESSION_TIMEOUT>
+        </RESPONSE>
+      </ExecTRResult>
+    </ExecTRResponse>
+  </soap:Body>
+</soap:Envelope>
+============= FIN HTTP CLIENT =============
+
+============= INICIO HTTP CLIENT =============
+TraceId       : 0HNFBPF0IM952:0000000B
+Método        : POST
+URL           : https://test.globalplatform.ws/gpcs/GPTS/transactionservice.asmx
+Código Status : 200
+Duración (ms) : 196
+Encabezados   :
+traceparent: 00-117e89d348247749157f6ba2d98dbe4e-e7ed83090753b533-00
+
+Cuerpo:
+<?xml version="1.0" encoding="utf-16"?>
+<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:gp="http://www.btsincusa.com/gp/" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Header>
+    <gp:SECURITY>
+      <gp:SESSION_ID>kxbnoizqnropbepk2mp1zmwk</gp:SESSION_ID>
+      <gp:USER_NAME>GPWSHSBCHND</gp:USER_NAME>
+      <gp:USER_DOMAIN>BTS_AGENTS</gp:USER_DOMAIN>
+      <gp:USER_PASS>HsbcHnd!@#</gp:USER_PASS>
+    </gp:SECURITY>
+    <gp:ADDRESSING>
+      <FROM />
+      <TO />
+    </gp:ADDRESSING>
+  </soapenv:Header>
+  <soapenv:Body xsi:type="soapenv:SDEPBody">
+    <gp:ExecTR>
+      <gp:REQUEST>
+        <gp:AGENT_CD>HSH</gp:AGENT_CD>
+        <gp:AGENT_TRANS_TYPE_CODE>SDEP</gp:AGENT_TRANS_TYPE_CODE>
+        <gp:DATA>
+          <gp:ROW_COUNT>50</gp:ROW_COUNT>
+        </gp:DATA>
+      </gp:REQUEST>
+    </gp:ExecTR>
+  </soapenv:Body>
+</soapenv:Envelope>
+Respuesta:
+<?xml version="1.0" encoding="utf-16"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <ExecTRResponse xmlns="http://www.btsincusa.com/gp/">
+      <ExecTRResult>
+        <RESPONSE xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="DEPOSITS_LIST" xmlns="http://www.btsincusa.com/gp/">
+          <OPCODE>1308</OPCODE>
+          <PROCESS_MSG>SDEP ACCEPTED ORDER</PROCESS_MSG>
+          <ERROR_PARAM_FULL_NAME />
+          <PROCESS_DT>20250904</PROCESS_DT>
+          <PROCESS_TM>105751</PROCESS_TM>
+          <DEPOSITS />
+        </RESPONSE>
+      </ExecTRResult>
+    </ExecTRResponse>
+  </soap:Body>
+</soap:Envelope>
+============= FIN HTTP CLIENT =============
+
+===== LOG DE EJECUCIÓN SQL =====
+Fecha y Hora      : 2025-09-04 09:58:41.943
+Duración          : 142.5798 ms
+Base de Datos     : DVHNDEV
+IP                : 166.178.81.19
+Puerto            : 0
+Esquema           : bcah96dta
+Tabla             : bcah96dta.btsacta
+Veces Ejecutado   : 1
+Filas Afectadas   : 10
+SQL:
+INSERT INTO BCAH96DTA.BTSACTA (INOCONFIR, IDATRECI, IHORRECI, IDATCONF, IHORCONF, IDATVAL, IHORVAL, IDATPAGO, IHORPAGO, IDATACRE, IHORACRE, IDATRECH, IHORRECH, ITIPPAGO, ISERVICD, IDESPAIS, IDESMONE, ISAGENCD, ISPAISCD, ISTATECD, IRAGENCD, ITICUENTA, INOCUENTA, INUMREFER, ISTSREM, ISTSPRO, IERR, IERRDSC, IDSCRECH, ACODPAIS, ACODMONED, AMTOENVIA, AMTOCALCU, AFACTCAMB, BPRIMNAME, BSECUNAME, BAPELLIDO, BSEGUAPE, BDIRECCIO, BCIUDAD, BESTADO, BPAIS, BCODPOST, BTELEFONO, CPRIMNAME, CSECUNAME, CAPELLIDO, CSEGUAPE, CDIRECCIO, CCIUDAD, CESTADO, CPAIS, CCODPOST, CTELEFONO, DTIDENT, ESALEDT, EMONREFER, ETASAREFE, EMTOREF) VALUES ('89901012400', '20250904', '095817398', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'HNL', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '5200342008', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '5400.00', '140754.24', '26.0656000000', 'MIGUEL', 'ANGEL', 'SEPULVEDA', 'HENDERSON', '820 N WILCOX AVE', 'MONTEBELLO', 'CA', 'USA', '90640', '13238873090', 'EUGENIA', 'FATIMA', 'GALEANO', 'DIAZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5045244034', ' ', '20250703', 'USD', '26.0656000000', '5400.00'), ('89901012418', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'HNL', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '3011618679', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '3500.00', '91229.60', '26.0656000000', 'MIGUEL', 'ANGEL', 'MONDRAGON', 'BUSTILLOS', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'FABIOLA', 'PATRICIA', 'BONILLA', 'HERNANDEZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5044161416', ' ', '20250703', 'USD', '26.0656000000', '3500.00'), ('89901012426', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '5200368287', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '2000.00', '2000.00', '1.0000000000', 'MIGUEL', 'ANGEL', 'CHAVARRIA', 'TOLENTINO', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'EUGENIA', 'FATIMA', 'GALEANO', 'DIAZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5048281414', ' ', '20250703', 'USD', '1.0000000000', '2000.00'), ('89901012434', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '6303133567', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '2100.00', '2100.00', '1.0000000000', 'MANUEL', 'ANTONIO', 'ONTIVEROS', 'MARAVILLA', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'FABIOLA', 'PATRICIA', 'BONILLA', 'HERNANDEZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5047321536', ' ', '20250703', 'USD', '1.0000000000', '2100.00'), ('89901012442', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '1041202367', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '2000.00', '2000.00', '1.0000000000', 'MANUEL', 'ANTONIO', 'HENRIQUEZ', 'VILLARREAL', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'CARLOS', 'ROBERTO', 'REYES', 'ARGUETA', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5044443114', ' ', '20250703', 'USD', '1.0000000000', '2000.00'), ('89901012459', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '1041202367', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '2000.00', '2000.00', '1.0000000000', 'MANUEL', 'ANTONIO', 'SOLORZANO', 'VALENZUELA', '721 CASTROVILLE RD', 'SAN ANTONIO', 'TX', 'USA', '78237', '+12104320949', 'CARLOS', 'ROBERTO', 'REYES', 'ARGUETA', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5048332044', ' ', '20250703', 'USD', '1.0000000000', '2000.00'), ('89901012475', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '5013407495', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '3000.00', '3000.00', '1.0000000000', 'HUGO', 'ERNESTO', 'SANTILLAN', 'VILLALOBOS', '5403 UNIVERSITY AVE', 'SAN DIEGO', 'CA', 'USA', '92105', '+(1)6192-659701', 'ZENIA', 'MARCELA', 'SUAZO', 'LOPEZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5047312313', ' ', '20250703', 'USD', '1.0000000000', '3000.00'), ('89901012467', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'TX', 'HSH', 'NOT', '5013407495', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '3000.00', '3000.00', '1.0000000000', 'MANUEL', 'ANTONIO', 'RODRIGUES', 'VILLANUEVA', '527 FAIR AVE', 'SAN ANTONIO', 'TX', 'USA', '78223', 'NONE', 'ZENIA', 'MARCELA', 'SUAZO', 'LOPEZ', 'DOMICILIO CONOCIDO', 'CIUDAD CONOCIDA', 'ATL', 'HND', '31001', '+5044272838', ' ', '20250703', 'USD', '1.0000000000', '3000.00'), ('70908937005', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'HNL', 'BTS', 'USA', 'CA', 'HSH', 'NOT', '7649274531', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '95.02', '2483.81', '26.1398000000', 'CARMELO', 'DE JESUS', 'GUTIERREZ', 'TIRADO', 'ADDRESS DE CLIENTE', 'YUMA', 'AZ', 'USA', '90210', '7476691161852', 'YOSELIN', ' ', 'SANTOS', 'RODRIGUEZ', 'ADDRESS BENEFICIARIO', 'TEGUCIGALPA', 'TEG', 'HND', '80100', ' ', ' ', '20250703', 'USD', '26.1398000000', '95.02'), ('70976846336', '20250904', '095817407', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'ACC', 'MTR', 'HND', 'USD', 'BTS', 'USA', 'CA', 'HSH', 'NOT', '7649274531', ' ', ' ', 'RECIBIDA', '1308', 'SDEP ACCEPTED ORDER', ' ', 'USA', 'USD', '100.00', '100.00', '1.0000000000', 'CARMELO', 'DE JESUS', 'GUTIERREZ', 'TIRADO', 'ADDRESS DE CLIENTE', 'YUMA', 'AZ', 'USA', '90210', '7476691161852', 'YOSELIN', ' ', 'SANTOS', 'RODRIGUEZ', 'ADDRESS BENEFICIARIO', 'TEGUCIGALPA', 'TEG', 'HND', '80100', ' ', ' ', '20250703', 'USD', '1.0000000000', '100.00')
+================================
+
+
+----------------------------------Response Info---------------------------------
+Inicio: 2025-09-04 09:58:42
+-------------------------------------------------------------------------------
+Código Estado: 200
+Headers: [Content-Type, application/json; charset=utf-8]; [Content-Length, 11969]
+Cuerpo:
+
+                              {
+                                "header": {
+                                  "reponseId": "e688fbe6-65ce-4276-951a-71666fcd49f9",
+                                  "timestamp": "2025-09-04T15:58:42.1088193Z",
+                                  "processingTime": "100ms",
+                                  "statusCode": "1308",
+                                  "message": "SDEP ACCEPTED ORDER",
+                                  "requestHeader": {
+                                    "hRequestId": "string",
+                                    "hChannel": "string",
+                                    "hTerminal": "string",
+                                    "hOrganization": "string",
+                                    "hUserId": "string",
+                                    "hProvider": "string",
+                                    "hSessionId": "string",
+                                    "hClientIp": "string",
+                                    "hTimestamp": "string"
+                                  }
+                                },
+                                "data": {
+                                  "opCode": "1308",
+                                  "processMsg": "SDEP ACCEPTED ORDER",
+                                  "errorParamFullName": "",
+                                  "processDt": "20250728",
+                                  "processTm": "151412",
+                                  "deposits": [
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012400",
+                                        "saleMovementId": "17373378",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "HNL",
+                                        "originAmount": "5400.00",
+                                        "destinationAmount": "140754.24",
+                                        "exchangeRateFx": "26.0656000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "26.0656000000",
+                                        "marketRefCurrencyAmount": "5400.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "5200342008",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MIGUEL",
+                                          "middleName": "ANGEL",
+                                          "lastName": "SEPULVEDA",
+                                          "motherMaidenName": "HENDERSON",
+                                          "address": {
+                                            "addressLine": "820 N WILCOX AVE",
+                                            "city": "MONTEBELLO",
+                                            "stateCode": "CA",
+                                            "countryCode": "USA",
+                                            "zipCode": "90640",
+                                            "phone": "13238873090"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "EUGENIA",
+                                          "middleName": "FATIMA",
+                                          "lastName": "GALEANO",
+                                          "motherMaidenName": "DIAZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5045244034"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012418",
+                                        "saleMovementId": "17373379",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "HNL",
+                                        "originAmount": "3500.00",
+                                        "destinationAmount": "91229.60",
+                                        "exchangeRateFx": "26.0656000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "26.0656000000",
+                                        "marketRefCurrencyAmount": "3500.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "3011618679",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MIGUEL",
+                                          "middleName": "ANGEL",
+                                          "lastName": "MONDRAGON",
+                                          "motherMaidenName": "BUSTILLOS",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "FABIOLA",
+                                          "middleName": "PATRICIA",
+                                          "lastName": "BONILLA",
+                                          "motherMaidenName": "HERNANDEZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5044161416"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012426",
+                                        "saleMovementId": "17373380",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "2000.00",
+                                        "destinationAmount": "2000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "2000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "5200368287",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MIGUEL",
+                                          "middleName": "ANGEL",
+                                          "lastName": "CHAVARRIA",
+                                          "motherMaidenName": "TOLENTINO",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "EUGENIA",
+                                          "middleName": "FATIMA",
+                                          "lastName": "GALEANO",
+                                          "motherMaidenName": "DIAZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5048281414"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012434",
+                                        "saleMovementId": "17373381",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "2100.00",
+                                        "destinationAmount": "2100.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "2100.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "6303133567",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MANUEL",
+                                          "middleName": "ANTONIO",
+                                          "lastName": "ONTIVEROS",
+                                          "motherMaidenName": "MARAVILLA",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "FABIOLA",
+                                          "middleName": "PATRICIA",
+                                          "lastName": "BONILLA",
+                                          "motherMaidenName": "HERNANDEZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5047321536"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012442",
+                                        "saleMovementId": "17373382",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "2000.00",
+                                        "destinationAmount": "2000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "2000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "1041202367",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MANUEL",
+                                          "middleName": "ANTONIO",
+                                          "lastName": "HENRIQUEZ",
+                                          "motherMaidenName": "VILLARREAL",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "CARLOS",
+                                          "middleName": "ROBERTO",
+                                          "lastName": "REYES",
+                                          "motherMaidenName": "ARGUETA",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5044443114"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012459",
+                                        "saleMovementId": "17373383",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "2000.00",
+                                        "destinationAmount": "2000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "2000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "1041202367",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MANUEL",
+                                          "middleName": "ANTONIO",
+                                          "lastName": "SOLORZANO",
+                                          "motherMaidenName": "VALENZUELA",
+                                          "address": {
+                                            "addressLine": "721 CASTROVILLE RD",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78237",
+                                            "phone": "+12104320949"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "CARLOS",
+                                          "middleName": "ROBERTO",
+                                          "lastName": "REYES",
+                                          "motherMaidenName": "ARGUETA",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5048332044"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012475",
+                                        "saleMovementId": "17373385",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "3000.00",
+                                        "destinationAmount": "3000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "3000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "5013407495",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "HUGO",
+                                          "middleName": "ERNESTO",
+                                          "lastName": "SANTILLAN",
+                                          "motherMaidenName": "VILLALOBOS",
+                                          "address": {
+                                            "addressLine": "5403 UNIVERSITY AVE",
+                                            "city": "SAN DIEGO",
+                                            "stateCode": "CA",
+                                            "countryCode": "USA",
+                                            "zipCode": "92105",
+                                            "phone": "+(1)6192-659701"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "ZENIA",
+                                          "middleName": "MARCELA",
+                                          "lastName": "SUAZO",
+                                          "motherMaidenName": "LOPEZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5047312313"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "89901012467",
+                                        "saleMovementId": "17373386",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "3000.00",
+                                        "destinationAmount": "3000.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "3000.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "TX",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "5013407495",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "MANUEL",
+                                          "middleName": "ANTONIO",
+                                          "lastName": "RODRIGUES",
+                                          "motherMaidenName": "VILLANUEVA",
+                                          "address": {
+                                            "addressLine": "527 FAIR AVE",
+                                            "city": "SAN ANTONIO",
+                                            "stateCode": "TX",
+                                            "countryCode": "USA",
+                                            "zipCode": "78223",
+                                            "phone": "NONE"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "ZENIA",
+                                          "middleName": "MARCELA",
+                                          "lastName": "SUAZO",
+                                          "motherMaidenName": "LOPEZ",
+                                          "address": {
+                                            "addressLine": "DOMICILIO CONOCIDO",
+                                            "city": "CIUDAD CONOCIDA",
+                                            "stateCode": "ATL",
+                                            "countryCode": "HND",
+                                            "zipCode": "31001",
+                                            "phone": "+5044272838"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "70908937005",
+                                        "saleMovementId": "17373486",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "HNL",
+                                        "originAmount": "95.02",
+                                        "destinationAmount": "2483.81",
+                                        "exchangeRateFx": "26.1398000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "26.1398000000",
+                                        "marketRefCurrencyAmount": "95.02",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "CA",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "7649274531",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "CARMELO",
+                                          "middleName": "DE JESUS",
+                                          "lastName": "GUTIERREZ",
+                                          "motherMaidenName": "TIRADO",
+                                          "address": {
+                                            "addressLine": "ADDRESS DE CLIENTE",
+                                            "city": "YUMA",
+                                            "stateCode": "AZ",
+                                            "countryCode": "USA",
+                                            "zipCode": "90210",
+                                            "phone": "7476691161852"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "YOSELIN",
+                                          "middleName": "",
+                                          "lastName": "SANTOS",
+                                          "motherMaidenName": "RODRIGUEZ",
+                                          "address": {
+                                            "addressLine": "ADDRESS BENEFICIARIO",
+                                            "city": "TEGUCIGALPA",
+                                            "stateCode": "TEG",
+                                            "countryCode": "HND",
+                                            "zipCode": "80100",
+                                            "phone": ""
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "data": {
+                                        "confirmationNumber": "70976846336",
+                                        "saleMovementId": "17373487",
+                                        "saleDate": "20250703",
+                                        "saleTime": "205003",
+                                        "serviceCode": "MTR",
+                                        "paymentTypeCode": "ACC",
+                                        "originCountryCode": "USA",
+                                        "originCurrencyCode": "USD",
+                                        "destinationCountryCode": "HND",
+                                        "destinationCurrencyCode": "USD",
+                                        "originAmount": "100.00",
+                                        "destinationAmount": "100.00",
+                                        "exchangeRateFx": "1.0000000000",
+                                        "marketRefCurrencyCode": "USD",
+                                        "marketRefCurrencyFx": "1.0000000000",
+                                        "marketRefCurrencyAmount": "100.00",
+                                        "senderAgentCode": "BTS",
+                                        "senderCountryCode": "USA",
+                                        "senderStateCode": "CA",
+                                        "recipientAccountTypeCode": "NOT",
+                                        "recipientAccountNumber": "7649274531",
+                                        "recipientAgentCode": "HSH",
+                                        "sender": {
+                                          "firstName": "CARMELO",
+                                          "middleName": "DE JESUS",
+                                          "lastName": "GUTIERREZ",
+                                          "motherMaidenName": "TIRADO",
+                                          "address": {
+                                            "addressLine": "ADDRESS DE CLIENTE",
+                                            "city": "YUMA",
+                                            "stateCode": "AZ",
+                                            "countryCode": "USA",
+                                            "zipCode": "90210",
+                                            "phone": "7476691161852"
+                                          }
+                                        },
+                                        "recipient": {
+                                          "firstName": "YOSELIN",
+                                          "middleName": "",
+                                          "lastName": "SANTOS",
+                                          "motherMaidenName": "RODRIGUEZ",
+                                          "address": {
+                                            "addressLine": "ADDRESS BENEFICIARIO",
+                                            "city": "TEGUCIGALPA",
+                                            "stateCode": "TEG",
+                                            "countryCode": "HND",
+                                            "zipCode": "80100",
+                                            "phone": ""
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+----------------------------------Response Info---------------------------------
+Fin: 2025-09-04 09:58:42
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+Controlador: Bts
+Action: ObtenerTransaccionesClienteBts
+Fin: 2025-09-04 09:58:42
+-------------------------------------------------------------------------------
+
+
+[Tiempo Total de Ejecución]: 52364 ms
+---------------------------Fin de Log-------------------------
+Final: 2025-09-04 09:58:42
+-------------------------------------------------------------------
+
