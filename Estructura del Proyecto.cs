@@ -1,133 +1,47 @@
-sigue sin funcionar, te dejo el codigo antiguo que si funcionaba:
+namespace Logging.Helpers;
 
-﻿using Logging.Helpers;
-using Microsoft.AspNetCore.Http;
+public static partial class LogHelper
+{
+    /// <summary>
+    /// Indica si el buffer por-request está activo en este <see cref="HttpContext"/>.
+    /// Se usa para decidir si encolamos en la ventana dinámica o caemos al comportamiento legacy.
+    /// </summary>
+    public static bool HasRequestBuffer(HttpContext? ctx)
+        => ctx is not null && ctx.Items.ContainsKey(BufferKey); // BufferKey ya existe en tu partial
+}
+
+
+
 using System.Diagnostics;
+using System.Net.Http.Headers;
+using System.Text;
+using Logging.Helpers;
+using Microsoft.AspNetCore.Http;
+using static Logging.Helpers.LogHelper;
 
 namespace RestUtilities.Logging.Handlers;
 
 /// <summary>
-/// Handler personalizado para interceptar y registrar llamadas HTTP salientes realizadas mediante HttpClient.
-/// Este log se integrará automáticamente con el archivo de log del Middleware.
+/// DelegatingHandler que registra HTTP saliente. Si el buffer por-request está activo,
+/// encola el bloque en la ventana dinámica (queda entre 4 y 5 ordenado). Si no, usa
+/// el mecanismo legacy de HttpContext.Items para no romper integraciones existentes.
 /// </summary>
-public class HttpClientLoggingHandler : DelegatingHandler
+public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAccessor) : DelegatingHandler
 {
-    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IHttpContextAccessor _accessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
 
-    public HttpClientLoggingHandler(IHttpContextAccessor httpContextAccessor)
-    {
-        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
-    }
+    private const int MaxBodyChars = 20000; // Límite de seguridad para cuerpos
 
     /// <summary>
-    /// Intercepta la solicitud y la respuesta del HttpClient, y guarda su información en HttpContext.Items.
+    /// Intercepta request/response, arma un bloque único y lo envía al buffer dinámico
+    /// o a Items (legacy) según disponibilidad. No interrumpe el flujo si el logging falla.
     /// </summary>
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var stopwatch = Stopwatch.StartNew();
-        var context = _httpContextAccessor.HttpContext;
-        string traceId = context?.TraceIdentifier ?? Guid.NewGuid().ToString();
-
-        try
-        {
-            HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
-            stopwatch.Stop();
-
-            string responseBody = response.Content != null
-                ? await response.Content.ReadAsStringAsync(cancellationToken)
-                : "Sin contenido";
-
-            // 🔹 Formato del log: incluye cuerpo de respuesta bien formateado
-            string formatted = LogFormatter.FormatHttpClientRequest(
-                traceId: traceId,
-                method: request.Method.Method,
-                url: request.RequestUri?.ToString() ?? "URI no definida",
-                statusCode: ((int)response.StatusCode).ToString(),
-                elapsedMs: stopwatch.ElapsedMilliseconds,
-                headers: request.Headers.ToString(),
-                body: request.Content != null ? await request.Content.ReadAsStringAsync(cancellationToken) : null,
-                responseBody: LogHelper.PrettyPrintAuto(responseBody, response.Content?.Headers?.ContentType?.MediaType)
-            );
-            if (context != null)
-            {
-                AppendHttpClientLogToContext(context, formatted);
-            }
-
-            return response;
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-
-            string errorLog = LogFormatter.FormatHttpClientError(
-                traceId: traceId,
-                method: request.Method.Method,
-                url: request.RequestUri?.ToString() ?? "URI no definida",
-                exception: ex
-            );
-
-            if (context != null)
-            {
-                AppendHttpClientLogToContext(context, errorLog);
-            }
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Agrega el log de HttpClient a la lista en HttpContext.Items, para que luego sea procesado por el Middleware.
-    /// </summary>
-    private static void AppendHttpClientLogToContext(HttpContext context, string logEntry)
-    {
-        const string key = "HttpClientLogs";
-
-        if (!context.Items.ContainsKey(key))
-            context.Items[key] = new List<string>();
-
-        if (context.Items[key] is List<string> logs)
-            logs.Add(logEntry);
-    }
-}
-
-
-Y te dejo el código nuevo:
-
-using Logging.Helpers;
-using Microsoft.AspNetCore.Http;
-using System.Diagnostics;
-using System.Net.Http.Headers;
-using System.Text;
-using static Logging.Helpers.LogHelper;
-
-namespace Logging.Handlers;
-
-/// <summary>
-/// DelegatingHandler que registra peticiones HTTP salientes y sus respuestas
-/// en un bloque único y lo envía a la ventana dinámica del log (entre 4 y 5).
-/// </summary>
-/// <remarks>
-/// - Incluye TraceId, método, URL, cabeceras, cuerpo request/response y duración.
-/// - Redacta cabeceras sensibles (Authorization/Proxy-Authorization).
-/// - No interrumpe el flujo si algo del logging falla.
-/// </remarks>
-public sealed class HttpClientLoggingHandler(IHttpContextAccessor? accessor) : DelegatingHandler
-{
-    // Acceso al HttpContext actual; permite ubicar el log dentro del request en curso.
-    private readonly IHttpContextAccessor? _accessor = accessor;
-
-    // Límite de caracteres para cuerpos (evita logs gigantes).
-    private const int MaxBodyChars = 20000;
-
-    /// <summary>
-    /// Envía la petición, mide duración y registra un bloque único con request/response
-    /// en la ventana dinámica del log (entre 4 y 5).
-    /// </summary>
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        var ctx = _accessor?.HttpContext;                         // Puede ser null fuera de pipeline
+        var ctx = _accessor.HttpContext; // Puede ser null fuera de pipeline
         var traceId = ctx?.TraceIdentifier ?? Guid.NewGuid().ToString();
 
-        // === Request: prepara cabeceras y cuerpo (si existe) ===
+        // ---- Preparar request ----
         string? requestBody = null;
         if (request.Content is not null)
         {
@@ -136,11 +50,9 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor? accessor) : D
                 var raw = await request.Content.ReadAsStringAsync(cancellationToken);
                 requestBody = LogHelper.PrettyPrintAuto(Limit(raw, MaxBodyChars), request.Content.Headers.ContentType?.MediaType);
             }
-            catch
-            {
-                requestBody = "[No disponible para logging]";
-            }
+            catch { requestBody = "[No disponible para logging]"; } // Streams no repetibles, etc.
         }
+
         var requestHeaders = RenderHeaders(request.Headers);
 
         var sw = Stopwatch.StartNew();
@@ -149,23 +61,18 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor? accessor) : D
             var response = await base.SendAsync(request, cancellationToken);
             sw.Stop();
 
-            // === Response: prepara cabeceras y cuerpo ===
+            // ---- Preparar response ----
             string responseBody;
             try
             {
-                var raw = response.Content is null
-                    ? "[Sin contenido]"
-                    : await response.Content.ReadAsStringAsync(cancellationToken);
-
+                var raw = response.Content is null ? "[Sin contenido]" : await response.Content.ReadAsStringAsync(cancellationToken);
                 responseBody = LogHelper.PrettyPrintAuto(Limit(raw, MaxBodyChars), response.Content?.Headers?.ContentType?.MediaType);
             }
-            catch
-            {
-                responseBody = "[No disponible para logging]";
-            }
+            catch { responseBody = "[No disponible para logging]"; }
+
             var responseHeaders = RenderHeaders(response.Headers);
 
-            // === Bloque final (request + response + métrica) ===
+            // ---- Bloque final: request + response + métrica ----
             var block = new StringBuilder(capacity: 2048)
                 .AppendLine("============== INICIO HTTP CLIENT ==============")
                 .Append("TraceId        : ").AppendLine(traceId)
@@ -187,8 +94,15 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor? accessor) : D
                 .AppendLine()
                 .ToString();
 
-            // ➜ Ventana dinámica (entre 4 y 5). filePath:null → se resuelve internamente.
-            LogHelper.AppendDynamic(ctx, filePath: null, DynamicLogKind.HttpClient, block);
+            // === Compatibilidad: buffer dinámico si está activo; si no, legacy Items ===
+            if (HasRequestBuffer(ctx))
+            {
+                LogHelper.AppendDynamic(ctx, filePath: null, DynamicLogKind.HttpClient, block); // Ordenado entre 4 y 5
+            }
+            else if (ctx is not null)
+            {
+                AppendHttpClientLogToContext(ctx, block); // Legacy, para que el middleware actual lo recoja
+            }
 
             return response;
         }
@@ -213,7 +127,11 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor? accessor) : D
                 .AppendLine()
                 .ToString();
 
-            LogHelper.AppendDynamic(ctx, filePath: null, DynamicLogKind.HttpClient, errorBlock);
+            if (HasRequestBuffer(ctx))
+                LogHelper.AppendDynamic(ctx, null, DynamicLogKind.HttpClient, errorBlock);
+            else if (ctx is not null)
+                AppendHttpClientLogToContext(ctx, errorBlock);
+
             throw;
         }
     }
@@ -230,13 +148,19 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor? accessor) : D
             // Redacción de secretos: evita exponer tokens.
             if (key.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
                 key.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase))
-            {
                 value = "[REDACTED]";
-            }
 
             sb.Append(key).Append(": ").AppendLine(value);
         }
         return sb.ToString();
+    }
+
+    /// <summary>Compat: agrega el log HTTP a HttpContext.Items para el middleware legacy.</summary>
+    private static void AppendHttpClientLogToContext(HttpContext context, string logEntry)
+    {
+        const string key = "HttpClientLogs"; // misma clave legacy
+        if (!context.Items.ContainsKey(key)) context.Items[key] = new List<string>();
+        if (context.Items[key] is List<string> logs) logs.Add(logEntry);
     }
 
     /// <summary>Limita el tamaño de texto para evitar logs desmesurados.</summary>
@@ -247,6 +171,3 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor? accessor) : D
         return text[..maxChars] + "… [truncado]";
     }
 }
-
-
-Compara y revisa los cambios para identificar el problema si es por los cambios, porque se empezo a presentar cuando corregimos lo del orden de los logs.
