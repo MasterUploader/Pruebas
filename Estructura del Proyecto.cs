@@ -1,53 +1,44 @@
 using System.Collections.Concurrent;
 using System.Text;
-using System.Threading;
 using Microsoft.AspNetCore.Http;
 
 namespace Logging.Helpers;
 
 /// <summary>
-/// Extensión (partial) de LogHelper que agrega:
-/// 1) Un buffer por-request con "ventana dinámica" entre 4) Request y 5) Response.
-/// 2) Orden cronológico basado en el INICIO real de cada evento (HTTP/SQL/etc.).
-/// 3) Compatibilidad: si no hay buffer, escribe directo como en el comportamiento legacy.
+/// Extensión (partial) de LogHelper que agrega una "ventana dinámica" entre
+/// 4) Request Info y 5) Response Info, y ordena eventos por el INICIO real.
+/// Incluye compatibilidad: si no hay buffer por-request, se comporta como antes.
 /// </summary>
 public static partial class LogHelper
 {
     // ===================== Infraestructura interna =====================
 
     /// <summary>
-    /// Clave para guardar el buffer por-request en HttpContext.Items (detalle interno).
+    /// Clave interna para guardar el buffer por-request en HttpContext.Items.
     /// </summary>
     private const string BufferKey = "__ReqLogBuffer";
 
     /// <summary>
-    /// AsyncLocal que mantiene referencia al buffer del request a través de awaits/Task.Run
-    /// para escenarios donde el HttpContext no está disponible en un hilo hijo.
-    /// </summary>
-    private static readonly AsyncLocal<object?> _ambient = new();
-
-    /// <summary>
-    /// Claves legacy usadas por el middleware antiguo para acumular bloques de HTTP en Items.
-    /// Se mantienen para compatibilidad total sin cambiar a los consumidores de la librería.
+    /// Claves legacy para HTTP: listas en HttpContext.Items usadas por el middleware antiguo.
+    /// Mantener ambas para compatibilidad.
     /// </summary>
     private const string HttpItemsKey      = "HttpClientLogs";       // List<string>
-    private const string HttpItemsTimedKey = "HttpClientLogsTimed";  // List<object> con { DateTime TsUtc, string Content }
+    private const string HttpItemsTimedKey = "HttpClientLogsTimed";  // List<object> con TsUtc/Content
 
     // ===================== Modelo de eventos dinámicos =====================
 
     /// <summary>
-    /// Tipos de eventos dinámicos que ocurren durante la ejecución del request.
-    /// La clasificación NO altera la posición en el log (solo etiqueta).
+    /// Tipos de eventos dinámicos (solo etiqueta, no altera la posición fija).
     /// </summary>
     public enum DynamicLogKind
     {
-        /// <summary>Eventos de HttpClient (salientes).</summary>
+        /// <summary>Eventos de clientes HTTP salientes.</summary>
         HttpClient = 1,
 
-        /// <summary>Ejecución de comandos SQL.</summary>
+        /// <summary>Ejecuciones de comandos SQL.</summary>
         Sql = 2,
 
-        /// <summary>Entradas manuales de texto (AddSingleLog).</summary>
+        /// <summary>Entradas manuales simples (AddSingleLog).</summary>
         ManualSingle = 3,
 
         /// <summary>Entradas manuales de objeto/estructura (AddObjLog).</summary>
@@ -56,22 +47,28 @@ public static partial class LogHelper
         /// <summary>Bloques manuales (StartLogBlock/Add/End).</summary>
         ManualBlock = 5,
 
-        /// <summary>Reservado para extensiones personalizadas.</summary>
+        /// <summary>Reservado.</summary>
         Custom = 99
     }
 
     /// <summary>
-    /// Segmento dinámico con sello temporal de INICIO (UTC) y secuencia para empate.
-    /// El orden final usa: TimestampUtc ASC, luego Sequence ASC.
+    /// Segmento dinámico con sello de INICIO (UTC) y secuencia para ordenar de forma estable.
     /// </summary>
     private sealed class DynamicLogSegment(DynamicLogKind kind, DateTime timestampUtc, int sequence, string content)
     {
-        public DynamicLogKind Kind { get; } = kind;          // Clasificación (HTTP/SQL/…)
-        public DateTime TimestampUtc { get; } = timestampUtc; // Momento real de INICIO del evento
-        public int Sequence { get; } = sequence;              // Empate estable en alta concurrencia
-        public string Content { get; } = content;             // Texto final ya formateado
+        /// <summary>Clasificación del segmento (HTTP/SQL/etc.).</summary>
+        public DynamicLogKind Kind { get; } = kind;
 
-        /// <summary>Crea un segmento con sello de tiempo actual (UTC).</summary>
+        /// <summary>Instante UTC en que comenzó el evento (se usa para ordenar correctamente).</summary>
+        public DateTime TimestampUtc { get; } = timestampUtc;
+
+        /// <summary>Secuencia incremental por-request para desempate.</summary>
+        public int Sequence { get; } = sequence;
+
+        /// <summary>Contenido final del bloque (ya formateado por el productor).</summary>
+        public string Content { get; } = content;
+
+        /// <summary>Fábrica con sello UTC actual (para casos sin “startedUtc” explícito).</summary>
         public static DynamicLogSegment Create(DynamicLogKind k, int seq, string text)
             => new(k, DateTime.UtcNow, seq, text);
     }
@@ -79,43 +76,43 @@ public static partial class LogHelper
     /// <summary>
     /// Buffer por-request que concentra:
     /// - Slots fijos 2..6 (Environment, Controller, Request, Response, Errors).
-    /// - Eventos dinámicos a ubicar SIEMPRE entre 4 (Request) y 5 (Response).
+    /// - Eventos dinámicos siempre entre 4 y 5, ordenados por inicio real.
     /// </summary>
     private sealed class RequestLogBuffer(string filePath)
     {
-        /// <summary>Ruta final del archivo de log para este request.</summary>
+        /// <summary>Ruta del archivo final de este request.</summary>
         public string FilePath { get; } = filePath;
 
-        // Secuencia incremental local para desempates en la cola dinámica.
+        // Secuencia incremental local para desempates y estabilidad.
         private int _seq;
 
         // Cola de segmentos dinámicos producidos durante el request.
         private readonly ConcurrentQueue<DynamicLogSegment> _dynamic = new();
 
-        // Slots fijos (1 y 7 — Inicio/Fin — se mantienen fuera: los manejas como hoy).
+        // Slots FIJOS 2..6 (1: Inicio y 7: Fin siguen fuera, como hoy).
         public string? FixedEnvironment { get; private set; }
         public string? FixedController  { get; private set; }
         public string? FixedRequest     { get; private set; }
         public string? FixedResponse    { get; private set; }
         public List<string> FixedErrors { get; } = [];
 
-        /// <summary>Coloca/actualiza Environment Info (2).</summary>
+        /// <summary>Coloca Environment Info (2).</summary>
         public void SetEnvironmentSlot(string content) => FixedEnvironment = content;
 
-        /// <summary>Coloca/actualiza Controlador (3).</summary>
+        /// <summary>Coloca Controlador (3).</summary>
         public void SetControllerSlot(string content)  => FixedController  = content;
 
-        /// <summary>Coloca/actualiza Request Info (4).</summary>
+        /// <summary>Coloca Request Info (4).</summary>
         public void SetRequestSlot(string content)     => FixedRequest     = content;
 
-        /// <summary>Coloca/actualiza Response Info (5).</summary>
+        /// <summary>Coloca Response Info (5).</summary>
         public void SetResponseSlot(string content)    => FixedResponse    = content;
 
-        /// <summary>Agrega un Error (6). Se acumulan en orden de llegada.</summary>
+        /// <summary>Agrega Error (6).</summary>
         public void AddErrorSlot(string content)       => FixedErrors.Add(content);
 
         /// <summary>
-        /// Inserta evento dinámico con sello de tiempo actual. Útil cuando no tienes un "startedUtc".
+        /// Inserta evento dinámico con sello de tiempo actual (UTC).
         /// </summary>
         public void AppendDynamic(DynamicLogKind kind, string content)
         {
@@ -124,8 +121,7 @@ public static partial class LogHelper
         }
 
         /// <summary>
-        /// Inserta evento dinámico con sello de tiempo de INICIO explícito (UTC).
-        /// Permite ordenar según "cuándo comenzó" (ideal para HTTP/SQL).
+        /// Inserta evento dinámico con sello de INICIO explícito (UTC) — ideal para HTTP/SQL.
         /// </summary>
         public void AppendDynamicAt(DynamicLogKind kind, string content, DateTime timestampUtc)
         {
@@ -134,11 +130,11 @@ public static partial class LogHelper
         }
 
         /// <summary>
-        /// Compone el bloque central 2→6 con la ventana dinámica entre 4 y 5.
+        /// Construye el bloque central 2→6 con la ventana dinámica en medio (entre 4 y 5).
         /// </summary>
         public string BuildCore()
         {
-            // 1) Drenar y ordenar la porción dinámica por inicio real y secuencia.
+            // 1) Ordenar la porción dinámica por INICIO real y por secuencia.
             List<DynamicLogSegment> dyn = [];
             while (_dynamic.TryDequeue(out var seg)) dyn.Add(seg);
 
@@ -147,7 +143,7 @@ public static partial class LogHelper
                 .ThenBy(s => s.Sequence)
                 .ToList();
 
-            // 2) Ensamblar el bloque central.
+            // 2) Ensamblar el bloque central en el orden fijo.
             var sb = new StringBuilder(capacity: 64 * 1024);
 
             if (FixedEnvironment is not null) sb.Append(FixedEnvironment);
@@ -168,8 +164,7 @@ public static partial class LogHelper
     // ===================== Helpers internos del buffer =====================
 
     /// <summary>
-    /// Devuelve el buffer existente desde HttpContext.Items o desde AsyncLocal (si fue publicado).
-    /// No crea uno nuevo (uso interno para compatibilidad/lecturas).
+    /// Devuelve el buffer si ya existe en Items. No crea uno nuevo.
     /// </summary>
     private static RequestLogBuffer? TryGetExistingBuffer(HttpContext? ctx)
     {
@@ -178,52 +173,45 @@ public static partial class LogHelper
             existing is RequestLogBuffer ok)
             return ok;
 
-        return _ambient.Value as RequestLogBuffer;
+        return null;
     }
 
     /// <summary>
-    /// Obtiene o crea el buffer por-request y lo publica en AsyncLocal para hilos hijos.
-    /// Si no hay HttpContext, retorna el buffer ambient si existe (no crea).
+    /// Crea u obtiene el buffer por-request desde Items. Si no hay HttpContext, devuelve null.
     /// </summary>
     private static RequestLogBuffer? GetOrCreateBuffer(HttpContext? ctx, string? filePath)
     {
-        // Sin contexto → reusar ambient si existe (evita crear buffers huérfanos).
-        if (ctx is null) return _ambient.Value as RequestLogBuffer;
+        if (ctx is null) return null;
 
-        // Determinar ruta final del archivo con tu helper existente si no se pasa.
         var path = string.IsNullOrWhiteSpace(filePath) ? GetPathFromContext(ctx) : filePath;
 
         if (ctx.Items.TryGetValue(BufferKey, out var existing) && existing is RequestLogBuffer ok)
-        {
-            _ambient.Value = ok; // Publica en AsyncLocal para tareas hijas (Task.Run/await)
             return ok;
-        }
 
         var created = new RequestLogBuffer(path!);
         ctx.Items[BufferKey] = created;
-        _ambient.Value = created; // Publica en ambient
         return created;
     }
 
     // ===================== API pública de slots fijos =====================
 
-    /// <summary>Coloca Environment Info (2) en el buffer actual.</summary>
+    /// <summary>Coloca Environment Info (2) en el buffer.</summary>
     public static void SetEnvironment(HttpContext ctx, string? filePath, string text)
         => GetOrCreateBuffer(ctx, filePath)?.SetEnvironmentSlot(text);
 
-    /// <summary>Coloca Controlador (3) en el buffer actual.</summary>
+    /// <summary>Coloca Controlador (3) en el buffer.</summary>
     public static void SetController(HttpContext ctx, string? filePath, string text)
         => GetOrCreateBuffer(ctx, filePath)?.SetControllerSlot(text);
 
-    /// <summary>Coloca Request Info (4) en el buffer actual.</summary>
+    /// <summary>Coloca Request Info (4) en el buffer.</summary>
     public static void SetRequest(HttpContext ctx, string? filePath, string text)
         => GetOrCreateBuffer(ctx, filePath)?.SetRequestSlot(text);
 
-    /// <summary>Coloca Response Info (5) en el buffer actual.</summary>
+    /// <summary>Coloca Response Info (5) en el buffer.</summary>
     public static void SetResponse(HttpContext ctx, string? filePath, string text)
         => GetOrCreateBuffer(ctx, filePath)?.SetResponseSlot(text);
 
-    /// <summary>Agrega Error (6) en el buffer actual.</summary>
+    /// <summary>Agrega Error (6) en el buffer.</summary>
     public static void AddError(HttpContext ctx, string? filePath, string text)
         => GetOrCreateBuffer(ctx, filePath)?.AddErrorSlot(text);
 
@@ -236,15 +224,17 @@ public static partial class LogHelper
     // ===================== API pública de compatibilidad =====================
 
     /// <summary>
-    /// ¿El buffer por-request está activo en este HttpContext? Útil para compatibilidad dual.
+    /// ¿El buffer por-request está activo en este HttpContext?
     /// </summary>
     public static bool HasRequestBuffer(HttpContext? ctx)
         => ctx is not null && ctx.Items.ContainsKey(BufferKey);
 
     /// <summary>
     /// Agrega un evento dinámico con timestamp explícito (UTC) con compatibilidad:
-    /// - Si hay buffer, encola y respetará el orden por INICIO.
-    /// - Si no hay buffer, escribe directo como legacy (sin romper al consumidor).
+    /// - Si hay buffer, encola (orden por INICIO).
+    /// - Si no hay buffer:
+    ///   - HTTP → Items legacy (con lista "timed" y lista simple).
+    ///   - Otros (ej. SQL) → escritura directa a archivo (comportamiento clásico).
     /// </summary>
     public static void AppendDynamicCompatAt(HttpContext? ctx, string? filePath, DynamicLogKind kind, string text, DateTime startedUtc)
     {
@@ -255,36 +245,37 @@ public static partial class LogHelper
             return;
         }
 
-        // Legacy: sin buffer → escritura directa al archivo (misma ruta de siempre).
+        // Sin buffer → compatibilidad total
+        if (kind == DynamicLogKind.HttpClient && ctx is not null)
+        {
+            // 1) Lista “timed” para que Flush pueda importar y ordenar si más tarde hay buffer.
+            if (!ctx.Items.ContainsKey(HttpItemsTimedKey)) ctx.Items[HttpItemsTimedKey] = new List<object>();
+            if (ctx.Items[HttpItemsTimedKey] is List<object> timed) timed.Add(new LegacyHttpEntry(startedUtc, text));
+
+            // 2) Lista antigua (string) para middleware legacy que aún lee esta clave.
+            if (!ctx.Items.ContainsKey(HttpItemsKey)) ctx.Items[HttpItemsKey] = new List<string>();
+            if (ctx.Items[HttpItemsKey] is List<string> raw) raw.Add(text);
+
+            return;
+        }
+
+        // Para SQL u otros: escritura directa (no dependemos del middleware).
         var path = string.IsNullOrWhiteSpace(filePath) ? GetPathFromContext(ctx) : filePath!;
         var dir  = Path.GetDirectoryName(path) ?? AppDomain.CurrentDomain.BaseDirectory;
         WriteLogToFile(dir, path, text);
     }
 
     /// <summary>
-    /// Agrega un evento dinámico con compatibilidad:
-    /// - Si hay buffer, encola (sello de tiempo actual).
-    /// - Si no hay buffer, escribe directo como legacy.
+    /// Agrega un evento dinámico con compatibilidad usando el sello de tiempo actual.
     /// </summary>
     public static void AppendDynamicCompat(HttpContext? ctx, string? filePath, DynamicLogKind kind, string text)
-    {
-        var buf = TryGetExistingBuffer(ctx);
-        if (buf is not null)
-        {
-            buf.AppendDynamic(kind, text);
-            return;
-        }
-
-        var path = string.IsNullOrWhiteSpace(filePath) ? GetPathFromContext(ctx) : filePath!;
-        var dir  = Path.GetDirectoryName(path) ?? AppDomain.CurrentDomain.BaseDirectory;
-        WriteLogToFile(dir, path, text);
-    }
+        => AppendDynamicCompatAt(ctx, filePath, kind, text, DateTime.UtcNow);
 
     // ===================== Flush central con import legacy =====================
 
     /// <summary>
-    /// FLUSH único: importa logs HTTP legacy de Items (si existen), compone el bloque 2→6
-    /// y lo escribe en el archivo final. Mantén Inicio(1) y Fin(7) como hoy.
+    /// FLUSH único: importa HTTP legacy desde Items (si existe), compone 2→6 y lo escribe.
+    /// Mantén Inicio(1) y Fin(7) como ya los manejas.
     /// </summary>
     public static void Flush(HttpContext ctx, string? filePath)
     {
@@ -293,56 +284,60 @@ public static partial class LogHelper
         var buf = GetOrCreateBuffer(ctx, filePath);
         if (buf is null) return;
 
-        // Importar HTTP legacy (si se acumularon en Items) antes de ordenar.
+        // Importar HTTP legacy antes de ordenar.
         ImportLegacyHttpItems(ctx, buf);
 
         var core = buf.BuildCore();
         var path = buf.FilePath;
         var dir  = Path.GetDirectoryName(path) ?? AppDomain.CurrentDomain.BaseDirectory;
 
-        // Escritura TXT (reutiliza tus primitivas robustas).
         WriteLogToFile(dir, path, core);
-
-        // Si deseas CSV automático, descomenta:
+        // Si quieres CSV automático, descomenta:
         // SaveLogAsCsv(dir, path, core);
     }
 
     /// <summary>
-    /// Importa bloques HTTP guardados en Items (legacy) para que también participen
-    /// del ordenado en la ventana dinámica entre 4 y 5.
+    /// Entrada temporal para Items “timed”. No se expone fuera.
+    /// </summary>
+    private sealed class LegacyHttpEntry(DateTime tsUtc, string content)
+    {
+        public DateTime TsUtc { get; } = tsUtc;
+        public string Content { get; } = content;
+    }
+
+    /// <summary>
+    /// Importa entradas de Items "timed" y antiguas (string) para que también se ordenen.
     /// </summary>
     private static void ImportLegacyHttpItems(HttpContext ctx, RequestLogBuffer buf)
     {
-        // 1) Lista "timed" (preferida): cada entrada trae TsUtc + Content.
+        // 1) Lista “timed”: TsUtc + Content (preferida)
         if (ctx.Items.TryGetValue(HttpItemsTimedKey, out var obj) && obj is List<object> timed && timed.Count > 0)
         {
             foreach (var o in timed)
             {
-                // Late-binding: admite el tipo PrivateEntry del handler sin acoplar referencias.
-                var tsProp = o.GetType().GetProperty("TsUtc");
-                var ctProp = o.GetType().GetProperty("Content");
-                if (tsProp is null || ctProp is null) continue;
+                // Late-binding para aceptar cualquier tipo con TsUtc/Content (p.ej. del handler).
+                var ts = (DateTime?)o.GetType().GetProperty("TsUtc")?.GetValue(o);
+                var tx = (string?)  o.GetType().GetProperty("Content")?.GetValue(o);
+                if (ts is null || tx is null) continue;
 
-                var ts = (DateTime)(tsProp.GetValue(o) ?? DateTime.UtcNow);
-                var tx = (string)(ctProp.GetValue(o) ?? string.Empty);
-
-                buf.AppendDynamicAt(DynamicLogKind.HttpClient, tx, ts);
+                buf.AppendDynamicAt(DynamicLogKind.HttpClient, tx, ts.Value);
             }
 
-            // Limpiar para evitar doble escritura.
-            ctx.Items.Remove(HttpItemsTimedKey);
+            ctx.Items.Remove(HttpItemsTimedKey); // evitar duplicados
         }
 
-        // 2) Lista antigua de strings: se importa sin timestamp (quedará ordenada por fin).
+        // 2) Lista antigua de strings (sin timestamp): se importan con el tiempo de importación
+        //    — último recurso por compatibilidad.
         if (ctx.Items.TryGetValue(HttpItemsKey, out var raw) && raw is List<string> oldList && oldList.Count > 0)
         {
             foreach (var s in oldList)
                 buf.AppendDynamic(DynamicLogKind.HttpClient, s);
 
-            ctx.Items.Remove(HttpItemsKey);
+            ctx.Items.Remove(HttpItemsKey); // evitar duplicados
         }
     }
 }
+
 
 
 
@@ -358,28 +353,26 @@ using static Logging.Helpers.LogHelper;
 namespace RestUtilities.Logging.Handlers;
 
 /// <summary>
-/// DelegatingHandler que registra HTTP saliente. Mantiene compatibilidad:
-/// - Si el buffer por-request está activo, encola el bloque en la ventana dinámica
-///   (queda entre 4 y 5, ordenado por el INICIO real del request).
-/// - Si no hay buffer, acumula en HttpContext.Items (legacy) para que el middleware
-///   lo recoja como siempre (sin cambios para el consumidor de la librería).
+/// DelegatingHandler que registra HTTP saliente con compatibilidad total:
+/// - Si hay buffer por-request: encola entre 4 y 5, ordenado por INICIO.
+/// - Si no hay buffer: acumula en Items (legacy) para que el middleware lo escriba,
+///   y además guarda variante "timed" para permitir orden cuando se use Flush.
 /// </summary>
 public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAccessor) : DelegatingHandler
 {
     private readonly IHttpContextAccessor _accessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
 
-    private const int MaxBodyChars = 20000; // Límite opcional para evitar logs gigantes
+    private const int MaxBodyChars = 20000; // Límite de seguridad para cuerpos grandes
 
     /// <summary>
-    /// Intercepta la petición/respuesta, arma un bloque único y lo publica
-    /// en el buffer dinámico o en Items (legacy) según disponibilidad.
+    /// Intercepta la petición/respuesta, arma el bloque y lo publica por buffer o por Items.
     /// </summary>
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var ctx = _accessor.HttpContext; // Puede ser null fuera del pipeline
         var traceId = ctx?.TraceIdentifier ?? Guid.NewGuid().ToString();
 
-        // Sello del INICIO del request HTTP — clave para el orden correcto.
+        // Sello del INICIO del request HTTP — fundamental para el orden correcto.
         var startedUtc = DateTime.UtcNow;
 
         // ===== Preparar datos de la petición =====
@@ -393,7 +386,7 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAcc
             }
             catch
             {
-                // Cuerpos no re-leibles o flujos cerrados no deben romper el logging.
+                // Cuerpos no re-leibles o streams cerrados no deben romper la llamada real.
                 requestBody = "[No disponible para logging]";
             }
         }
@@ -445,17 +438,8 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAcc
                 .AppendLine()
                 .ToString();
 
-            // ===== Compatibilidad dual =====
-            if (HasRequestBuffer(ctx))
-            {
-                // En buffer: quedará entre 4 y 5 y se ordenará por "startedUtc".
-                LogHelper.AppendDynamicCompatAt(ctx, null, DynamicLogKind.HttpClient, block, startedUtc);
-            }
-            else if (ctx is not null)
-            {
-                // Legacy: acumula en Items con timestamp para que Flush lo importe y ordene.
-                AppendHttpClientLogToContextTimed(ctx, startedUtc, block);
-            }
+            // Publicación con compatibilidad (buffer o Items).
+            LogHelper.AppendDynamicCompatAt(ctx, filePath: null, DynamicLogKind.HttpClient, block, startedUtc);
 
             return response;
         }
@@ -463,7 +447,7 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAcc
         {
             sw.Stop();
 
-            // Bloque de error: conserva contexto de la petición y tiempo transcurrido.
+            // Bloque de error con contexto de la petición.
             var errorBlock = new StringBuilder(capacity: 1024)
                 .AppendLine("============== INICIO HTTP CLIENT (ERROR) ==============")
                 .Append("TraceId        : ").AppendLine(traceId)
@@ -481,15 +465,7 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAcc
                 .AppendLine()
                 .ToString();
 
-            if (HasRequestBuffer(ctx))
-            {
-                LogHelper.AppendDynamicCompatAt(ctx, null, DynamicLogKind.HttpClient, errorBlock, startedUtc);
-            }
-            else if (ctx is not null)
-            {
-                AppendHttpClientLogToContextTimed(ctx, startedUtc, errorBlock);
-            }
-
+            LogHelper.AppendDynamicCompatAt(ctx, filePath: null, DynamicLogKind.HttpClient, errorBlock, startedUtc);
             throw;
         }
     }
@@ -515,31 +491,7 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAcc
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Compatibilidad: agrega un registro a Items con timestamp de INICIO para que
-    /// el Flush pueda importarlo y ordenar correctamente entre 4 y 5.
-    /// </summary>
-    private static void AppendHttpClientLogToContextTimed(HttpContext context, DateTime startedUtc, string logEntry)
-    {
-        // Tipo local privado para no acoplar al helper (se importará por reflexión).
-        var entry = new PrivateEntry(startedUtc, logEntry);
-
-        const string keyTimed = "HttpClientLogsTimed";
-        if (!context.Items.ContainsKey(keyTimed)) context.Items[keyTimed] = new List<object>();
-        if (context.Items[keyTimed] is List<object> list) list.Add(entry);
-    }
-
-    /// <summary>
-    /// Tipo privado con TsUtc/Content para almacenar entradas temporales en Items.
-    /// El helper lo importará mediante reflexión (sin necesidad de referenciar este tipo).
-    /// </summary>
-    private sealed class PrivateEntry(DateTime tsUtc, string content)
-    {
-        public DateTime TsUtc { get; } = tsUtc;
-        public string Content { get; } = content;
-    }
-
-    /// <summary>Limita el tamaño de texto para evitar logs desmesurados.</summary>
+    /// <summary>Limita tamaño de texto para evitar logs desmesurados.</summary>
     private static string Limit(string? text, int maxChars)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
@@ -550,72 +502,46 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAcc
 
 
 
-
-using System.Data.Common;
-using Microsoft.AspNetCore.Http;
-
-namespace Logging.Decorators;
-
-/// <summary>
-/// Wrapper mínimo para DbCommand que agrega logging SQL ordenado por el INICIO de la ejecución.
-/// Solo ilustra el patrón de sellar con startedUtc y publicar el bloque en la ventana dinámica.
-/// </summary>
-public sealed class LoggingDbCommandWrapper(DbCommand inner, IHttpContextAccessor accessor)
+// Ejemplo ilustrativo (ajústalo a tu clase real)
+public int ExecuteNonQueryLogged(DbCommand cmd, IHttpContextAccessor accessor)
 {
-    private readonly DbCommand _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-    private readonly IHttpContextAccessor _accessor = accessor ?? throw new ArgumentNullException(nameof(accessor));
+    var startedUtc = DateTime.UtcNow; // ⬅️ sello de INICIO
 
-    /// <summary>
-    /// Ejecuta NonQuery y registra el bloque SQL en la ventana dinámica (o legacy) anclado al INICIO.
-    /// </summary>
-    public int ExecuteNonQueryLogged()
+    try
     {
-        var startedUtc = DateTime.UtcNow; // ⬅️ sello de INICIO para el orden
-        try
+        var rows = cmd.ExecuteNonQuery();
+
+        var block = LogFormatter.FormatDbExecution(new SqlLogModel
         {
-            var rows = _inner.ExecuteNonQuery();
+            CommandText = cmd.CommandText,
+            // ... completa tu modelo como ya lo haces
+        });
 
-            var block = LogFormatter.FormatDbExecution(new SqlLogModel
-            {
-                CommandText = _inner.CommandText,
-                ElapsedMs = 0, // si lo mides, agrega el tiempo real
-                // ... completa con tus datos actuales (DB, tabla, etc.)
-            });
+        LogHelper.AppendDynamicCompatAt(
+            accessor.HttpContext, filePath: null,
+            LogHelper.DynamicLogKind.Sql,
+            block, startedUtc);
 
-            Logging.Helpers.LogHelper.AppendDynamicCompatAt(
-                _accessor.HttpContext, null,
-                Logging.Helpers.LogHelper.DynamicLogKind.Sql,
-                block, startedUtc);
+        return rows;
+    }
+    catch (Exception ex)
+    {
+        var errorBlock = LogFormatter.FormatDbExecutionError(
+            nombreBD: "Desconocida",
+            ip: "-", puerto: 0, biblioteca: "-",
+            tabla: LogHelper.ExtractTableName(cmd.CommandText),
+            sentenciaSQL: cmd.CommandText,
+            exception: ex,
+            horaError: DateTime.Now);
 
-            return rows;
-        }
-        catch (Exception ex)
-        {
-            var errorBlock = LogFormatter.FormatDbExecutionError(
-                nombreBD: "Desconocida",
-                ip: "-",
-                puerto: 0,
-                biblioteca: "-",
-                tabla: Logging.Helpers.LogHelper.ExtractTableName(_inner.CommandText),
-                sentenciaSQL: _inner.CommandText,
-                exception: ex,
-                horaError: DateTime.Now
-            );
+        LogHelper.AppendDynamicCompatAt(
+            accessor.HttpContext, null,
+            LogHelper.DynamicLogKind.Sql,
+            errorBlock, startedUtc);
 
-            Logging.Helpers.LogHelper.AppendDynamicCompatAt(
-                _accessor.HttpContext, null,
-                Logging.Helpers.LogHelper.DynamicLogKind.Sql,
-                errorBlock, startedUtc);
-
-            throw;
-        }
+        throw;
     }
 }
-
-
-
-
-
 
 
 
