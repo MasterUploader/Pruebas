@@ -1,206 +1,157 @@
-using Logging.Helpers;
-using Logging.Ordering;
-using Microsoft.AspNetCore.Http;
 using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using Microsoft.AspNetCore.Http;
+
+using Logging.Helpers;                 // LogHelper (ventana dinámica + PrettyPrintAuto)
+using static Logging.Helpers.LogHelper; // Para usar DynamicLogKind sin prefijo
 
 namespace RestUtilities.Logging.Handlers;
 
-public class HttpClientLoggingHandler : DelegatingHandler
+/// <summary>
+/// DelegatingHandler que registra peticiones HTTP salientes y sus respuestas
+/// en un bloque único y lo envía a la ventana dinámica del log (entre 4 y 5).
+/// </summary>
+/// <remarks>
+/// - Incluye TraceId, método, URL, cabeceras, cuerpo request/response y duración.
+/// - Redacta cabeceras sensibles (Authorization/Proxy-Authorization).
+/// - No interrumpe el flujo si algo del logging falla.
+/// </remarks>
+public sealed class HttpClientLoggingHandler(IHttpContextAccessor? accessor) : DelegatingHandler
 {
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly Logging.Abstractions.ILoggingService _loggingService;
+    // Acceso al HttpContext actual; permite ubicar el log dentro del request en curso.
+    private readonly IHttpContextAccessor? _accessor = accessor;
 
-    /// <summary>Usa constructor primario; ILoggingService es opcional si lo resuelves por DI aquí.</summary>
-    public HttpClientLoggingHandler(IHttpContextAccessor httpContextAccessor, Logging.Abstractions.ILoggingService loggingService)
-    {
-        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
-        _loggingService = loggingService ?? throw new ArgumentNullException(nameof(loggingService));
-    }
+    // Límite de caracteres para cuerpos (evita logs gigantes).
+    private const int MaxBodyChars = 20000;
 
+    /// <summary>
+    /// Envía la petición, mide duración y registra un bloque único con request/response
+    /// en la ventana dinámica del log (entre 4 y 5).
+    /// </summary>
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var stopwatch = Stopwatch.StartNew();
-        var context = _httpContextAccessor.HttpContext;
-        var filePath = _loggingService.GetCurrentLogFile();
-        string traceId = context?.TraceIdentifier ?? Guid.NewGuid().ToString();
+        var ctx = _accessor?.HttpContext;                         // Puede ser null fuera de pipeline
+        var traceId = ctx?.TraceIdentifier ?? Guid.NewGuid().ToString();
 
+        // === Request: prepara cabeceras y cuerpo (si existe) ===
+        string? requestBody = null;
+        if (request.Content is not null)
+        {
+            try
+            {
+                var raw = await request.Content.ReadAsStringAsync(cancellationToken);
+                requestBody = LogHelper.PrettyPrintAuto(Limit(raw, MaxBodyChars), request.Content.Headers.ContentType?.MediaType);
+            }
+            catch
+            {
+                requestBody = "[No disponible para logging]";
+            }
+        }
+        var requestHeaders = RenderHeaders(request.Headers);
+
+        var sw = Stopwatch.StartNew();
         try
         {
             var response = await base.SendAsync(request, cancellationToken);
-            stopwatch.Stop();
+            sw.Stop();
 
-            string responseBody = response.Content != null
-                ? await response.Content.ReadAsStringAsync(cancellationToken)
-                : "Sin contenido";
+            // === Response: prepara cabeceras y cuerpo ===
+            string responseBody;
+            try
+            {
+                var raw = response.Content is null
+                    ? "[Sin contenido]"
+                    : await response.Content.ReadAsStringAsync(cancellationToken);
 
-            string formatted = LogFormatter.FormatHttpClientRequest(
-                traceId: traceId,
-                method: request.Method.Method,
-                url: request.RequestUri?.ToString() ?? "URI no definida",
-                statusCode: ((int)response.StatusCode).ToString(),
-                elapsedMs: stopwatch.ElapsedMilliseconds,
-                headers: request.Headers.ToString(),
-                body: request.Content != null ? await request.Content.ReadAsStringAsync(cancellationToken) : null,
-                responseBody: LogHelper.PrettyPrintAuto(responseBody, response.Content?.Headers?.ContentType?.MediaType)
-            );
+                responseBody = LogHelper.PrettyPrintAuto(Limit(raw, MaxBodyChars), response.Content?.Headers?.ContentType?.MediaType);
+            }
+            catch
+            {
+                responseBody = "[No disponible para logging]";
+            }
+            var responseHeaders = RenderHeaders(response.Headers);
 
-            // 🔸 Dinámico: quedará entre Request y Response, ordenado por tiempo real.
-            LogHelper.AppendDynamic(_loggingService, context, filePath, DynamicLogKind.HttpClient, formatted);
+            // === Bloque final (request + response + métrica) ===
+            var block = new StringBuilder(capacity: 2048)
+                .AppendLine("============== INICIO HTTP CLIENT ==============")
+                .Append("TraceId        : ").AppendLine(traceId)
+                .Append("Fecha/Hora     : ").AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"))
+                .Append("Método         : ").AppendLine(request.Method.Method)
+                .Append("URL            : ").AppendLine(request.RequestUri?.ToString() ?? "URI no definida")
+                .AppendLine("---- Request Headers ----")
+                .AppendLine(requestHeaders)
+                .AppendLine("---- Request Body ----")
+                .AppendLine(string.IsNullOrWhiteSpace(requestBody) ? "[Sin cuerpo]" : requestBody)
+                .AppendLine("---- Response ----")
+                .Append("Status Code    : ").Append((int)response.StatusCode).Append(" ").AppendLine(response.StatusCode.ToString())
+                .AppendLine("---- Response Headers ----")
+                .AppendLine(responseHeaders)
+                .AppendLine("---- Response Body ----")
+                .AppendLine(responseBody)
+                .Append("Duración (ms)  : ").AppendLine(sw.ElapsedMilliseconds.ToString())
+                .AppendLine("=============== FIN HTTP CLIENT ================")
+                .AppendLine()
+                .ToString();
+
+            // ➜ Ventana dinámica (entre 4 y 5). filePath:null → se resuelve internamente.
+            LogHelper.AppendDynamic(ctx, filePath: null, DynamicLogKind.HttpClient, block);
 
             return response;
         }
         catch (Exception ex)
         {
-            stopwatch.Stop();
+            sw.Stop();
 
-            string errorLog = LogFormatter.FormatHttpClientError(
-                traceId: traceId,
-                method: request.Method.Method,
-                url: request.RequestUri?.ToString() ?? "URI no definida",
-                exception: ex
-            );
+            var errorBlock = new StringBuilder(capacity: 1024)
+                .AppendLine("============== INICIO HTTP CLIENT (ERROR) ==============")
+                .Append("TraceId        : ").AppendLine(traceId)
+                .Append("Fecha/Hora     : ").AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"))
+                .Append("Método         : ").AppendLine(request.Method.Method)
+                .Append("URL            : ").AppendLine(request.RequestUri?.ToString() ?? "URI no definida")
+                .AppendLine("---- Request Headers ----")
+                .AppendLine(requestHeaders)
+                .AppendLine("---- Request Body ----")
+                .AppendLine(string.IsNullOrWhiteSpace(requestBody) ? "[Sin cuerpo]" : requestBody)
+                .Append("Duración (ms)  : ").AppendLine(sw.ElapsedMilliseconds.ToString())
+                .AppendLine("Excepción:")
+                .AppendLine(ex.ToString())
+                .AppendLine("=============== FIN HTTP CLIENT (ERROR) ================")
+                .AppendLine()
+                .ToString();
 
-            LogHelper.AppendDynamic(_loggingService, context, filePath, DynamicLogKind.HttpClient, errorLog);
+            LogHelper.AppendDynamic(ctx, filePath: null, DynamicLogKind.HttpClient, errorBlock);
             throw;
         }
     }
-}
 
-
-
-
-
-// 1) Reemplazar AddSingleLog:
-public void AddSingleLog(string message)
-{
-    try
+    /// <summary>Devuelve cabeceras legibles, redactando las sensibles.</summary>
+    private static string RenderHeaders(HttpHeaders headers)
     {
-        string formatted = LogFormatter.FormatSingleLog(message).Indent(LogScope.CurrentLevel);
-        var ctx = _httpContextAccessor.HttpContext;
-        var filePath = GetCurrentLogFile();
-        // 🔸 Dinámico (ManualSingle)
-        LogHelper.AppendDynamic(this, ctx, filePath, Logging.Ordering.DynamicLogKind.ManualSingle, formatted);
+        var sb = new StringBuilder(capacity: 512);
+        foreach (var h in headers)
+        {
+            var key = h.Key;
+            var value = string.Join(",", h.Value);
+
+            // Redacción de secretos: evita exponer tokens.
+            if (key.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase))
+            {
+                value = "[REDACTED]";
+            }
+
+            sb.Append(key).Append(": ").AppendLine(value);
+        }
+        return sb.ToString();
     }
-    catch (Exception ex)
-    {
-        LogInternalError(ex);
-    }
-}
 
-// 2) Reemplazar AddObjLog(nombre, objeto):
-public void AddObjLog(string objectName, object logObject)
-{
-    try
+    /// <summary>Limita el tamaño de texto para evitar logs desmesurados.</summary>
+    private static string Limit(string? text, int maxChars)
     {
-        string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
-        var ctx = _httpContextAccessor.HttpContext;
-        var filePath = GetCurrentLogFile();
-        // 🔸 Dinámico (ManualObject)
-        LogHelper.AppendDynamic(this, ctx, filePath, Logging.Ordering.DynamicLogKind.ManualObject, formatted);
-    }
-    catch (Exception ex)
-    {
-        LogInternalError(ex);
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        if (text.Length <= maxChars) return text;
+        return text[..maxChars] + "… [truncado]";
     }
 }
-
-// 3) Reemplazar AddObjLog(objeto):
-public void AddObjLog(object logObject)
-{
-    try
-    {
-        string objectName = logObject?.GetType()?.Name ?? "ObjetoDesconocido";
-        object safeObject = logObject ?? new { };
-        string formatted = LogFormatter.FormatObjectLog(objectName, safeObject).Indent(LogScope.CurrentLevel);
-        var ctx = _httpContextAccessor.HttpContext;
-        var filePath = GetCurrentLogFile();
-        // 🔸 Dinámico (ManualObject)
-        LogHelper.AppendDynamic(this, ctx, filePath, Logging.Ordering.DynamicLogKind.ManualObject, formatted);
-    }
-    catch (Exception ex)
-    {
-        LogInternalError(ex);
-    }
-}
-
-// 4) Reemplazar AddExceptionLog:
-public void AddExceptionLog(Exception ex)
-{
-    try
-    {
-        string formatted = LogFormatter.FormatExceptionDetails(ex.ToString()).Indent(LogScope.CurrentLevel);
-        var ctx = _httpContextAccessor.HttpContext;
-        var filePath = GetCurrentLogFile();
-        // 🔸 Slot 6) Errores (no dinámico)
-        LogHelper.AddError(this, ctx!, filePath, formatted);
-    }
-    catch (Exception e)
-    {
-        LogInternalError(e);
-    }
-}
-
-// 5) Reemplazar LogDatabaseSuccess:
-public void LogDatabaseSuccess(SqlLogModel model, HttpContext? context = null)
-{
-    try
-    {
-        var formatted = LogFormatter.FormatDbExecution(model);
-        var ctx = context ?? _httpContextAccessor.HttpContext;
-        var filePath = GetCurrentLogFile();
-        // 🔸 Dinámico (SQL)
-        LogHelper.AppendDynamic(this, ctx, filePath, Logging.Ordering.DynamicLogKind.Sql, formatted);
-    }
-    catch (Exception loggingEx)
-    {
-        LogInternalError(loggingEx);
-    }
-}
-
-// 6) Reemplazar LogDatabaseError:
-public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null)
-{
-    try
-    {
-        var connectionInfo = LogHelper.ExtractDbConnectionInfo(command.Connection?.ConnectionString);
-        var tabla = LogHelper.ExtractTableName(command.CommandText);
-
-        var formatted = LogFormatter.FormatDbExecutionError(
-            nombreBD: connectionInfo.Database,
-            ip: connectionInfo.Ip,
-            puerto: connectionInfo.Port,
-            biblioteca: connectionInfo.Library,
-            tabla: tabla,
-            sentenciaSQL: command.CommandText,
-            exception: ex,
-            horaError: DateTime.Now
-        );
-
-        var ctx = context ?? _httpContextAccessor.HttpContext;
-        var filePath = GetCurrentLogFile();
-
-        // 🔸 Dinámico (SQL) + registrar excepción en slot 6
-        LogHelper.AppendDynamic(this, ctx, filePath, Logging.Ordering.DynamicLogKind.Sql, formatted);
-        AddExceptionLog(ex);
-    }
-    catch (Exception errorAlLoguear)
-    {
-        LogInternalError(errorAlLoguear);
-    }
-}
-
-
-
-
-
-var ctx = context ?? _httpContextAccessor.HttpContext;
-var fp = GetCurrentLogFile();
-var header = LogFormatter.BuildBlockHeader(title);
-LogHelper.AppendDynamic(this, ctx!, fp, Logging.Ordering.DynamicLogKind.ManualBlock, header);
-return new LogBlock(this, fp, title);
-
-
-
-LogHelper.AppendDynamic(_svc, _httpContextAccessor.HttpContext, _filePath, Logging.Ordering.DynamicLogKind.ManualBlock, contenido);
-
-
