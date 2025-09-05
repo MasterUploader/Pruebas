@@ -347,7 +347,6 @@ public static partial class LogHelper
 
 
 
-
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -551,6 +550,7 @@ public sealed class HttpClientLoggingHandler(IHttpContextAccessor httpContextAcc
 
 
 
+
 using System.Data.Common;
 using Microsoft.AspNetCore.Http;
 
@@ -611,6 +611,8 @@ public sealed class LoggingDbCommandWrapper(DbCommand inner, IHttpContextAccesso
         }
     }
 }
+
+
 
 
 
