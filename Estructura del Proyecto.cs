@@ -340,8 +340,6 @@ public static partial class LogHelper
 
 
 
-
-
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
