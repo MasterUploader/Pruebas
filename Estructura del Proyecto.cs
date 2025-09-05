@@ -37,12 +37,6 @@ public class LoggingService(
         Path.Combine(loggingOptions.Value.BaseLogDirectory,
                      !string.IsNullOrWhiteSpace(hostEnvironment.ApplicationName) ? hostEnvironment.ApplicationName : "Desconocido");
 
-    /// <summary>
-    /// Dispara una verificación/creación perezosa de la carpeta base al instanciar.
-    /// Evita crear un segundo constructor y mantiene el primario limpio.
-    /// </summary>
-    private readonly bool _logDirReady = EnsureLogDirectory();
-
     // ===================== API pública =====================
 
     /// <summary>
@@ -68,7 +62,7 @@ public class LoggingService(
                 context.Items.Remove("LogFileName");
             }
 
-            // Reutilizar si ya está cacheado (guardamos SIEMPRE el path completo, no solo el nombre).
+            // Reutilizar si ya está cacheado (guardamos SIEMPRE el path completo).
             if (context.Items.TryGetValue("LogFileName", out var cached) &&
                 cached is string cachedPath && !string.IsNullOrWhiteSpace(cachedPath))
             {
@@ -96,7 +90,7 @@ public class LoggingService(
 
             // Carpeta final: <base>/<controller>/<endpoint>/<fecha>
             var finalDirectory = Path.Combine(_logDirectory, controllerName, endpoint, fecha);
-            Directory.CreateDirectory(finalDirectory); // Garantiza existencia
+            Directory.CreateDirectory(finalDirectory); // Garantiza existencia (crea toda la jerarquía)
 
             // Nombre final y path completo
             var fileName = $"{endpoint}_{executionId}{customPart}_{timestamp}.txt";
@@ -267,9 +261,8 @@ public class LoggingService(
     // ===================== Bloques manuales =====================
 
     /// <summary>
-    /// Inicia un bloque de log. Escribe una cabecera común y permite ir agregando filas
-    /// con <see cref="ILogBlock.Add(string, bool)"/>. Al finalizar, llamar <see cref="ILogBlock.End()"/>
-    /// o disponer el objeto (using) para escribir el cierre del bloque.
+    /// Inicia un bloque de log. Escribe una cabecera común y permite ir agregando filas.
+    /// Al finalizar (Dispose), se escribe el pie del bloque.
     /// </summary>
     public ILogBlock StartLogBlock(string title, HttpContext? context = null)
     {
@@ -281,82 +274,37 @@ public class LoggingService(
         var header = LogFormatter.BuildBlockHeader(title);
         LogHelper.SafeWriteLog(_logDirectory, filePath, header);
 
-        return new LogBlock(this, filePath, title);
+        return new LogBlock(this, filePath);
     }
 
     /// <summary>
     /// Implementación concreta de un bloque de log (cabecera + líneas + pie).
-    /// Cada llamada a Add/AddObj/AddException agrega contenido al mismo archivo
-    /// que abrió el bloque; End/Dispose escribe el pie para cerrarlo.
+    /// Cada llamada a Add agrega contenido al mismo archivo que abrió el bloque;
+    /// Dispose escribe el pie para cerrarlo.
     /// </summary>
-    private sealed class LogBlock : ILogBlock
+    private sealed class LogBlock(LoggingService svc, string filePath) : ILogBlock
     {
-        private readonly LoggingService _svc;
-        private readonly string _filePath;
-        private readonly string _title;
+        private readonly LoggingService _svc = svc;
+        private readonly string _filePath = filePath;
         private int _ended; // 0: abierto, 1: cerrado (idempotencia)
 
-        public LogBlock(LoggingService svc, string filePath, string title)
+        /// <summary>Agrega una línea de texto al bloque.</summary>
+        public void Add(string line)
         {
-            _svc = svc;
-            _filePath = filePath;
-            _title = title;
-        }
-
-        /// <summary>Agrega una fila de texto al bloque (con opción de timestamp corto).</summary>
-        public void Add(string message, bool includeTimestamp = false)
-        {
-            var line = includeTimestamp
-                ? $"[{DateTime.Now:HH:mm:ss}]•{message}"
-                :  $"• {message}";
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, line + Environment.NewLine);
-        }
-
-        /// <summary>Agrega un objeto serializado con un nombre al bloque.</summary>
-        public void AddObj(string name, object obj)
-        {
-            var formatted = LogFormatter.FormatObjectLog(name, obj);
-            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
-        }
-
-        /// <summary>Agrega detalles de excepción al bloque.</summary>
-        public void AddException(Exception ex)
-        {
-            var formatted = LogFormatter.FormatExceptionDetails(ex.ToString());
+            var formatted = line.Indent(LogScope.CurrentLevel) + Environment.NewLine;
             LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
         }
 
         /// <summary>Finaliza el bloque escribiendo el pie (idempotente).</summary>
-        public void End()
+        public void Dispose()
         {
             if (Interlocked.Exchange(ref _ended, 1) == 1) return; // evitar doble cierre
             var footer = LogFormatter.BuildBlockFooter();
             LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, footer);
         }
-
-        public void Dispose() => End();
     }
 
     // ===================== Utilidades privadas =====================
-
-    /// <summary>
-    /// Asegura que la carpeta base de logs exista. Si falla, registra en un archivo
-    /// de errores internos; no interrumpe la aplicación.
-    /// </summary>
-    private bool EnsureLogDirectory()
-    {
-        try
-        {
-            if (!Directory.Exists(_logDirectory))
-                Directory.CreateDirectory(_logDirectory);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogInternalError(ex);
-            return false;
-        }
-    }
 
     /// <summary>
     /// Devuelve un nombre seguro para usar en rutas/archivos (quita caracteres inválidos).
