@@ -1,371 +1,358 @@
-using System.Data.Common;
-using Logging.Models;
-using Microsoft.AspNetCore.Http;
+Este es el codigo original:
 
-namespace Logging.Abstractions;
-
-/// <summary>
-/// Define el contrato del servicio de logging: cálculo de rutas, escritura de bloques
-/// fijos/dinámicos, registro de SQL y utilidades de bloques manuales.
-/// </summary>
-public interface ILoggingService
-{
-    /// <summary>
-    /// Devuelve el path absoluto del archivo de log para la request actual
-    /// (cacheado en Items["LogFileName"]).
-    /// </summary>
-    string GetCurrentLogFile();
-
-    /// <summary>
-    /// Escribe texto en el archivo de log “actual”. Agrega cabecera/pie según corresponda.
-    /// </summary>
-    void WriteLog(HttpContext? context, string logContent);
-
-    /// <summary>Agrega una línea simple de texto.</summary>
-    void AddSingleLog(string message);
-
-    /// <summary>Agrega un objeto con nombre.</summary>
-    void AddObjLog(string objectName, object logObject);
-
-    /// <summary>Agrega un objeto usando su tipo como nombre.</summary>
-    void AddObjLog(object logObject);
-
-    /// <summary>Agrega detalles de excepción (stack) al log actual.</summary>
-    void AddExceptionLog(Exception ex);
-
-    /// <summary>
-    /// Registra ejecución SQL exitosa. Si hay contexto, se encola con timestamp de INICIO
-    /// para que el middleware lo inserte ordenado entre Request y Response.
-    /// </summary>
-    void LogDatabaseSuccess(SqlLogModel model, HttpContext? context = null);
-
-    /// <summary>
-    /// Registra ejecución SQL con error. Si el wrapper propagó el INICIO en Items,
-    /// se respeta para ordenar cronológicamente.
-    /// </summary>
-    void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null);
-
-    /// <summary>
-    /// Crea un bloque manual de log. El contenido se acumula y, al liberar el bloque (Dispose),
-    /// se publica como un único segmento dinámico posicionado por el instante de INICIO.
-    /// </summary>
-    ILogBlock StartLogBlock(string title, HttpContext? context = null);
-
-    /// <summary>
-    /// Log de error interno del propio servicio (no interrumpe la app).
-    /// </summary>
-    void LogInternalError(Exception ex);
-}
-
-
-
-
-
-using System.Data.Common;
-using System.Text;
-using Logging.Abstractions;
+﻿using Logging.Abstractions;
 using Logging.Configuration;
-using Logging.Extensions;   // .Indent(...) y LogScope
-using Logging.Helpers;      // LogHelper (archivo/csv/utilidades)
-using Logging.Models;       // SqlLogModel (StartTime, Duration, etc.)
+using Logging.Extensions;
+using Logging.Helpers;
+using Logging.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using System.Data.Common;
+using System.Text;
 
 namespace Logging.Services;
 
 /// <summary>
-/// Servicio central de logging: calcula rutas, escribe bloques fijos/dinámicos
-/// y mantiene compatibilidad con agregación cronológica (por INICIO) vía Items.
+/// Servicio de logging que captura y almacena eventos en archivos de log.
 /// </summary>
-/// <remarks>
-/// - Constructor primario (menos boilerplate).
-/// - Uso de new() y [] para inicializaciones.
-/// - Comentarios xml e inline describen **funcionalidades**.
-/// </remarks>
-public class LoggingService(
-    IHttpContextAccessor httpContextAccessor,
-    IHostEnvironment hostEnvironment,
-    IOptions<LoggingOptions> loggingOptions) : ILoggingService
+public class LoggingService : ILoggingService
 {
-    // ========= Dependencias y configuración =========
-
-    /// <summary>Acceso al contexto HTTP (correlación y nombre de archivo por-request).</summary>
-    private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
-
-    /// <summary>Opciones de logging (rutas, banderas de .txt/.csv, etc.).</summary>
-    private readonly LoggingOptions _loggingOptions = loggingOptions.Value;
-
-    /// <summary>Carpeta base por API: BaseLogDirectory/ApplicationName.</summary>
-    private readonly string _logDirectory =
-        Path.Combine(loggingOptions.Value.BaseLogDirectory,
-                     string.IsNullOrWhiteSpace(hostEnvironment.ApplicationName) ? "Desconocido" : hostEnvironment.ApplicationName);
+    private readonly string _logDirectory;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly LoggingOptions _loggingOptions;
 
     /// <summary>
-    /// Dispara verificación/creación de la carpeta base (inicialización perezosa).
+    /// Constructor que inicializa el servicio de logging con la configuración de rutas.
     /// </summary>
-    private readonly bool _logDirReady = EnsureLogDirectory();
+    public LoggingService(IHttpContextAccessor httpContextAccessor, IHostEnvironment hostEnvironment, IOptions<LoggingOptions> loggingOptions)
+    {
+        _httpContextAccessor = httpContextAccessor;
+        _loggingOptions = loggingOptions.Value;
+        string baseLogDir = loggingOptions.Value.BaseLogDirectory;
+        string apiName = !string.IsNullOrWhiteSpace(hostEnvironment.ApplicationName) ? hostEnvironment.ApplicationName : "Desconocido";
+        _logDirectory = Path.Combine(baseLogDir, apiName);
 
-    // ===== Constantes de interoperabilidad =====
+        try
+        {
+            if (!Directory.Exists(_logDirectory))
+                Directory.CreateDirectory(_logDirectory);
+        }
+        catch (Exception ex)
+        {
+            LogInternalError(ex);
+        }
+    }
 
-    /// <summary>Clave para propagar el INICIO de una ejecución SQL en Items.</summary>
-    private const string SqlStartedKey = "__SqlStartedUtc";
-
-    /// <summary>Lista en Items con bloques dinámicos “timed” (HTTP/SQL/etc.).</summary>
-    private const string TimedItemsKey = "HttpClientLogsTimed";
-
-    // ================================ API pública ================================
-
-    /// <inheritdoc />
+    /// <summary>
+    /// Obtiene el archivo de log de la petición actual, garantizando que toda la información
+    /// se guarde en el mismo archivo. Organiza por API, controlador, endpoint (desde Path) y fecha.
+    /// Agrega el LogCustomPart si existe. Usa hora local.
+    /// </summary>
     public string GetCurrentLogFile()
     {
         try
         {
             var context = _httpContextAccessor.HttpContext;
-            if (context is null) return BuildErrorFilePath("manual", null);
+            if (context == null)
+                return BuildErrorFilePath(kind: "manual", context: null);
 
-            // Invalida cache si cambió el sufijo custom.
-            if (context.Items.TryGetValue("LogFileName", out var cachedObj) &&
-                cachedObj is string cachedPath &&
+            // 🔹 Regenerar si el path cacheado no contiene el custom part
+            if (context.Items.TryGetValue("LogFileName", out var existingObj) &&
+                existingObj is string existingPath &&
                 context.Items.TryGetValue("LogCustomPart", out var partObj) &&
-                partObj is string part &&
-                !string.IsNullOrWhiteSpace(part) &&
-                !cachedPath.Contains(part, StringComparison.OrdinalIgnoreCase))
+                partObj is string part && !string.IsNullOrWhiteSpace(part) &&
+                !existingPath.Contains(part, StringComparison.OrdinalIgnoreCase))
             {
                 context.Items.Remove("LogFileName");
             }
 
-            if (context.Items.TryGetValue("LogFileName", out var existingObj) &&
-                existingObj is string existing && !string.IsNullOrWhiteSpace(existing))
+            // 🔹 Reutilizar si ya estaba cacheado (ojo: aquí esperamos el FULL PATH)
+            if (context.Items.TryGetValue("LogFileName", out var cached) &&
+                cached is string cachedPath && !string.IsNullOrWhiteSpace(cachedPath))
             {
-                return existing;
+                return cachedPath;
             }
 
-            // Endpoint y controller (cuando hay metadata MVC).
-            var endpoint = (context.Request.Path.Value ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "UnknownEndpoint";
-            var cad = context.GetEndpoint()
-                             ?.Metadata
-                             .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
-                             .FirstOrDefault();
-            var controllerName = cad?.ControllerName ?? "UnknownController";
+            // Nombre del Endpoint
+            string endpoint = context.Request.Path.Value?.Trim('/').Split('/').LastOrDefault() ?? "UnknownEndpoint";            
 
-            // Identificadores y fecha/hora para nombre de archivo.
-            var executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
-            var customPart = context.Items.TryGetValue("LogCustomPart", out var cpObj) && cpObj is string cp && !string.IsNullOrWhiteSpace(cp)
-                             ? $"_{cp}"
-                             : "";
-            var fecha = DateTime.Now.ToString("yyyy-MM-dd");
-            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            // ✅ Controller desde CAD (si está), si no, “UnknownController”
+            var endpointMetadata = context.GetEndpoint();
+            string controllerName = endpointMetadata?.Metadata
+                .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
+                .FirstOrDefault()?.ControllerName ?? "UnknownController";
 
-            // Carpeta final y nombre.
-            var finalDirectory = Path.Combine(_logDirectory, Sanitize(controllerName), Sanitize(endpoint), fecha);
+            // 📅 Hora local
+            string fecha = DateTime.Now.ToString("yyyy-MM-dd");
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string executionId = context.Items["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
+
+            // 🧩 Sufijo custom opcional
+            string customPart = "";
+            if (context.Items.TryGetValue("LogCustomPart", out var partValue) &&
+                partValue is string partStr && !string.IsNullOrWhiteSpace(partStr))
+            {
+                customPart = $"_{partStr}";
+            }
+
+            // 📁 Carpeta final
+            string finalDirectory = Path.Combine(_logDirectory, controllerName, endpoint, fecha);
             Directory.CreateDirectory(finalDirectory);
 
-            var fileName = $"{Sanitize(endpoint)}_{executionId}{customPart}_{timestamp}.txt";
-            var fullPath = Path.Combine(finalDirectory, fileName);
+            // 📝 Nombre final
+            string fileName = $"{endpoint}_{executionId}{customPart}_{timestamp}.txt";
+            string fullPath = Path.Combine(finalDirectory, fileName);
 
+            // ✅ Cachear SIEMPRE el FULL PATH (antes guardabas solo el fileName)
             context.Items["LogFileName"] = fullPath;
+
             return fullPath;
         }
         catch (Exception ex)
         {
             LogInternalError(ex);
-            return BuildErrorFilePath("manual", _httpContextAccessor.HttpContext);
+        }
+        return BuildErrorFilePath(kind: "manual", context: _httpContextAccessor.HttpContext);            
+    }        
+
+    /// <summary>
+    /// Registra errores internos en un archivo dentro de /Errores/&lt;fecha&gt;/ con nombre:
+    /// ExecutionId_Endpoint_yyyyMMdd_HHmmss_internal.txt
+    /// </summary>
+    public void LogInternalError(Exception ex)
+    {
+        try
+        {
+            var context = _httpContextAccessor.HttpContext;
+            var errorPath = BuildErrorFilePath(kind: "internal", context: context);
+
+            var msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Error en LoggingService: {ex}{Environment.NewLine}";
+            File.AppendAllText(errorPath, msg);
+        }
+        catch
+        {
+            // Evita bucles de error
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Escribe un log en el archivo correspondiente de la petición actual (.txt)
+    /// y en su respectivo archivo .csv. Si el contenido excede cierto tamaño,
+    /// se ejecuta en un hilo aparte para no afectar el flujo de la API.
+    /// </summary>
+    /// <param name="context">Contexto HTTP actual (opcional, para asociar el archivo de log).</param>
+    /// <param name="logContent">Contenido del log a registrar.</param>
     public void WriteLog(HttpContext? context, string logContent)
     {
         try
         {
-            var filePath = GetCurrentLogFile();
-            var isNewFile = !File.Exists(filePath);
+            string filePath = GetCurrentLogFile();
+            bool isNewFile = !File.Exists(filePath);
 
-            StringBuilder sb = new(); // acumulamos para aplicar cabecera/pie cuando toque
+            var logBuilder = new StringBuilder();
 
-            if (isNewFile) sb.AppendLine(LogFormatter.FormatBeginLog()); // cabecera automática
+            // Agregar inicio si es el primer log
+            if (isNewFile)
+                logBuilder.AppendLine(LogFormatter.FormatBeginLog());
 
-            sb.AppendLine(logContent); // cuerpo aportado por el llamador
+            // Agregar el contenido del log
+            logBuilder.AppendLine(logContent);
 
-            // Si la respuesta ya inició, cerramos el log automáticamente.
-            if (context is not null && context.Response.HasStarted)
-                sb.AppendLine(LogFormatter.FormatEndLog());
+            // Agregar cierre si ya inició la respuesta
+            if (context != null && context.Response.HasStarted)
+                logBuilder.AppendLine(LogFormatter.FormatEndLog());
 
-            var fullText = sb.ToString();
-            var isLarge = fullText.Length > (128 * 1024);
+            string fullText = logBuilder.ToString();
 
-            if (isLarge)
+            // Si el log es mayor a 128 KB, delegar a un hilo (Task.Run) para no bloquear
+            bool isLargeLog = fullText.Length > (128 * 1024); // ~128 KB
+
+            if (isLargeLog)
             {
-                // No bloquear requests con logs gigantes
                 Task.Run(() =>
                 {
-                    if (_loggingOptions.GenerateTxt) LogHelper.WriteLogToFile(_logDirectory, filePath, fullText);
-                    if (_loggingOptions.GenerateCsv) LogHelper.SaveLogAsCsv(_logDirectory, filePath, logContent);
+                    if (_loggingOptions.GenerateTxt)
+                    {
+                        LogHelper.WriteLogToFile(_logDirectory, filePath, fullText);
+                    }
+                    if (_loggingOptions.GenerateCsv)
+                    {
+                        LogHelper.SaveLogAsCsv(_logDirectory, filePath, logContent);
+                    }
                 });
             }
             else
             {
-                if (_loggingOptions.GenerateTxt) LogHelper.WriteLogToFile(_logDirectory, filePath, fullText);
-                if (_loggingOptions.GenerateCsv) LogHelper.SaveLogAsCsv(_logDirectory, filePath, logContent);
+                // Escritura directa en orden (preserva el flujo)
+                if (_loggingOptions.GenerateTxt)
+                {
+                    LogHelper.WriteLogToFile(_logDirectory, filePath, fullText);
+                }
+                if (_loggingOptions.GenerateCsv)
+                {
+                    LogHelper.SaveLogAsCsv(_logDirectory, filePath, logContent);
+                }
             }
         }
-        catch (Exception ex) { LogInternalError(ex); }
+        catch (Exception ex)
+        {
+            LogInternalError(ex);
+        }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Agrega un log manual de texto en el archivo de log actual.
+    /// </summary>
     public void AddSingleLog(string message)
     {
         try
         {
-            var formatted = LogFormatter.FormatSingleLog(message).Indent(LogScope.CurrentLevel);
+            string formatted = LogFormatter.FormatSingleLog(message).Indent(LogScope.CurrentLevel);
             LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
         }
-        catch (Exception ex) { LogInternalError(ex); }
+        catch (Exception ex)
+        {
+            LogInternalError(ex);
+        }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Registra un objeto en los logs con un nombre descriptivo.
+    /// </summary>
+    /// <param name="objectName">Nombre descriptivo del objeto.</param>
+    /// <param name="logObject">Objeto a registrar.</param>
     public void AddObjLog(string objectName, object logObject)
     {
         try
         {
-            var formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
+            string formatted = LogFormatter.FormatObjectLog(objectName, logObject).Indent(LogScope.CurrentLevel);
             LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
         }
-        catch (Exception ex) { LogInternalError(ex); }
+        catch (Exception ex)
+        {
+            LogInternalError(ex);
+        }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Registra un objeto en los logs sin necesidad de un nombre específico.
+    /// Se intentará capturar automáticamente el tipo de objeto.
+    /// </summary>
+    /// <param name="logObject">Objeto a registrar.</param>
     public void AddObjLog(object logObject)
     {
         try
         {
-            var name = logObject?.GetType()?.Name ?? "ObjetoDesconocido";
-            var safe = logObject ?? new { };
-            var formatted = LogFormatter.FormatObjectLog(name, safe).Indent(LogScope.CurrentLevel);
+            // Obtener el nombre del tipo del objeto
+            string objectName = logObject?.GetType()?.Name ?? "ObjetoDesconocido";
+            object safeObject = logObject ?? new { };
 
+            // Convertir objeto a JSON o XML según el formato
+            string formatted = LogFormatter.FormatObjectLog(objectName, safeObject).Indent(LogScope.CurrentLevel);
+
+            // Guardar el log en archivo
             LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
         }
-        catch (Exception ex) { LogInternalError(ex); }
+        catch (Exception ex)
+        {
+            LogInternalError(ex);
+        }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Registra excepciones en los logs.
+    /// </summary>
     public void AddExceptionLog(Exception ex)
     {
         try
         {
-            var formatted = LogFormatter.FormatExceptionDetails(ex.ToString()).Indent(LogScope.CurrentLevel);
+            string formatted = LogFormatter.FormatExceptionDetails(ex.ToString()).Indent(LogScope.CurrentLevel);
             LogHelper.SafeWriteLog(_logDirectory, GetCurrentLogFile(), formatted);
         }
-        catch (Exception e) { LogInternalError(e); }
+        catch (Exception e)
+        {
+            LogInternalError(e);
+        }
     }
 
     /// <inheritdoc />
     public void LogDatabaseSuccess(SqlLogModel model, HttpContext? context = null)
     {
-        try
-        {
-            var formatted = LogFormatter.FormatDbExecution(model); // mantiene visual actual
+        // Usa el formateador que ya tienes para texto plano, si lo deseas
+        var formatted = LogFormatter.FormatDbExecution(model);
 
-            if (context is not null)
-            {
-                // Orden por INICIO real (UTC)
-                var startedUtc = model.StartTime.Kind == DateTimeKind.Utc
-                    ? model.StartTime
-                    : model.StartTime.ToUniversalTime();
-
-                EnqueueTimed(context, startedUtc, formatted);
-            }
-            else
-            {
-                WriteLog(context, formatted); // compatibilidad sin contexto
-            }
-        }
-        catch (Exception loggingEx) { LogInternalError(loggingEx); }
+        LogHelper.SaveStructuredLog(formatted, context);
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Método para registrar comandos SQL fallidos
+    /// </summary>
+    /// <param name="command"></param>
+    /// <param name="ex"></param>
+    /// <param name="context"></param>
     public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null)
     {
         try
         {
-            var info = LogHelper.ExtractDbConnectionInfo(command.Connection?.ConnectionString);
+            var connectionInfo = LogHelper.ExtractDbConnectionInfo(command.Connection?.ConnectionString);
             var tabla = LogHelper.ExtractTableName(command.CommandText);
 
             var formatted = LogFormatter.FormatDbExecutionError(
-                nombreBD: info.Database,
-                ip: info.Ip,
-                puerto: info.Port,
-                biblioteca: info.Library,
+                nombreBD: connectionInfo.Database,
+                ip: connectionInfo.Ip,
+                puerto: connectionInfo.Port,
+                biblioteca: connectionInfo.Library,
                 tabla: tabla,
                 sentenciaSQL: command.CommandText,
                 exception: ex,
-                horaError: DateTime.now
+                horaError: DateTime.Now
             );
 
-            if (context is not null)
-            {
-                // Preferimos el INICIO propagado por el wrapper; si no, ahora (UTC).
-                var startedUtc =
-                    context.Items.TryGetValue(SqlStartedKey, out var obj) && obj is DateTime dt
-                        ? dt
-                        : DateTime.UtcNow;
-
-                EnqueueTimed(context, startedUtc, formatted);
-            }
-            else
-            {
-                WriteLog(context, formatted);
-            }
-
-            AddExceptionLog(ex); // rastro transversal
+            WriteLog(context, formatted);
+            AddExceptionLog(ex); // También lo guardás como log general si usás esa ruta
         }
-        catch (Exception fail) { LogInternalError(fail); }
-    }
-
-    /// <inheritdoc />
-    public ILogBlock StartLogBlock(string title, HttpContext? context = null)
-    {
-        // Crea un bloque manual que se publicará como un único segmento dinámico
-        // usando el instante de INICIO como ancla para el orden cronológico.
-        return new LogBlock(this, context ?? _httpContextAccessor.HttpContext, title);
-    }
-
-    // ============================== Helpers privados ==============================
-
-    /// <summary>Garantiza la existencia del directorio base.</summary>
-    private bool EnsureLogDirectory()
-    {
-        try
+        catch (Exception errorAlLoguear)
         {
-            if (!Directory.Exists(_logDirectory))
-                Directory.CreateDirectory(_logDirectory);
-            return true;
+            LogInternalError(errorAlLoguear);
         }
-        catch (Exception ex) { LogInternalError(ex); return false; }
     }
+
+    #region Métodos Privados
 
     /// <summary>
-    /// Encola un bloque “timed” (INICIO UTC) en Items para que el middleware lo inserte
-    /// entre Request(4) y Response(5) respetando el orden cronológico.
+    /// Devuelve un nombre seguro para usar en rutas/archivos.
     /// </summary>
-    private static void EnqueueTimed(HttpContext context, DateTime startedUtc, string content)
-    {
-        if (!context.Items.ContainsKey(TimedItemsKey)) context.Items[TimedItemsKey] = new List<object>();
-        if (context.Items[TimedItemsKey] is List<object> list)
-            list.Add(new TimedEntry(startedUtc, content));
-    }
-
-    /// <summary>Normaliza nombres de controlador/endpoint/archivo.</summary>
     private static string Sanitize(string? name)
     {
         if (string.IsNullOrWhiteSpace(name)) return "Unknown";
         var invalid = Path.GetInvalidFileNameChars().Concat(Path.GetInvalidPathChars()).Distinct().ToArray();
-        var cleaned = new string([.. name.Where(c => !invalid.Contains(c))]).Trim();
+        var cleaned = new string(name.Where(c => !invalid.Contains(c)).ToArray()).Trim();
         return string.IsNullOrWhiteSpace(cleaned) ? "Unknown" : cleaned;
     }
 
-    /// <summary>Crea (si no existe) la carpeta de errores del día.</summary>
+    /// <summary>
+    /// Obtiene un nombre de endpoint seguro desde el HttpContext. Si no existe contexto, devuelve "NoContext".
+    /// </summary>
+    private static string GetEndpointSafe(HttpContext? context)
+    {
+        if (context == null) return "NoContext";
+
+        // Intentar usar CAD (ActionName); si no, caer al último segmento del Path
+        var cad = context.GetEndpoint()?.Metadata
+            .OfType<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>()
+            .FirstOrDefault();
+
+        var endpoint = cad?.ActionName
+                       ?? (context.Request.Path.Value ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault()
+                       ?? "UnknownEndpoint";
+
+        return Sanitize(endpoint);
+    }
+
+    /// <summary>
+    /// Devuelve la carpeta base de errores con la subcarpeta de fecha local: &lt;_logDirectory&gt;/Errores/&lt;yyyy-MM-dd&gt;
+    /// </summary>
     private string GetErrorsDirectory(DateTime nowLocal)
     {
         var dir = Path.Combine(_logDirectory, "Errores", nowLocal.ToString("yyyy-MM-dd"));
@@ -373,94 +360,207 @@ public class LoggingService(
         return dir;
     }
 
-    /// <summary>Construye ruta para logs de error internos o manuales.</summary>
+    /// <summary>
+    /// Construye un path de archivo de error con ExecutionId, Endpoint y timestamp local.
+    /// Sufijo: "internal" para errores internos; "manual" para global manual logs.
+    /// </summary>
     private string BuildErrorFilePath(string kind, HttpContext? context)
     {
-        var now = DateTime.Now;
+        var now = DateTime.Now; // hora local
         var dir = GetErrorsDirectory(now);
 
+        // ExecutionId (si hay contexto), si no un Guid nuevo
         var executionId = context?.Items?["ExecutionId"]?.ToString() ?? Guid.NewGuid().ToString();
-        var endpoint = (context?.Request.Path.Value ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "UnknownEndpoint";
-        var timestamp = now.ToString("yyyyMMdd_HHmmss");
-        var suffix = string.Equals(kind, "internal", StringComparison.OrdinalIgnoreCase) ? "_internal" : "";
 
-        var fileName = $"{Sanitize(endpoint)}_{executionId}_{timestamp}{suffix}.txt";
+        var endpoint = GetEndpointSafe(context);
+        var timestamp = now.ToString("yyyyMMdd_HHmmss");
+
+        var suffix = string.Equals(kind, "internal", StringComparison.OrdinalIgnoreCase) ? "_internal" : "";
+        var fileName = $"{executionId}_{endpoint}_{timestamp}{suffix}.txt";
+
         return Path.Combine(dir, fileName);
     }
 
-    /// <inheritdoc />
-    public void LogInternalError(Exception ex)
-    {
-        try
-        {
-            var context = _httpContextAccessor.HttpContext;
-            var errorPath = BuildErrorFilePath("internal", context);
-            var msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Error en LoggingService: {ex}{Environment.NewLine}";
-            File.AppendAllText(errorPath, msg);
-        }
-        catch { /* silencio para evitar loops */ }
-    }
+    #endregion
 
-    // ===== Tipos internos auxiliares =====
+
+    #region Métodos para AddSingleLog en bloque
 
     /// <summary>
-    /// Entrada usada en Items para ordenar por INICIO (UTC) dentro del middleware.
+    /// Inicia un bloque de log. Escribe una cabecera común y permite ir agregando filas
+    /// con <see cref="ILogBlock.Add(string)"/>. Al finalizar, llamar <see cref="ILogBlock.End()"/>
+    /// o disponer el objeto (using) para escribir el cierre del bloque.
     /// </summary>
-    private sealed class TimedEntry(DateTime tsUtc, string content)
+    /// <param name="title">Título o nombre del bloque (ej. "Proceso de conciliación").</param>
+    /// <param name="context">Contexto HTTP (opcional). Si es null, se usa el contexto actual si existe.</param>
+    /// <returns>Instancia del bloque para agregar filas.</returns>
+    public ILogBlock StartLogBlock(string title, HttpContext? context = null)
     {
-        public DateTime TsUtc { get; } = tsUtc;
-        public string Content { get; } = content;
+        context ??= _httpContextAccessor.HttpContext;
+        var filePath = GetCurrentLogFile(); // asegura que compartimos el mismo archivo de la request
+
+        // Cabecera del bloque
+        var header = LogFormatter.BuildBlockHeader(title);
+        LogHelper.SafeWriteLog(_logDirectory, filePath, header);
+
+        return new LogBlock(this, filePath, title);
     }
 
     /// <summary>
-    /// Implementación de <see cref="ILogBlock"/>: acumula texto y, al liberar,
-    /// publica un único segmento dinámico posicionado por el INICIO del bloque.
+    /// Implementación concreta de un bloque de log.
     /// </summary>
-    private sealed class LogBlock(LoggingService owner, HttpContext? context, string title) : ILogBlock
+    private sealed class LogBlock : ILogBlock
     {
-        private readonly LoggingService _owner = owner;
-        private readonly HttpContext? _context = context;
-        private readonly DateTime _startedUtc = DateTime.UtcNow; // ancla para el orden
-        private readonly string _title = title;
+        private readonly LoggingService _svc;
+        private readonly string _filePath;
+        private readonly string _title;
+        private int _ended; // 0 no, 1 sí (para idempotencia)
 
-        private readonly StringBuilder _sb = new(); // buffer del bloque
-
-        public LogBlock : this(owner, context, title)
+        public LogBlock(LoggingService svc, string filePath, string title)
         {
-            // Cabecera del bloque manual (formato consistente con el resto del log).
-            _sb.AppendLine("============== INICIO BLOQUE ==============")
-               .Append("Título         : ").AppendLine(_title)
-               .Append("Fecha/Hora     : ").AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"))
-               .AppendLine("-------------------------------------------");
+            _svc = svc;
+            _filePath = filePath;
+            _title = title;
         }
 
         /// <inheritdoc />
-        public void Add(string line)
+        public void Add(string message, bool includeTimestamp = false)
         {
-            // Agrega líneas respetando sangrías del nivel actual.
-            _sb.AppendLine(line.Indent(LogScope.CurrentLevel));
+            // cada "Add" es una fila en el mismo archivo, dentro del bloque
+            var line = includeTimestamp 
+                ? $"[{DateTime.Now:HH:mm:ss}]•{message}" 
+                :  $"• {message}";
+            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, line + Environment.NewLine);
         }
 
         /// <inheritdoc />
-        public void Dispose()
+        public void AddObj(string name, object obj)
         {
-            // Cierre del bloque y publicación como segmento dinámico “timed”.
-            _sb.AppendLine("-------------------------------------------")
-               .AppendLine("=============== FIN BLOQUE ================")
-               .AppendLine();
-
-            var ctx = _context ?? _owner._httpContextAccessor.HttpContext;
-            if (ctx is not null)
-            {
-                EnqueueTimed(ctx, _startedUtc, _sb.ToString());
-            }
-            else
-            {
-                // Sin contexto: caída a archivo directo para no perder el bloque.
-                _owner.WriteLog(null, _sb.ToString());
-            }
+            var formatted = LogFormatter.FormatObjectLog(name, obj);
+            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
         }
+
+        /// <inheritdoc />
+        public void AddException(Exception ex)
+        {
+            var formatted = LogFormatter.FormatExceptionDetails(ex.ToString());
+            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, formatted);
+        }
+
+        /// <inheritdoc />
+        public void End()
+        {
+            if (Interlocked.Exchange(ref _ended, 1) == 1) return; // ya finalizado
+            var footer = LogFormatter.BuildBlockFooter();
+            LogHelper.SafeWriteLog(_svc._logDirectory, _filePath, footer);
+        }
+
+        public void Dispose() => End();
+    }
+}
+
+    #endregion
+
+
+/// <summary>
+/// Atributo para indicar qué propiedad del modelo debe usarse como parte del nombre del archivo de log.
+/// Debe aplicarse únicamente a propiedades públicas sin parámetros (no indexers).
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
+public sealed class LogFileNameAttribute : Attribute
+{ }
+
+
+
+namespace Logging.Abstractions;
+
+/// <summary>
+/// Contrato para un bloque de log que agrupa múltiples filas con un encabezado y un pie comunes.
+/// </summary>
+public interface ILogBlock : IDisposable
+{
+    /// <summary>Agrega una fila de texto al bloque.</summary>
+    void Add(string message, bool includeTimestamp = false);
+
+    /// <summary>Agrega una fila logueando un objeto formateado.</summary>
+    void AddObj(string name, object obj);
+
+    /// <summary>Agrega una fila con detalle de excepción.</summary>
+    void AddException(Exception ex);
+
+    /// <summary>Finaliza el bloque (escribe el pie). Idempotente.</summary>
+    void End();
+}
+
+
+
+using Logging.Models;
+using Microsoft.AspNetCore.Http;
+using System.Data.Common;
+
+namespace Logging.Abstractions
+{
+    /// <summary>
+    /// Define la interfaz para el servicio de logging.
+    /// </summary>
+    public interface ILoggingService
+    {
+        /// <summary>
+        /// MEtodo que guarda logs
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="logContent"></param>
+        void WriteLog(HttpContext? context, string logContent);
+        /// <summary>
+        /// Agrega un log de texto simple.
+        /// </summary>
+        void AddSingleLog(string message);
+
+        /// <summary>
+        /// Registra un objeto en los logs con un nombre descriptivo.
+        /// </summary>
+        /// <param name="objectName">Nombre descriptivo del objeto.</param>
+        /// <param name="logObject">Objeto a registrar.</param>
+        void AddObjLog(string objectName, object logObject);
+
+        /// <summary>
+        /// Registra un objeto en los logs sin necesidad de un nombre específico.
+        /// Se intentará capturar automáticamente el tipo de objeto.
+        /// </summary>
+        /// <param name="logObject">Objeto a Registrar</param>
+        void AddObjLog(object logObject);
+
+        /// <summary>
+        /// Registra una excepción en los logs.
+        /// </summary>
+        void AddExceptionLog(Exception ex);
+
+        /// <summary>
+        /// Registra un log estructurado de éxito para una operación SQL usando un modelo preformateado.
+        /// </summary>
+        /// <param name="model">Modelo con los datos del comando SQL ejecutado.</param>
+        /// <param name="context">Contexto HTTP para trazabilidad opcional.</param>
+        void LogDatabaseSuccess(SqlLogModel model, HttpContext? context = null);
+
+        /// <summary>
+        /// Registra un log de error para un comando SQL que lanzó una excepción.
+        /// </summary>
+        /// <param name="command">El comando ejecutado que causó el error.</param>
+        /// <param name="ex">La excepción lanzada.</param>
+        /// <param name="context">Contexto HTTP actual para extraer información adicional (opcional).</param>
+        void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null);
+
+        /// <summary>
+        /// Inicia un bloque de log. Escribe una cabecera común y permite ir agregando filas
+        /// con <see cref="ILogBlock.Add(string)"/>. Al finalizar, llamar <see cref="ILogBlock.End()"/>
+        /// o disponer el objeto (using) para escribir el cierre del bloque.
+        /// </summary>
+        /// <param name="title">Título o nombre del bloque (ej. "Proceso de conciliación").</param>
+        /// <param name="context">Contexto HTTP (opcional). Si es null, se usa el contexto actual si existe.</param>
+        /// <returns>Instancia del bloque para agregar filas.</returns>
+        public ILogBlock StartLogBlock(string title, HttpContext? context = null);
     }
 }
 
 
+Considera todas las funciones y metodos que tenia originalmente para aplicar las mejoras, porque el codigo que me entregas elimina varia opciones que ya disponia.
