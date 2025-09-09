@@ -1,5 +1,3 @@
-Este es el program.cs de otro API, actualizalo al igual que el anterior con los comentarios xml y comentarios en general
-
 using Connections.Abstractions;
 using Connections.Helpers;
 using Connections.Providers.Database;
@@ -24,102 +22,128 @@ using System.Reflection;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
-/*Conexiones */
 
-var connectionSettings = new ConnectionSettings(builder.Configuration);
+/// <summary>
+/// ===============================  Conexiones  ===============================
+/// Publica la configuración de conexiones y deja disponible un helper global
+/// usado por componentes existentes (compatibilidad con código legacy).
+/// </summary>
+ConnectionSettings connectionSettings = new(builder.Configuration);
 ConnectionManagerHelper.ConnectionConfig = connectionSettings;
 
-// Registrar ConnectionSettings para leer configuración dinámica
+// Registrar ConnectionSettings para lectura dinámica en tiempo de ejecución
 builder.Services.AddSingleton<ConnectionSettings>();
 
-// Registrar IHttpContextAccessor para acceso al contexto en servicios
+/// <summary>
+/// ===============================  Infra Logging  ===============================
+/// Accessor del HttpContext para:
+///  - Propagar correlación (ExecutionId, etc.)
+///  - Permitir que SQL/HTTP se encolen en la **misma cola “timed”** y se ordenen por INICIO real.
+/// </summary>
 builder.Services.AddHttpContextAccessor();
+
+// Filtro que anota Controller/Action y otros metadatos MVC en los bloques fijos del log.
 builder.Services.AddScoped<LoggingActionFilter>();
 
-// Registrar servicio de Logging
-builder.Services.AddScoped<ILoggingService, LoggingService>();
-
-// Registrar la conexión principal a AS400 usando OleDbCommand
-// Registrar servicio de conexión con soporte de logging para AS400
-builder.Services.AddScoped<IDatabaseConnection>(sp =>
-{
-    // Obtener configuración general
-    var config = sp.GetRequiredService<IConfiguration>();
-    var settings = new ConnectionSettings(config); // Tu clase para acceder a settings
-
-    // Obtener cadena de conexión desencriptada para AS400
-    var connStr = settings.GetAS400ConnectionString("AS400");
-
-    // Instanciar proveedor interno
-    return new AS400ConnectionProvider(
-        connStr,
-        sp.GetRequiredService<ILoggingService>()); // Constructor de AS400ConnectionProvider
-});
-/*Conexiones*/
-
-
-// Registra IHttpContextAccessor para acceder al HttpContext en el servicio de logging.
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<LoggingActionFilter>();
-
-// Registra el servicio de logging. La implementación utilizará la configuración inyectada (IOptions<LoggingOptions>)
-// y la información del entorno (IHostEnvironment).
+// Servicio central de logging (singleton: configuración y E/S de archivos compartidos).
 builder.Services.AddSingleton<ILoggingService, LoggingService>();
 
-// Configura LoggingOptions a partir de la sección "LoggingOptions" en el appsettings.json.
-builder.Services.Configure<Logging.Configuration.LoggingOptions>(builder.Configuration.GetSection("LoggingOptions"));
+// Opciones de logging (rutas, switches .txt/.csv) mapeadas desde appsettings.
+builder.Services.Configure<Logging.Configuration.LoggingOptions>(
+    builder.Configuration.GetSection("LoggingOptions"));
 
-builder.Services.AddTransient<IMachineInfoService, MachineInformationService>();
+/// <summary>
+/// ===============================  BD Provider  ===============================
+/// Proveedor AS400 con soporte de logging estructurado y **HttpContext**.
+/// Se pasa IHttpContextAccessor para que el wrapper SQL:
+///  - Selle Items["__SqlStartedUtc"] (ancla de orden por INICIO real)
+///  - Encole el bloque en HttpClientLogsTimed (mezcla/orden junto con HTTP).
+/// </summary>
+builder.Services.AddScoped<IDatabaseConnection>(sp =>
+{
+    IConfiguration config = sp.GetRequiredService<IConfiguration>();
+    ConnectionSettings settings = new(config);
+    string connStr = settings.GetAS400ConnectionString("AS400");
 
-//Login para HTTPClientHandler
+    return new AS400ConnectionProvider(
+        connStr,
+        sp.GetRequiredService<ILoggingService>(),
+        sp.GetRequiredService<IHttpContextAccessor>()); // ← imprescindible para orden cronológico correcto
+});
+
+/// <summary>
+/// ===============================  HTTP Saliente  ===============================
+/// Handler que intercepta TODAS las solicitudes/respuestas HTTP salientes para loguearlas
+/// en la cola “timed”. Los servicios deben usar IHttpClientFactory con el cliente **"Embosado"**.
+/// </summary>
 builder.Services.AddTransient<HttpClientLoggingHandler>();
 
-/*Configuración de la conexión*/
+// Cliente HTTP **nombrado** con el handler de logging encadenado.
+builder.Services.AddHttpClient("Embosado")
+    .AddHttpMessageHandler<HttpClientLoggingHandler>();
+
+/// <summary>
+/// ===============================  Config general / archivos  ===============================
+/// Carga de archivos de configuración de la API.
+/// </summary>
 builder.Configuration
     .SetBasePath(Directory.GetCurrentDirectory())
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile("ConnectionData.json", optional: false, reloadOnChange: true);
 
-var configuration = builder.Configuration;
+IConfiguration configuration = builder.Configuration;
 
-//Leer Ambiente
-var enviroment = configuration["ApiSettings:Enviroment"] ?? "DEV";
-////Leer node correspondiente desde ConnectionData.json
-var connectionSection = configuration.GetSection(enviroment);
-var connectionConfig = connectionSection.Get<ConnectionConfig>();
+// Resolver nodo de conexión por ambiente y publicarlo globalmente (compatibilidad).
+string enviroment = configuration["ApiSettings:Enviroment"] ?? "DEV";
+IConfigurationSection connectionSection = configuration.GetSection(enviroment);
+ConnectionConfig? connectionConfig = connectionSection.Get<ConnectionConfig>();
+GlobalConnection.Current = connectionConfig!; // intencional: debe existir configuración válida
 
-////Asignación de conexión Global
-GlobalConnection.Current = connectionConfig!;
-
-/*Configuración de la conexión*/
-
-//Carga de Clave secreta
-var jwtKeyService = new JwtKeyService();
-var secretKey = await jwtKeyService.GetSecretKeyAsync();
+/// <summary>
+/// ===============================  JWT / Seguridad  ===============================
+/// Carga de clave secreta dinámica y configuración de autenticación JWT.
+/// </summary>
+var jwtKeyService = new JwtKeyService();                // servicio utilitario existente (sin DI)
+var secretKey = await jwtKeyService.GetSecretKeyAsync(); // obtiene llave (p.ej., de bóveda/archivo)
 builder.Configuration["JwtKey"] = secretKey;
 
+// Autenticación JWT (validación de firma y expiración; sin issuer/audience estrictos).
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new()
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        };
+    });
 
-builder.Services.AddHttpClient<IJwtService, JwtKeyService>();
-builder.Services.AddHttpClient<IAuthService, AuthService>();
-builder.Services.AddHttpClient<ISessionManagerService, SessionManagerService>();
-builder.Services.AddHttpClient<IDetalleTarjetasImprimirServices, DetalleTarjetasImprimirServices>();
-builder.Services.AddHttpClient<IRegistraImpresionService, RegistraImpresionService>();
-builder.Services.AddHttpClient<IValidaImpresionService, ValidaImpresionService>();
-//builder.Services.AddHttpClient<IHeartbeat,  HeartbeatService>();
-
+/// <summary>
+/// ===============================  Servicios de dominio  ===============================
+/// Se registran como Scoped (no typed clients). Cada servicio debe obtener el HttpClient
+/// via IHttpClientFactory.CreateClient("Embosado") para que el handler capture los logs HTTP.
+/// </summary>
+builder.Services.AddTransient<IMachineInfoService, MachineInformationService>();
 builder.Services.AddScoped<IJwtService, JwtKeyService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ISessionManagerService, SessionManagerService>();
 builder.Services.AddScoped<IDetalleTarjetasImprimirServices, DetalleTarjetasImprimirServices>();
 builder.Services.AddScoped<IRegistraImpresionService, RegistraImpresionService>();
 builder.Services.AddScoped<IValidaImpresionService, ValidaImpresionService>();
-//builder.Services.AddScoped<IHeartbeat,  HeartbeatService>();
+// Si en el futuro conviertes alguno a typed client, su clase debe exponer ctor(HttpClient, ...).
 
-// Add services to the container.
+/// <summary>
+/// ===============================  MVC / Swagger / CORS  ===============================
+/// Inserta el filtro de logging y expone documentación con comentarios XML.
+/// </summary>
 builder.Services.AddControllers(options =>
 {
+    // Inserta filtro para capturar Controller/Action en los bloques fijos del log.
     options.Filters.Add<LoggingActionFilter>();
-
 });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -129,10 +153,10 @@ builder.Services.AddSwaggerGen(options =>
     {
         Title = "MS_BAN_43_Embosado_Tarjetas_Debito",
         Version = "v1",
-        Description = "API para embosado de tarjetas de Debito",
+        Description = "API para embosado de tarjetas de Débito",
         Contact = new OpenApiContact
         {
-            Name = "Embosado Tarjetas Debito",
+            Name = "Embosado Tarjetas Débito",
             Email = "soporte@api.com",
             Url = new Uri("https://api.com")
         },
@@ -143,60 +167,44 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 
-    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-
+    string xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    string xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
     options.IncludeXmlComments(xmlPath);
 });
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
-{
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
-        ValidateIssuer = false,
-        ValidateAudience = false,
-        ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
-    };
-
-});
-
+// Política CORS (ej. front Angular); abre orígenes/métodos/headers.
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAngularOrigins", builder =>
+    options.AddPolicy("AllowAngularOrigins", policy =>
     {
-        builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
     });
 });
 
+/// <summary>
+/// ===============================  Pipeline HTTP  ===============================
+/// Activa CORS, seguridad, middleware de logging y Swagger en Dev/Prod.
+/// </summary>
 var app = builder.Build();
 
 app.UseCors("AllowAngularOrigins");
 
-/*Configuración de Sunitp*/
-
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
-    app.UseSwagger(c =>
-    {
-        c.RouteTemplate = "swagger/{documentName}/swagger.json";
-    });
-
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "API para embosado de tarjetas de Debito.");
-    });
+    app.UseSwagger(c => c.RouteTemplate = "swagger/{documentName}/swagger.json");
+    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "API para embosado de tarjetas de Débito"));
 }
 
 app.UseHttpsRedirection();
 
-app.UseAuthentication();
+app.UseAuthentication(); // valida JWT en endpoints protegidos
+app.UseAuthorization();  // aplica políticas/atributos
 
-app.UseAuthorization();
-
+// Middleware de logging central:
+// - Escribe los 7 bloques fijos (Inicio/Env/Controlador/Request/Dinámicos/Errores/Fin).
+// - Mezcla HTTP/SQL entre (4) Request y (5) Response, ordenados por INICIO real (TsUtc) y Seq.
 app.UseMiddleware<LoggingMiddleware>();
 
 app.MapControllers();
