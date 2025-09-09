@@ -1,47 +1,300 @@
-si quito el Scoped da este error:
+Asi tengo el constructor:
 
------------------------------Exception Details---------------------------------
-Inicio: 2025-09-09 10:19:23
--------------------------------------------------------------------------------
-System.InvalidOperationException: A suitable constructor for type 'API_1_TERCEROS_REMESADORAS.Services.BTSServices.AuthenticateService.AuthenticateService' could not be located. Ensure the type is concrete and all parameters of a public constructor are either registered as services or passed as arguments. Also ensure no extraneous arguments are provided.
-   at Microsoft.Extensions.DependencyInjection.ActivatorUtilities.FindApplicableConstructor(Type instanceType, Type[] argumentTypes, ConstructorInfo& matchingConstructor, Nullable`1[]& matchingParameterMap)
-   at Microsoft.Extensions.DependencyInjection.ActivatorUtilities.CreateFactoryInternal(Type instanceType, Type[] argumentTypes, ParameterExpression& provider, ParameterExpression& argumentArray, Expression& factoryExpressionBody)
-   at Microsoft.Extensions.DependencyInjection.ActivatorUtilities.CreateFactory(Type instanceType, Type[] argumentTypes)
-   at System.Threading.LazyInitializer.EnsureInitializedCore[T](T& target, Boolean& initialized, Object& syncLock, Func`1 valueFactory)
-   at Microsoft.Extensions.Http.DefaultTypedHttpClientFactory`1.Cache.get_Activator()
-   at Microsoft.Extensions.Http.DefaultTypedHttpClientFactory`1.CreateClient(HttpClient httpClient)
-   at Microsoft.Extensions.DependencyInjection.HttpClientBuilderExtensions.AddTransientHelper[TClient,TImplementation](IServiceProvider s, IHttpClientBuilder builder)
-   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteRuntimeResolver.VisitDisposeCache(ServiceCallSite transientCallSite, RuntimeResolverContext context)
-   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteVisitor`2.VisitCallSite(ServiceCallSite callSite, TArgument argument)
-   at Microsoft.Extensions.DependencyInjection.ServiceLookup.CallSiteRuntimeResolver.Resolve(ServiceCallSite callSite, ServiceProviderEngineScope scope)
-   at Microsoft.Extensions.DependencyInjection.ServiceLookup.DynamicServiceProviderEngine.<>c__DisplayClass2_0.<RealizeService>b__0(ServiceProviderEngineScope scope)
-   at Microsoft.Extensions.DependencyInjection.ServiceProvider.GetService(ServiceIdentifier serviceIdentifier, ServiceProviderEngineScope serviceProviderEngineScope)
-   at Microsoft.Extensions.DependencyInjection.ServiceLookup.ServiceProviderEngineScope.GetService(Type serviceType)
-   at lambda_method10(Closure, IServiceProvider, Object[])
-   at Microsoft.AspNetCore.Mvc.Controllers.ControllerFactoryProvider.<>c__DisplayClass6_0.<CreateControllerFactory>g__CreateController|0(ControllerContext controllerContext)
-   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Next(State& next, Scope& scope, Object& state, Boolean& isCompleted)
-   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.InvokeInnerFilterAsync()
---- End of stack trace from previous location ---
-   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeFilterPipelineAsync>g__Awaited|20_0(ResourceInvoker invoker, Task lastTask, State next, Scope scope, Object state, Boolean isCompleted)
-   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeAsync>g__Logged|17_1(ResourceInvoker invoker)
-   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeAsync>g__Logged|17_1(ResourceInvoker invoker)
-   at Logging.Middleware.LoggingMiddleware.InvokeAsync(HttpContext context)
------------------------------Exception Details---------------------------------
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Autenticacion.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.ConfirmacionPago.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.ConfirmacionTransaccionDirecta.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Consulta.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Pago.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.RechazoPago.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Reporteria.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Reporteria.SDEP.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Reverso.Request;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.AuthenticateService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConfirmacionPago;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConfirmacionTransaccionDirectaService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConsultaService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.PagoService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.RechazoPago;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReporteriaService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReporteriaService.SEDP;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReversoServices;
+using API_Terceros.Models;
+using Microsoft.AspNetCore.Mvc;
 
-    Lo dejare solo con esto para que funcione:
+namespace API_1_TERCEROS_REMESADORAS.Controllers;
 
-builder.Services.AddScoped<IDatabaseConnection>(sp =>
+/// <summary>
+/// Controlador BTS
+/// </summary>
+[Route("v1/[controller]")]
+[ApiController]
+public class BtsController : ControllerBase
 {
-    // Obtener configuración general
-    var config = sp.GetRequiredService<IConfiguration>();
-    var settings = new ConnectionSettings(config); // Tu clase para acceder a settings
+    private readonly IAuthenticateService _authenticateService;
+    private readonly IConsultaService _consultaService;
+    private readonly IPagoService _pagoService;
+    private readonly IReversoService _reversoService;
+    private readonly IConfirmacionTransaccionDirecta _confirmacionTransaccionDirecta;
+    private readonly IConfirmacionPago _confirmacionPago;
+    private readonly IRechazoPago _rechazoPago;
+    private readonly IReporteriaService _reporteriaService;
+    private readonly ISEDPService _sEDPService;
 
-    // Obtener cadena de conexión desencriptada para AS400
-    var connStr = settings.GetAS400ConnectionString("AS400");
 
-    // Instanciar proveedor interno
-    return new AS400ConnectionProvider(
-        connStr,
-        sp.GetRequiredService<ILoggingService>(),
-        sp.GetRequiredService<IHttpContextAccessor>()); // Constructor de AS400ConnectionProvider       
-});
+    /// <summary>
+    /// Contructor de BTS Controller
+    /// </summary>
+    /// <param name="authenticateService">Instancia de Authenticate Service.</param>
+    /// <param name="consultaService">Instancia de Consulta Service.</param>
+    /// <param name="pagoService">Instancia de Pago Service.</param>
+    /// <param name="reversoService">Instancia de Reverso Service.</param>
+    /// <param name="confirmacionTransaccionDirecta">Instancia de Confirmación Transaccion Directa Service.</param>
+    /// <param name="confirmacionPago">Instancia de Confirmación Pago Service.</param>
+    /// <param name="rechazoPago">Instancia de Rechazo Pago Service.</param>
+    /// <param name="reporteriaService">Instancia de Reporteria Service.</param>
+    /// <param name="sEDPService">Instnacia de ISEDPService.</param>
+    public BtsController(IAuthenticateService authenticateService, IConsultaService consultaService, IPagoService pagoService, 
+        IReversoService reversoService, IConfirmacionTransaccionDirecta confirmacionTransaccionDirecta, IConfirmacionPago confirmacionPago, 
+        IRechazoPago rechazoPago, IReporteriaService reporteriaService, ISEDPService sEDPService)
+    {
+        _authenticateService = authenticateService;
+        _consultaService = consultaService;
+        _pagoService = pagoService;
+        _reversoService = reversoService;
+        _confirmacionTransaccionDirecta = confirmacionTransaccionDirecta;
+        _confirmacionPago = confirmacionPago;
+        _rechazoPago = rechazoPago;
+        _reporteriaService = reporteriaService;
+        _sEDPService = sEDPService;
+    }
+
+    /// <summary>
+    /// Enpoint Autenticación.
+    /// </summary>
+    /// <param name="requestModel"></param>
+    /// <returns>Un Acción HTTP</returns>
+    [HttpPost("Autenticacion/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> AutenticacionBTS([FromBody] RequestModel<AuthenticateBody> requestModel)
+    {
+        var (jsonResponse, statusCode)  = await _authenticateService.AuthenticateServiceRequestAsync();
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.Process_Msg
+            },
+            Data = new
+            {
+                jsonResponse
+            }
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Endpoint GetData
+    /// </summary>
+    /// <param name="requestModel"></param>
+    /// <returns>Http Response</returns>
+    [HttpPost("Consulta/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> ConsultaBTS([FromBody] RequestModel<ConsultaBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _consultaService.ConsultaServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Endpoint GetData
+    /// </summary>
+    /// <param name="requestModel"></param>
+    /// <returns>Http Response</returns>
+    [HttpPost("Pago/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> PagoBTS([FromBody] RequestModel<PagoBody> requestModel)
+    {
+        var (jsonResponse, statusCode)  = await _pagoService.PagoServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data =  jsonResponse                
+        };
+
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Endpoint ReversoBTS
+    /// </summary>
+    /// <param name="requestModel"></param>
+    /// <returns>Http Response</returns>
+    [HttpPost("Reverso/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> ReversoBTS([FromBody] RequestModel<ReversoBody> requestModel)
+    {
+        var (jsonResponse, statusCode)  = await _reversoService.ReversoServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse                
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Endpoint ConfirmacionTransaccionDirectaBTS "CDEP"
+    /// </summary>
+    /// <param name="requestModel">Objeto DTO de tipo RequestModel ->ConfirmacionTransaccionDirectaBody</param>
+    /// <returns>Retorna un objeto dentro de una respuesta HTTP.</returns>
+    [HttpPost("ConfirmacionTransaccionDirecta/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> ConfirmacionTransaccionDirectaBTS([FromBody] RequestModel<ConfirmacionTransaccionDirectaBody> requestModel)
+    {
+        var (jsonResponse, statusCode)  = await _confirmacionTransaccionDirecta.ConfirmacionTransaccionDirectaServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Endpoint ConfirmacionPagoBTS "PAYC"
+    /// </summary>
+    /// <param name="requestModel">Objeto DTO de tipo RequestModel ->ConfirmacionTransaccionDirectaBody</param>
+    /// <returns>Retorna un objeto dentro de una respuesta HTTP.</returns>
+    [HttpPost("ConfirmacionPago/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> ConfirmacionPagoBTS([FromBody] RequestModel<ConfirmacionPagoBody> requestModel)
+    {
+        var (jsonResponse, statusCode)  = await _confirmacionPago.ConfirmacionPagoServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Endpoint RechazoPagoBTS "PAYJ"
+    /// </summary>
+    /// <param name="requestModel">Objeto DTO de tipo RequestModel ->RechazoPagoBody</param>
+    /// <returns>Retorna un objeto dentro de una respuesta HTTP.</returns>
+    [HttpPost("RechazoPago/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> RechazoPagoBTS([FromBody] RequestModel<RechazoPagoBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _rechazoPago.RechazoPagoServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Endpoint para Reporteria.
+    /// </summary>
+    /// <param name="requestModel">Objeto Dto de tipo Request Model -> Reporteria Body</param>
+    /// <returns>Retorna un objeto dentro de una respuesta Http.</returns>
+    [HttpPost("Reporteria/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> ReporteriaBTS([FromBody] RequestModel<ReporteriaBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _reporteriaService.ReporteriaServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+
+    /// <summary>
+    /// Endpoint para Reporteria.
+    /// </summary>
+    /// <param name="requestModel">Objeto Dto de tipo Request Model -> Reporteria Body</param>
+    /// <returns>Retorna un objeto dentro de una respuesta Http.</returns>
+    [HttpPost("ReporteriaSDEP/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(400)]
+    public async Task<IActionResult> ObtenerTransaccionesClienteBts([FromBody] RequestModel<SDEPBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _sEDPService.SDEPServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+}
