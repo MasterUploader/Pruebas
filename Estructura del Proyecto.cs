@@ -1,152 +1,138 @@
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.AuthenticateService;
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConfirmacionPago;
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConfirmacionTransaccionDirectaService;
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConsultaService;
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.PagoService;
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.RechazoPago;
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReporteriaService;
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReporteriaService.SEDP;
-using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReversoServices;
-using API_Terceros.Middleware;
+Este es el program.cs de otro API, actualizalo al igual que el anterior con los comentarios xml y comentarios en general
+
 using Connections.Abstractions;
 using Connections.Helpers;
 using Connections.Providers.Database;
 using Connections.Services;
 using Logging.Abstractions;
 using Logging.Filters;
-using Logging.Handlers;
 using Logging.Middleware;
 using Logging.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.AuthService;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.DetalleTarjetasImprimir;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.MachineInformationService;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.RegistraImpresion;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Utils;
+using Logging.Handlers;
 using System.Reflection;
+using System.Text;
 
-/// <summary>
-/// Punto de entrada principal de la API.
-/// Configura DI, clientes HTTP con handler de logging, proveedor de BD con HttpContext,
-/// opciones de logging, Swagger y el pipeline (incluye el middleware de logging).
-/// </summary>
 var builder = WebApplication.CreateBuilder(args);
+/*Conexiones */
 
-/// <summary>
-/// Carga de configuración de conexiones y exposición para componentes dependientes.
-/// </summary>
-ConnectionSettings connectionSettings = new(builder.Configuration);
+var connectionSettings = new ConnectionSettings(builder.Configuration);
 ConnectionManagerHelper.ConnectionConfig = connectionSettings;
 
-// Registrar ConnectionSettings como singleton (acceso a configuración dinámica en tiempo de ejecución).
+// Registrar ConnectionSettings para leer configuración dinámica
 builder.Services.AddSingleton<ConnectionSettings>();
 
-/// <summary>
-/// Acceso al HttpContext para propagar correlación y ordenar logs (HTTP/SQL) por inicio real.
-/// </summary>
+// Registrar IHttpContextAccessor para acceso al contexto en servicios
 builder.Services.AddHttpContextAccessor();
-
-/// <summary>
-/// Filtro de logging por acción (captura metadatos del pipeline MVC).
-/// </summary>
 builder.Services.AddScoped<LoggingActionFilter>();
 
-/// <summary>
-/// Servicio central de logging (scope global por proceso; seguro y no intrusivo).
-/// </summary>
-builder.Services.AddSingleton<ILoggingService, LoggingService>();
+// Registrar servicio de Logging
+builder.Services.AddScoped<ILoggingService, LoggingService>();
 
-/// <summary>
-/// Proveedor de BD (AS400) con soporte de logging estructurado y contexto HTTP.
-/// Se inyecta IHttpContextAccessor para que el wrapper SQL pueda:
-///  - Sellar el instante de INICIO real (Items["__SqlStartedUtc"]).
-///  - Encolar los bloques en la cola “timed” para ordenarse entre Request y Response.
-/// </summary>
+// Registrar la conexión principal a AS400 usando OleDbCommand
+// Registrar servicio de conexión con soporte de logging para AS400
 builder.Services.AddScoped<IDatabaseConnection>(sp =>
 {
-    IConfiguration config = sp.GetRequiredService<IConfiguration>();
-    ConnectionSettings settings = new(config);
-    string connStr = settings.GetAS400ConnectionString("AS400");
+    // Obtener configuración general
+    var config = sp.GetRequiredService<IConfiguration>();
+    var settings = new ConnectionSettings(config); // Tu clase para acceder a settings
 
+    // Obtener cadena de conexión desencriptada para AS400
+    var connStr = settings.GetAS400ConnectionString("AS400");
+
+    // Instanciar proveedor interno
     return new AS400ConnectionProvider(
         connStr,
-        sp.GetRequiredService<ILoggingService>(),
-        sp.GetRequiredService<IHttpContextAccessor>());
+        sp.GetRequiredService<ILoggingService>()); // Constructor de AS400ConnectionProvider
 });
+/*Conexiones*/
 
-/// <summary>
-/// Mapeo de opciones de logging desde appsettings (rutas, switches .txt/.csv, etc.).
-/// </summary>
+
+// Registra IHttpContextAccessor para acceder al HttpContext en el servicio de logging.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<LoggingActionFilter>();
+
+// Registra el servicio de logging. La implementación utilizará la configuración inyectada (IOptions<LoggingOptions>)
+// y la información del entorno (IHostEnvironment).
+builder.Services.AddSingleton<ILoggingService, LoggingService>();
+
+// Configura LoggingOptions a partir de la sección "LoggingOptions" en el appsettings.json.
 builder.Services.Configure<Logging.Configuration.LoggingOptions>(builder.Configuration.GetSection("LoggingOptions"));
 
-/// <summary>
-/// Handler que intercepta TODAS las solicitudes/respuestas HTTP salientes para loguearlas.
-/// </summary>
+builder.Services.AddTransient<IMachineInfoService, MachineInformationService>();
+
+//Login para HTTPClientHandler
 builder.Services.AddTransient<HttpClientLoggingHandler>();
 
-/// <summary>
-/// Cliente HTTP “nombrado” (BTS) que encadena el handler de logging.
-/// Los servicios de negocio deben obtener este cliente vía IHttpClientFactory.CreateClient("BTS").
-/// </summary>
-builder.Services.AddHttpClient("BTS")
-    .AddHttpMessageHandler<HttpClientLoggingHandler>();
-
-/// <summary>
-/// Carga de archivos de configuración base de la API.
-/// </summary>
+/*Configuración de la conexión*/
 builder.Configuration
     .SetBasePath(Directory.GetCurrentDirectory())
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile("ConnectionData.json", optional: false, reloadOnChange: true);
 
-IConfiguration configuration = builder.Configuration;
+var configuration = builder.Configuration;
 
-/// <summary>
-/// Resolución de nodo de conexión por ambiente y publicación global (para componentes legacy).
-/// </summary>
-string enviroment = configuration["ApiSettings:Enviroment"] ?? "DEV";
-IConfigurationSection connectionSection = configuration.GetSection(enviroment);
-ConnectionConfig? connectionConfig = connectionSection.Get<ConnectionConfig>();
-GlobalConnection.Current = connectionConfig!; // Uso intencional: el archivo de conexiones debe existir
+//Leer Ambiente
+var enviroment = configuration["ApiSettings:Enviroment"] ?? "DEV";
+////Leer node correspondiente desde ConnectionData.json
+var connectionSection = configuration.GetSection(enviroment);
+var connectionConfig = connectionSection.Get<ConnectionConfig>();
 
-/// <summary>
-/// Registro de servicios de dominio (Scoped). Estos servicios deben usar IHttpClientFactory
-/// para obtener el cliente “BTS” y así garantizar que el handler de logging intercepte todo.
-/// </summary>
-builder.Services.AddScoped<IAuthenticateService, AuthenticateService>();
-builder.Services.AddScoped<IConsultaService, ConsultaService>();
-builder.Services.AddScoped<IPagoService, PagoService>();
-builder.Services.AddScoped<IReversoService, ReversoService>();
-builder.Services.AddScoped<IConfirmacionTransaccionDirecta, ConfirmacionTransaccionDirectaService>();
-builder.Services.AddScoped<IConfirmacionPago, ConfirmacionPagoService>();
-builder.Services.AddScoped<IRechazoPago, RechazoPagoService>();
-builder.Services.AddScoped<IReporteriaService, ReporteriaService>();
-builder.Services.AddScoped<ISEDPService, SEDPService>();
+////Asignación de conexión Global
+GlobalConnection.Current = connectionConfig!;
 
-/// <summary>
-/// MVC + filtro de logging por acción. Se agrega compatibilidad con Newtonsoft.Json.
-/// </summary>
+/*Configuración de la conexión*/
+
+//Carga de Clave secreta
+var jwtKeyService = new JwtKeyService();
+var secretKey = await jwtKeyService.GetSecretKeyAsync();
+builder.Configuration["JwtKey"] = secretKey;
+
+
+builder.Services.AddHttpClient<IJwtService, JwtKeyService>();
+builder.Services.AddHttpClient<IAuthService, AuthService>();
+builder.Services.AddHttpClient<ISessionManagerService, SessionManagerService>();
+builder.Services.AddHttpClient<IDetalleTarjetasImprimirServices, DetalleTarjetasImprimirServices>();
+builder.Services.AddHttpClient<IRegistraImpresionService, RegistraImpresionService>();
+builder.Services.AddHttpClient<IValidaImpresionService, ValidaImpresionService>();
+//builder.Services.AddHttpClient<IHeartbeat,  HeartbeatService>();
+
+builder.Services.AddScoped<IJwtService, JwtKeyService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<ISessionManagerService, SessionManagerService>();
+builder.Services.AddScoped<IDetalleTarjetasImprimirServices, DetalleTarjetasImprimirServices>();
+builder.Services.AddScoped<IRegistraImpresionService, RegistraImpresionService>();
+builder.Services.AddScoped<IValidaImpresionService, ValidaImpresionService>();
+//builder.Services.AddScoped<IHeartbeat,  HeartbeatService>();
+
+// Add services to the container.
 builder.Services.AddControllers(options =>
 {
-    // Inserta el filtro para anotar Controller/Action en el log (bloque fijo “Controlador”).
     options.Filters.Add<LoggingActionFilter>();
+
 });
 
-builder.Services.AddControllers().AddNewtonsoftJson(options =>
-{
-    // Resolver de contrato por defecto (útil para mantener nombres y formatos esperados).
-    options.SerializerSettings.ContractResolver = new Newtonsoft.Json.Serialization.DefaultContractResolver();
-});
-
-/// <summary>
-/// Swagger/OpenAPI con carga de comentarios XML para documentación enriquecida.
-/// </summary>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "API de Terceros Remesadoras",
+        Title = "MS_BAN_43_Embosado_Tarjetas_Debito",
         Version = "v1",
-        Description = "API para las consultas de Remesadoras.",
+        Description = "API para embosado de tarjetas de Debito",
         Contact = new OpenApiContact
         {
-            Name = "Remesadoras",
+            Name = "Embosado Tarjetas Debito",
             Email = "soporte@api.com",
             Url = new Uri("https://api.com")
         },
@@ -157,45 +143,60 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 
-    string xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    string xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+
     options.IncludeXmlComments(xmlPath);
 });
 
-builder.Services.AddSwaggerGenNewtonsoftSupport();
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ValidateLifetime = true,
+        ClockSkew = TimeSpan.Zero
+    };
 
-/// <summary>
-/// Construcción de la aplicación y configuración del pipeline HTTP.
-/// </summary>
+});
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAngularOrigins", builder =>
+    {
+        builder.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+    });
+});
+
 var app = builder.Build();
 
+app.UseCors("AllowAngularOrigins");
+
+/*Configuración de Sunitp*/
+
+// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
-    // Publicación de Swagger (JSON + UI) en entornos de desarrollo/producción.
-    app.UseSwagger(c => c.RouteTemplate = "swagger/{documentName}/swagger.json");
-    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "API de Terceros Remesadoras"));
+    app.UseSwagger(c =>
+    {
+        c.RouteTemplate = "swagger/{documentName}/swagger.json";
+    });
+
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "API para embosado de tarjetas de Debito.");
+    });
 }
 
-/// <summary>
-/// Middleware de validación de cabeceras personalizado de tu solución (previo al logging).
-/// </summary>
-app.UseHeaderValidation();
-
-/// <summary>
-/// Redirección a HTTPS para reforzar transporte seguro.
-/// </summary>
 app.UseHttpsRedirection();
 
-/// <summary>
-/// Autorización (si existen políticas o atributos en controladores/acciones).
-/// </summary>
+app.UseAuthentication();
+
 app.UseAuthorization();
 
-/// <summary>
-/// Middleware de logging central.
-/// Escribe bloques fijos en el orden 1..7 y mezcla los bloques dinámicos (HTTP/SQL)
-/// entre (4) Request Info y (5) Response Info, ordenados por INICIO real (TsUtc) y desempate (Seq).
-/// </summary>
 app.UseMiddleware<LoggingMiddleware>();
 
 app.MapControllers();
