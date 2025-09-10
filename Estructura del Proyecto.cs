@@ -1,120 +1,149 @@
-// ================== CAMPOS PRIVADOS (agregar a la clase) ==================
-private enum MergeUsingKind { None, Values, Select }
-
-private MergeUsingKind _usingKind = MergeUsingKind.None;
-
-// Nombres de columnas de la tabla S (USING ... AS S(col1, col2, ...))
-private readonly List<string> _usingSourceColumns = [];
-
-// Cada fila VALUES se guarda como una lista con los fragmentos SQL tipados (CAST(? AS ...), TIMESTAMP(?), etc.)
-private readonly List<List<string>> _usingValueRows = [];
-
-// Parámetros para los placeholders "?" en el mismo orden en que se generan.
-private readonly List<object?> _parameters = [];
-
-// Si alguna vez usas UsingSelect(...), limpia _usingValueRows y marca _usingKind = Select
-// ==========================================================================
-
-
+Así tengo el build
 
 /// <summary>
-/// Define la fila de <c>USING (VALUES ...)</c> con **placeholders tipados para DB2 for i**.
-/// <para>
-/// Ejemplo:
-/// <code>
-/// .UsingValuesTyped(
-///     ("UID",  Db2ITyped.VarChar(userId, 20)),
-///     ("NOWTS",Db2ITyped.Timestamp(now)),
-///     ("EXI",  Db2ITyped.Char(exitoso, 1)),
-///     ("IP",   Db2ITyped.VarChar(ip, 64)),
-///     ("DEV",  Db2ITyped.VarChar(device, 64)),
-///     ("BRO",  Db2ITyped.VarChar(browser, 64)),
-///     ("TOK",  Db2ITyped.VarChar(token, 512))
-/// )
-/// </code>
-/// Genera:
-/// <c>USING (VALUES (CAST(? AS VARCHAR(20)), TIMESTAMP(?), CAST(? AS CHAR(1)), ...)) AS S(UID, NOWTS, EXI, ...)</c>
-/// y agrega los valores a <see cref="_parameters"/> en el mismo orden.
-/// </para>
+/// Construye el SQL MERGE final y su lista de parámetros (para DB2 i: placeholders <c>?</c>).
+/// <para>Orden de parámetros:</para>
+/// <list type="number">
+/// <item><description>Parámetros de <c>USING</c> (SELECT o VALUES), en el orden en que aparecen en el SQL.</description></item>
+/// <item><description>Parámetros de <c>UPDATE SET</c> agregados con <see cref="SetParam"/> (en el orden de las asignaciones).</description></item>
+/// <item><description>Parámetros de <c>INSERT VALUES</c> agregados con <see cref="MapParam"/> (en el orden de los mapeos).</description></item>
+/// </list>
 /// </summary>
-/// <param name="values">
-/// Pares (NombreDeColumna, ValorTipado) para la tabla fuente <c>S</c>.
-/// El orden define el orden de las columnas y de los parámetros.
-/// </param>
-/// <returns>El propio <see cref="MergeQueryBuilder"/> para encadenamiento.</returns>
-/// <exception cref="ArgumentException">Si no se envía ningún valor o si un nombre de columna está vacío.</exception>
-public MergeQueryBuilder UsingValuesTyped(params (string Column, Db2ITyped Value)[] values)
+public QueryResult Build()
 {
-    if (values is null || values.Length == 0)
-        throw new ArgumentException("Debe especificar al menos un valor para USING (VALUES ...).", nameof(values));
+    // Limpiar el acumulador por si reusan la misma instancia
+    _parameters.Clear();
 
-    // Marcamos explícitamente que la fuente del MERGE es USING VALUES
-    _usingKind = MergeUsingKind.Values;
+    // Validaciones
+    if (string.IsNullOrWhiteSpace(_targetTable))
+        throw new InvalidOperationException("Debe especificarse la tabla destino.");
+    if (_sourceKind == SourceKind.None)
+        throw new InvalidOperationException("Debe especificarse la fuente USING (VALUES o SELECT).");
+    if (string.IsNullOrWhiteSpace(_onConditionSql))
+        throw new InvalidOperationException("Debe especificarse la condición ON.");
 
-    _usingSourceColumns.Clear();
-    _usingValueRows.Clear();       // solo una fila (si quieres varias usa UsingValuesTypedRow debajo)
+    // Para USING(VALUES) las columnas son obligatorias
+    if (_sourceKind == SourceKind.Values && _sourceColumns.Count == 0)
+        throw new InvalidOperationException("Para USING (VALUES) debe definir nombres de columnas de la fuente.");
 
-    var rowSql = new List<string>(values.Length);
+    var sb = new StringBuilder();
 
-    foreach (var (col, typed) in values)
+    // MERGE INTO <lib.tabla> AS T
+    sb.Append("MERGE INTO ");
+    if (!string.IsNullOrWhiteSpace(_targetLibrary))
+        sb.Append(_targetLibrary).Append('.');
+    sb.Append(_targetTable).Append(' ').Append("AS ").Append(_targetAlias).Append('\n');
+
+    // USING (...)
+    sb.Append("USING (");
+    if (_sourceKind == SourceKind.Values)
     {
-        if (string.IsNullOrWhiteSpace(col))
-            throw new ArgumentException("El nombre de columna en USING no puede ser vacío.", nameof(values));
+        // (VALUES (?, ?, ...), (?, ?, ...))
+        sb.Append("VALUES").Append('\n');
 
-        _usingSourceColumns.Add(col);
-        rowSql.Add(typed.Sql);              // p.ej. CAST(? AS VARCHAR(20)) / TIMESTAMP(?)
-        _parameters.Add(typed.Value);       // valor para el marcador '?' correspondiente
+        var lines = new List<string>();
+        foreach (var row in _sourceValuesRows)
+        {
+            var placeholders = new string[row.Length];
+            for (int i = 0; i < row.Length; i++)
+            {
+                placeholders[i] = "?";
+                _parameters.Add(row[i]); // 1) Primero, parámetros de USING(VALUES)
+            }
+            lines.Add($"({string.Join(", ", placeholders)})");
+        }
+        sb.Append(string.Join(",\n", lines));
+    }
+    else
+    {
+        // USING ( <SELECT...> )
+        var sel = _sourceSelect!.Build();
+
+        // 1) Primero, los parámetros del SELECT en USING
+        if (sel.Parameters is { Count: > 0 })
+            _parameters.AddRange(sel.Parameters);
+
+        sb.Append(sel.Sql);
+    }
+    sb.Append(')');
+
+    // Alias y columnas de la fuente:
+    // - Para VALUES: obligatorio. Ya validado arriba.
+    // - Para SELECT: opcional. Si hay nombres, se emiten.
+    sb.Append(' ').Append("AS ").Append(_sourceAlias);
+    if (_sourceColumns.Count > 0)
+    {
+        sb.Append('(').Append(string.Join(", ", _sourceColumns)).Append(')');
+    }
+    sb.Append('\n');
+
+    // ON ...
+    sb.Append("ON ").Append(_onConditionSql).Append('\n');
+
+    // WHEN MATCHED THEN UPDATE SET ...
+    if (_matchedSet.Count > 0)
+    {
+        sb.Append("WHEN MATCHED");
+        if (!string.IsNullOrWhiteSpace(_matchedAndCondition))
+            sb.Append(" AND (").Append(_matchedAndCondition).Append(')');
+        sb.Append(" THEN UPDATE SET").Append('\n');
+
+        var assigns = new List<string>();
+        foreach (var s in _matchedSet)
+        {
+            string rhs = s.Kind switch
+            {
+                SetValueKind.SourceExpr => s.Expression!,   // ej: S.COL
+                SetValueKind.Raw => s.Expression!,   // ej: CASE ...
+                SetValueKind.Param => "?",             // parametrizado
+                _ => throw new InvalidOperationException("Tipo de asignación inválido.")
+            };
+
+            if (s.Kind == SetValueKind.Param)
+                _parameters.Add(s.Value); // 2) Después de USING, parámetros de SET
+
+            assigns.Add($"{_targetAlias}.{s.TargetColumn} = {rhs}");
+        }
+        sb.Append(string.Join(",\n", assigns)).Append('\n');
     }
 
-    _usingValueRows.Add(rowSql);            // registramos la única fila
-    return this;
-}
-
-/// <summary>
-/// Agrega **otra** fila a <c>USING (VALUES ...)</c> con placeholders tipados (DB2 i).
-/// Úsalo si necesitas más de una fila en la fuente <c>S</c>.
-/// </summary>
-public MergeQueryBuilder UsingValuesTypedRow(params (string Column, Db2ITyped Value)[] values)
-{
-    if (_usingKind != MergeUsingKind.Values || _usingSourceColumns.Count == 0)
-        throw new InvalidOperationException("Debe llamar primero a UsingValuesTyped(...) para la primera fila.");
-
-    if (values is null || values.Length != _usingSourceColumns.Count)
-        throw new ArgumentException($"Se esperaban {_usingSourceColumns.Count} valores para la fila adicional de USING (VALUES ...).");
-
-    var rowSql = new List<string>(values.Length);
-
-    for (int i = 0; i < values.Length; i++)
+    // WHEN NOT MATCHED THEN INSERT (...) VALUES (...)
+    if (_notMatchedInsert.Count > 0)
     {
-        var (col, typed) = values[i];
-        // Validación opcional: el nombre debe coincidir con el de la primera fila
-        if (!col.Equals(_usingSourceColumns[i], StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException($"La columna #{i + 1} ('{col}') no coincide con '{ _usingSourceColumns[i] }' definida en la primera fila.");
+        sb.Append("WHEN NOT MATCHED");
+        if (!string.IsNullOrWhiteSpace(_notMatchedAndCondition))
+            sb.Append(" AND (").Append(_notMatchedAndCondition).Append(')');
+        sb.Append(" THEN INSERT").Append('\n');
 
-        rowSql.Add(typed.Sql);
-        _parameters.Add(typed.Value);
+        var cols = _notMatchedInsert.Select(m => m.TargetColumn).ToArray();
+        sb.Append('(').Append(string.Join(", ", cols)).Append(')').Append('\n');
+
+        sb.Append("VALUES").Append('\n');
+
+        var vals = new List<string>();
+        foreach (var m in _notMatchedInsert)
+        {
+            string rhs = m.Kind switch
+            {
+                InsertValueKind.SourceExpr => m.Expression!, // ej: S.UID
+                InsertValueKind.Raw => m.Expression!, // ej: ''
+                InsertValueKind.Param => "?",           // parametrizado
+                _ => throw new InvalidOperationException("Tipo de mapeo inválido.")
+            };
+
+            if (m.Kind == InsertValueKind.Param)
+                _parameters.Add(m.Value); // 3) Finalmente, parámetros de INSERT
+
+            vals.Add(rhs);
+        }
+
+        sb.Append('(').Append(string.Join(", ", vals)).Append(')').Append('\n');
     }
 
-    _usingValueRows.Add(rowSql);
-    return this;
+    // Nota: No se añade ';' aquí. De ser necesario, el caller puede agregarlo.
+    return new QueryResult
+    {
+        Sql = sb.ToString(),
+        Parameters = _parameters
+    };
 }
-
-
-
-
-
-// dentro de Build()
-if (_usingKind == MergeUsingKind.None)
-    throw new InvalidOperationException("Debe especificarse la fuente USING (VALUES o SELECT).");
-
-if (_usingKind == MergeUsingKind.Values)
-{
-    // USING (VALUES (...), (...), ...) AS S(col1, col2, ...)
-    var rows = _usingValueRows.Select(r => $"({string.Join(", ", r)})");
-    sb.Append(" USING (VALUES ")
-      .Append(string.Join(", ", rows))
-      .Append(") AS S(")
-      .Append(string.Join(", ", _usingSourceColumns))
-      .Append(')');
-}
-else /* Select */ { /* ... */ }
