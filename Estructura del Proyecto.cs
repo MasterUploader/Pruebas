@@ -1,21 +1,48 @@
-// Dentro de MergeQueryBuilder
-public MergeQueryBuilder UsingValuesTyped(params (string Column, Db2Typed Typed)[] row)
-{
-    if (row == null || row.Length == 0)
-        throw new ArgumentException("Debe especificar al menos una columna/valor.");
+Lo que tengo es esto
 
-    _sourceKind = MergeSourceKind.Values;       // <- marca que hay USING VALUES
-    _sourceColumns = new List<string>();
-    var rendered = new List<string>();
-
-    foreach (var (col, typed) in row)
+    /// <summary>
+    /// Define la fila de <c>USING (VALUES ...)</c> con **placeholders tipados para DB2 for i**.
+    /// <para>
+    /// Ejemplo:
+    /// <code>
+    /// .UsingValuesTyped(
+    ///     ("UID",  Db2iTyped.VarChar(userId, 20)),
+    ///     ("NOWTS",Db2iTyped.Timestamp(now)),
+    ///     ("EXI",  Db2iTyped.Char(exitoso, 1)),
+    ///     ("IP",   Db2iTyped.VarChar(ip, 64)),
+    ///     ("DEV",  Db2iTyped.VarChar(device, 64)),
+    ///     ("BRO",  Db2iTyped.VarChar(browser, 64)),
+    ///     ("TOK",  Db2iTyped.VarChar(token, 512))
+    /// )
+    /// </code>
+    /// Esto genera:
+    /// <c>USING (VALUES(CAST(? AS VARCHAR(20)), TIMESTAMP(?), CAST(? AS CHAR(1)), ...)) AS S(UID, NOWTS, EXI, ...)</c>
+    /// y agrega los valores a <see cref="QueryResult.Parameters"/> en el mismo orden.
+    /// </para>
+    /// </summary>
+    /// <param name="values">
+    /// Pares (NombreDeColumna, ValorTipado) para la tabla fuente <c>S</c>.
+    /// El orden define el orden de columnas y de parámetros.
+    /// </param>
+    /// <returns>El propio <see cref="MergeQueryBuilder"/> para encadenamiento.</returns>
+    /// <exception cref="ArgumentException">Si no se envía ningún valor.</exception>
+    public MergeQueryBuilder UsingValuesTyped(params (string Column, Db2ITyped Value)[] values)
     {
-        _sourceColumns.Add(col);
-        rendered.Add(typed.SqlFragment);        // ej. "CAST(? AS VARCHAR(20))" o "TIMESTAMP(?)"
-        _parameters.Add(typed.Value);           // añade el valor para el placeholder
-    }
+        if (values == null || values.Length == 0)
+            throw new ArgumentException("Debe especificar al menos un valor para USING (VALUES ...).", nameof(values));
 
-    _valuesRows.Clear();
-    _valuesRows.Add(rendered);                  // al menos UNA fila en USING(VALUES)
-    return this;
-}
+        _usingSourceColumns.Clear();
+        _usingValueSql.Clear();
+
+        foreach (var (col, val) in values)
+        {
+            if (string.IsNullOrWhiteSpace(col))
+                throw new ArgumentException("El nombre de columna en USING no puede ser vacío.", nameof(values));
+
+            _usingSourceColumns.Add(col);
+            _usingValueSql.Add(val.Sql);     // ej. CAST(? AS VARCHAR(20)) / TIMESTAMP(?)
+            _parameters.Add(val.Value);      // valor para el marcador ?
+        }
+
+        return this;
+    }
