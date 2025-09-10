@@ -1,164 +1,131 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace QueryBuilder.Builders;
 
 /// <summary>
-/// Helper para declarar parámetros **tipados** en DB2 for i cuando se usan
-/// marcadores en <c>USING (VALUES ...)</c> de un MERGE.
-/// Genera el fragmento SQL (por ejemplo: <c>CAST(? AS VARCHAR(64))</c>, <c>TIMESTAMP(?)</c>)
-/// y conserva el valor que debe ir en la lista de parámetros.
+/// Parte de <see cref="MergeQueryBuilder"/> que agrega las cláusulas
+/// <c>WHEN MATCHED THEN UPDATE</c> y <c>WHEN NOT MATCHED THEN INSERT</c>.
 /// </summary>
-public sealed class Db2iTyped
-{
-    /// <summary>Fragmento SQL del placeholder tipado (ej. <c>CAST(? AS VARCHAR(64))</c>).</summary>
-    public string Sql { get; }
-
-    /// <summary>Valor del parámetro que se enlazará al marcador <c>?</c>.</summary>
-    public object? Value { get; }
-
-    private Db2iTyped(string sql, object? value)
-    {
-        Sql = sql;
-        Value = value;
-    }
-
-    /// <summary>Crea un <c>CAST(? AS CHAR(n))</c>.</summary>
-    public static Db2iTyped Char(object? value, int length)
-        => new($"CAST(? AS CHAR({length}))", value ?? string.Empty);
-
-    /// <summary>Crea un <c>CAST(? AS VARCHAR(n))</c>.</summary>
-    public static Db2iTyped VarChar(object? value, int length)
-        => new($"CAST(? AS VARCHAR({length}))", value ?? string.Empty);
-
-    /// <summary>
-    /// Crea un <c>TIMESTAMP(?)</c>. Acepta <see cref="DateTime"/> o cadena en formato
-    /// compatible con DB2 (por ejemplo, <c>yyyy-MM-dd-HH.mm.ss</c>).
-    /// </summary>
-    public static Db2iTyped Timestamp(object value)
-        => new("TIMESTAMP(?)", value);
-
-    /// <summary>Crea un <c>CAST(? AS INTEGER)</c>.</summary>
-    public static Db2iTyped Int32(int value)
-        => new("CAST(? AS INTEGER)", value);
-
-    /// <summary>Crea un <c>CAST(? AS BIGINT)</c>.</summary>
-    public static Db2iTyped BigInt(long value)
-        => new("CAST(? AS BIGINT)", value);
-
-    /// <summary>
-    /// Crea un <c>CAST(? AS DECIMAL(p,s))</c>.
-    /// </summary>
-    public static Db2iTyped Decimal(object? value, int precision, int scale)
-        => new($"CAST(? AS DECIMAL({precision},{scale}))", value ?? 0m);
-
-    /// <summary>Crea un <c>CAST(? AS DATE)</c>. Acepta <see cref="DateTime"/> o string.</summary>
-    public static Db2iTyped Date(object value)
-        => new("CAST(? AS DATE)", value);
-
-    /// <summary>Crea un <c>CAST(? AS TIME)</c>. Acepta <see cref="DateTime"/> o string.</summary>
-    public static Db2iTyped Time(object value)
-        => new("CAST(? AS TIME)", value);
-}
-
-
-
-
-namespace QueryBuilder.Builders;
-
 public partial class MergeQueryBuilder
 {
-    // Internos que ya debes tener en la clase:
-    private readonly List<string> _usingSourceColumns = [];   // alias S(...) – nombres de columnas de la fuente
-    private readonly List<string> _usingValueSql = [];        // cada item: CAST(? AS ...), TIMESTAMP(?), etc.
-    private readonly List<object?> _parameters = [];          // parámetros en orden
-    // ...y en Build() usas _usingValueSql para armar (VALUES(...)) y devuelves _parameters en QueryResult.
+    // NOTA: Estas listas se asumen ya declaradas en la otra parte de la clase.
+    // Si aún no las tienes, decláralas allí:
+    // private readonly List<string> _updateAssignments = [];
+    // private readonly List<string> _insertColumns = [];
+    // private readonly List<string> _insertValues = [];
 
     /// <summary>
-    /// Define la fila de <c>USING (VALUES ...)</c> con **placeholders tipados para DB2 for i**.
-    /// <para>
-    /// Ejemplo:
-    /// <code>
-    /// .UsingValuesTyped(
-    ///     ("UID",  Db2iTyped.VarChar(userId, 20)),
-    ///     ("NOWTS",Db2iTyped.Timestamp(now)),
-    ///     ("EXI",  Db2iTyped.Char(exitoso, 1)),
-    ///     ("IP",   Db2iTyped.VarChar(ip, 64)),
-    ///     ("DEV",  Db2iTyped.VarChar(device, 64)),
-    ///     ("BRO",  Db2iTyped.VarChar(browser, 64)),
-    ///     ("TOK",  Db2iTyped.VarChar(token, 512))
-    /// )
-    /// </code>
-    /// Esto genera:
-    /// <c>USING (VALUES(CAST(? AS VARCHAR(20)), TIMESTAMP(?), CAST(? AS CHAR(1)), ...)) AS S(UID, NOWTS, EXI, ...)</c>
-    /// y agrega los valores a <see cref="QueryResult.Parameters"/> en el mismo orden.
-    /// </para>
+    /// Agrega asignaciones para <c>WHEN MATCHED THEN UPDATE SET ...</c>.
+    /// Cada item debe venir como una asignación SQL válida, por ejemplo:
+    /// <c>"T.COL1 = S.COL1"</c>, <c>"T.COUNT = T.COUNT + 1"</c>, etc.
     /// </summary>
-    /// <param name="values">
-    /// Pares (NombreDeColumna, ValorTipado) para la tabla fuente <c>S</c>.
-    /// El orden define el orden de columnas y de parámetros.
+    /// <param name="assignments">
+    /// Lista de asignaciones ya formateadas. Se validará que cada una contenga un <c>=</c>.
     /// </param>
-    /// <returns>El propio <see cref="MergeQueryBuilder"/> para encadenamiento.</returns>
-    /// <exception cref="ArgumentException">Si no se envía ningún valor.</exception>
-    public MergeQueryBuilder UsingValuesTyped(params (string Column, Db2iTyped Value)[] values)
+    /// <returns>El mismo <see cref="MergeQueryBuilder"/> para encadenamiento.</returns>
+    /// <exception cref="ArgumentException">Si alguna asignación no contiene <c>=</c>.</exception>
+    public MergeQueryBuilder WhenMatchedUpdate(params string[] assignments)
     {
-        if (values == null || values.Length == 0)
-            throw new ArgumentException("Debe especificar al menos un valor para USING (VALUES ...).", nameof(values));
+        if (assignments is null || assignments.Length == 0) return this;
 
-        _usingSourceColumns.Clear();
-        _usingValueSql.Clear();
-
-        foreach (var (col, val) in values)
+        foreach (var raw in assignments)
         {
-            if (string.IsNullOrWhiteSpace(col))
-                throw new ArgumentException("El nombre de columna en USING no puede ser vacío.", nameof(values));
+            var a = raw?.Trim();
+            if (string.IsNullOrWhiteSpace(a)) continue;
 
-            _usingSourceColumns.Add(col);
-            _usingValueSql.Add(val.Sql);     // ej. CAST(? AS VARCHAR(20)) / TIMESTAMP(?)
-            _parameters.Add(val.Value);      // valor para el marcador ?
+            if (!a.Contains('='))
+                throw new ArgumentException($"La asignación '{a}' no contiene '='.", nameof(assignments));
+
+            _updateAssignments.Add(a);
         }
 
         return this;
     }
 
-    // --------------------------------------------------------------------
-    // Pista de integración (por si aún no lo tienes dentro de Build()):
-    // En el Build() del MergeQueryBuilder deberías tener algo así:
-    //
-    // sb.AppendLine("USING (VALUES(" + string.Join(", ", _usingValueSql) + ")) AS S(" +
-    //               string.Join(", ", _usingSourceColumns) + ")");
-    //
-    // y al final:
-    // return new QueryResult { Sql = sb.ToString(), Parameters = _parameters };
-    // --------------------------------------------------------------------
-}
-
-
-var merge = new MergeQueryBuilder("ETD02LOG", "BCAH96DTA")
-    .UsingValuesTyped(
-        ("UID",   Db2iTyped.VarChar(userID, 20)),
-        ("NOWTS", Db2iTyped.Timestamp(now)),
-        ("EXI",   Db2iTyped.Char(exitoso, 1)),
-        ("IP",    Db2iTyped.VarChar(machine.ClientIPAddress, 64)),
-        ("DEV",   Db2iTyped.VarChar(machine.Device, 64)),
-        ("BRO",   Db2iTyped.VarChar(machine.Browser, 64)),
-        ("TOK",   Db2iTyped.VarChar(idSesion, 512))
-    )
-    .On("T.LOGB01UID = S.UID")
-    .WhenMatchedUpdate(new[]
+    /// <summary>
+    /// Variante tipada: recibe un diccionario <c>columna → expresión</c> y arma
+    /// <c>T.columna = expresión</c>. Si la columna ya viene calificada (ej. <c>X.COL</c>)
+    /// no se antepone alias.
+    /// </summary>
+    /// <param name="setMap">Mapa de columna destino a expresión SQL (sin comillas extras).</param>
+    /// <param name="targetAlias">Alias del target; por defecto <c>T</c>.</param>
+    /// <returns>El mismo <see cref="MergeQueryBuilder"/>.</returns>
+    public MergeQueryBuilder WhenMatchedUpdate(Dictionary<string, string> setMap, string targetAlias = "T")
     {
-        "T.LOGB02UIL = S.NOWTS",
-        "T.LOGB03TIL = CASE WHEN S.EXI = '1' THEN COALESCE(T.LOGB03TIL, 0) + 1 ELSE 0 END",
-        "T.LOGB04SEA = S.EXI",
-        "T.LOGB05UDI = S.IP",
-        "T.LOGB06UTD = S.DEV",
-        "T.LOGB07UNA = S.BRO",
-        "T.LOGB09UIF = COALESCE(T.LOGB02UIL, S.NOWTS)",
-        "T.LOGB10TOK = S.TOK"
-    })
-    .WhenNotMatchedInsert(
-        new[] { "LOGB01UID", "LOGB02UIL", "LOGB03TIL", "LOGB04SEA", "LOGB05UDI", "LOGB06UTD", "LOGB07UNA", "LOGB08CBI", "LOGB09UIF", "LOGB10TOK" },
-        new[] { "S.UID", "S.NOWTS", "CASE WHEN S.EXI = '1' THEN 1 ELSE 0 END", "S.EXI", "S.IP", "S.DEV", "S.BRO", "''", "S.NOWTS", "S.TOK" }
-    )
-    .Build();
+        if (setMap is null || setMap.Count == 0) return this;
 
-// Ejecutar (tu provider ya soporta QueryResult)
-using var cmd = _connection.GetDbCommand(merge, _contextAccessor.HttpContext!);
-var affected = await cmd.ExecuteNonQueryAsync();
+        foreach (var kvp in setMap)
+        {
+            if (string.IsNullOrWhiteSpace(kvp.Key))
+                throw new ArgumentException("Nombre de columna vacío en WhenMatchedUpdate(map).", nameof(setMap));
+
+            var col = kvp.Key.Trim();
+            var expr = (kvp.Value ?? "NULL").Trim();
+            var lhs = col.Contains('.') ? col : $"{targetAlias}.{col}";
+
+            _updateAssignments.Add($"{lhs} = {expr}");
+        }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Define las columnas y los valores para <c>WHEN NOT MATCHED THEN INSERT (... ) VALUES (...)</c>.
+    /// La cantidad de columnas y valores debe coincidir.
+    /// </summary>
+    /// <param name="columns">Lista de columnas de destino.</param>
+    /// <param name="values">
+    /// Lista de valores/expresiones SQL correspondientes (por ejemplo <c>"S.UID"</c>, <c>"CURRENT_TIMESTAMP"</c>,
+    /// <c>"CASE WHEN ... END"</c>, etc.).
+    /// </param>
+    /// <returns>El mismo <see cref="MergeQueryBuilder"/>.</returns>
+    /// <exception cref="ArgumentNullException">Si <paramref name="columns"/> o <paramref name="values"/> son nulos.</exception>
+    /// <exception cref="InvalidOperationException">Si las cantidades no coinciden o no hay columnas.</exception>
+    public MergeQueryBuilder WhenNotMatchedInsert(IEnumerable<string> columns, IEnumerable<string> values)
+    {
+        if (columns is null) throw new ArgumentNullException(nameof(columns));
+        if (values  is null) throw new ArgumentNullException(nameof(values));
+
+        _insertColumns.Clear();
+        _insertValues.Clear();
+
+        _insertColumns.AddRange(columns.Select(c => c?.Trim()).Where(c => !string.IsNullOrWhiteSpace(c))!);
+        _insertValues.AddRange(values.Select(v => v?.Trim()).Where(v => !string.IsNullOrWhiteSpace(v))!);
+
+        if (_insertColumns.Count == 0)
+            throw new InvalidOperationException("Debe especificar al menos una columna para INSERT.");
+        if (_insertColumns.Count != _insertValues.Count)
+            throw new InvalidOperationException(
+                $"La cantidad de columnas ({_insertColumns.Count}) no coincide con los valores ({_insertValues.Count}).");
+
+        return this;
+    }
+
+    /// <summary>
+    /// Atajo: recibe un diccionario <c>columna → valor/expresión</c> y construye
+    /// el par de listas para <c>INSERT (... ) VALUES (...)</c>.
+    /// </summary>
+    /// <param name="colValues">Mapa de columnas a valores/expresiones SQL.</param>
+    /// <returns>El mismo <see cref="MergeQueryBuilder"/>.</returns>
+    /// <exception cref="ArgumentException">Si el diccionario viene vacío.</exception>
+    public MergeQueryBuilder WhenNotMatchedInsert(Dictionary<string, string> colValues)
+    {
+        if (colValues is null || colValues.Count == 0)
+            throw new ArgumentException("Debe especificar al menos una columna/valor para INSERT.", nameof(colValues));
+
+        return WhenNotMatchedInsert(colValues.Keys, colValues.Values);
+    }
+
+    /// <summary>
+    /// Atajo con tuplas: define <c>INSERT</c> pasando pares <c>(Columna, Valor)</c>.
+    /// </summary>
+    /// <param name="pairs">Pares de columna y su valor/expresión SQL.</param>
+    /// <returns>El mismo <see cref="MergeQueryBuilder"/>.</returns>
+    public MergeQueryBuilder WhenNotMatchedInsert(params (string Column, string Value)[] pairs)
+        => pairs is null || pairs.Length == 0
+            ? this
+            : WhenNotMatchedInsert(pairs.Select(p => p.Column), pairs.Select(p => p.Value));
+}
+}
