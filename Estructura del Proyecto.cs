@@ -1,208 +1,223 @@
-using Connections.Abstractions;
-using Microsoft.AspNetCore.Http;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.DetalleTarjetaImprimir;
-using QueryBuilder.Core; // <- tu namespace de entrada al builder (ajústalo si difiere)
-using System.Data.Common;
+Es posible optimizar el siguiente código empleando RestUtilities.QueryBuilder, y donde se pueda realizar una sola consulta:
 
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Repository.IRepository.DetalleTarjetaImprimir;
+using API_1_TERCEROS_REMESADORAS.Utilities;
+using Connections.Abstractions;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.Auth;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.MachineInformationService;
+using System.Data.Common;
+using System.Data.OleDb;
+using System.Globalization;
+
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Repository.IRepository.Auth;
 
 /// <summary>
-/// Repositorio para consulta de tarjetas a imprimir con resolución en una sola consulta SQL.
-/// Integra subconsultas correlacionadas para evitar múltiples viajes a BD y suprime el patrón N+1.
-/// Compatible con AS400 utilizando <c>FETCH FIRST 1 ROWS ONLY</c> en subconsultas.
+/// Clase Repositorio AuthServiceRepository, registra los intentos de Log.
 /// </summary>
-/// <param name="_connection">Proveedor de conexión (IDatabaseConnection) abstraído para AS400.</param>
-/// <param name="_contextAccessor">Acceso a <see cref="HttpContext"/> para obtener trazabilidad y logging.</param>
-public class DetalleTarjetasImprimirRepository(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor)
+/// <param name="_machineInfoService">Instancia de IMachineInfoService.</param>
+/// <param name="_connection">Instancia de IDatabaseConnection.</param>
+/// <param name="_contextAccessor">Instancia de IHttpContextAccessor.</param>
+public class AuthServiceRepository(IMachineInfoService _machineInfoService, IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor)
 {
     /// <summary>
-    /// Respuesta acumulada del proceso; se reutiliza durante la ejecución del request.
+    /// Método que registra en tablas los intentos de Log.
     /// </summary>
-    protected GetDetallesTarjetasImprimirResponseDto _getDetalleTarjetasImprimirResponseDto = new();
-
-    /// <summary>
-    /// Obtiene, en una sola consulta, las tarjetas pendientes de impresión según filtros de BIN, agencias y antigüedad.
-    /// Incorpora datos relacionados mediante subconsultas: nombre en tarjeta (UNI00L33), número de cuenta (UNI01L19) y nombre de estatus (UNI5500),
-    /// así como los nombres de agencia (CFP10201) para agencia que imprime y agencia de apertura.
-    /// </summary>
-    /// <param name="bin">Código BIN del producto.</param>
-    /// <param name="agenciaImprime">Centro de costo que imprime la tarjeta.</param>
-    /// <param name="agenciaApertura">Centro de costo de apertura de la tarjeta.</param>
-    /// <remarks>
-    /// Funcionalidades clave:
-    /// <list type="bullet">
-    /// <item><description>Elimina N+1 mediante subconsultas correlacionadas en <c>SELECT</c>.</description></item>
-    /// <item><description>Respeta filtros de “no impresa” (<c>ST_FECHA_IMPRESION=0</c>, <c>ST_HORA_IMPRESION=0</c>, <c>ST_USUARIO_IMPRESION=''</c>).</description></item>
-    /// <item><description>Restringe por antigüedad mínima (<c>ST_FECHA_APERTURA &gt;= fecha_corte</c>).</description></item>
-    /// <item><description>Construcción con <c>QueryBuilder</c> para SQL claro, mantenible y tipado cuando aplica.</description></item>
-    /// </list>
-    /// </remarks>
-    public async Task<GetDetallesTarjetasImprimirResponseDto> BusquedaUNI5400(string bin, int agenciaImprime, int agenciaApertura)
+    /// <param name="_getAuthResponseDto">Objeto de respuesta GetAuthResponseDto, se pasa entre métodos.</param>
+    /// <param name="userID">El user ID del usuario que intenta loguearse.</param>
+    /// <param name="motivo">Motivo del registro del log.</param>
+    /// <param name="exitoso">Estado del logueo.</param>
+    /// <param name="idSesion">Id de sesión para registrar en log.</param>
+    /// <param name="success">Estado del proceso de logueo.</param>
+    /// <returns>Retorna un objeto GetAuthResponseDto</returns>
+    public GetAuthResponseDto RegistraLogsUsuario(GetAuthResponseDto _getAuthResponseDto, string userID, string motivo, string exitoso, string idSesion, string success)
     {
         try
         {
-            // -- Cálculo de fecha de corte para el filtro de antigüedad (formato entero yyyymmdd).
-            int dias = Convert.ToInt32(API_1_TERCEROS_REMESADORAS.Utilities.GlobalConnection.Current.DiasConsultaTarjeta);
-            var today = DateTime.Today;
-            var daysAgo = today.AddDays(-dias);
-            int numericDate = int.Parse(daysAgo.ToString("yyyyMMdd"));
+            //Consulta el ultimo Correlativo
+            PreConsultaCorrelativo(out int correlativo);
 
-            // -- Aliases para legibilidad dentro del builder (evita errores y facilita el ORDER BY).
-            var u54 = "U54";
-            var subNombre = "Nombre";                 // Alias para MT_NET_EMBOSE
-            var subCuenta = "NumeroCuenta";           // Alias para CA_CTA_COD_CUENTA
-            var subEstatus = "Motivo";                // Alias para ES_NOMBRE_ESTATUS
-            var agImpCod = "AgenciaImprimeCodigo";
-            var agImpNom = "AgenciaImprimeNombre";
-            var agApeCod = "AgenciaAperturaCodigo";
-            var agApeNom = "AgenciaAperturaNombre";
+            //Registra el Log General
+            RegistraLogLoginGeneral(correlativo, userID, motivo, exitoso, idSesion, out DateTime fecha, out MachineInfo machineInfo, out bool succes1);
 
-            // -- Subconsulta: Nombre en tarjeta (UNI00L33) correlacionada por código de tarjeta.
-            //    FETCH FIRST asegura 1 fila y mantiene compatibilidad AS400.
-            string subSelNombre =
-                "(SELECT MTA.MT_NET_EMBOSE FROM S38FILEBA.UNI00L33 MTA " +
-                $"WHERE MTA.MT_CTJ_COD_TARJETA = {u54}.ST_CODIGO_TARJETA FETCH FIRST 1 ROWS ONLY)";
+            //Registra el Log Personal
+            RegistraLogPersonal(userID, fecha, exitoso, machineInfo, idSesion, out bool succes2);
 
-            // -- Subconsulta: Cuenta priorizando tipo 10/20 y uso especial 'R'.
-            string subSelCuenta =
-                "(SELECT CAS.CA_CTA_COD_CUENTA FROM S38FILEBA.UNI01L19 CAS " +
-                $"WHERE CAS.CA_CTJ_COD_TARJETA = {u54}.ST_CODIGO_TARJETA " +
-                "AND (CAS.CA_TIPO_CUENTA IN (10,20)) AND CAS.CA_IUE_USO_ESPECIAL = 'R' " +
-                "FETCH FIRST 1 ROWS ONLY)";
-
-            // -- Subconsulta: Nombre de estatus por código de estatus del proceso de la tarjeta.
-            string subSelEstatus =
-                "(SELECT ES.ES_NOMBRE_ESTATUS FROM S38FILEBA.UNI5500 ES " +
-                $"WHERE ES.ES_ESTATUS_TARJETA = {u54}.ST_ESTATUS_PROCESO_TARJETA " +
-                "FETCH FIRST 1 ROWS ONLY)";
-
-            // -- Subconsultas: Nombres de agencia (CFP10201). Se filtra por CFBANK=1 y CFBRCH = centro de costo.
-            string subSelAgImpNom =
-                "(SELECT C1.CFBRNM FROM BNKPRD01.CFP10201 C1 " +
-                $"WHERE C1.CFBANK=1 AND C1.CFBRCH={u54}.ST_CENTRO_COSTO_IMPR_TARJETA " +
-                "FETCH FIRST 1 ROWS ONLY)";
-
-            string subSelAgApeNom =
-                "(SELECT C2.CFBRNM FROM BNKPRD01.CFP10201 C2 " +
-                $"WHERE C2.CFBANK=1 AND C2.CFBRCH={u54}.ST_CENTRO_COSTO_APERTURA " +
-                "FETCH FIRST 1 ROWS ONLY)";
-
-            // -- Construcción del SELECT principal con QueryBuilder:
-            //    FROM UNI54L07, filtros por BIN y agencias, "no impresa" y fecha de corte.
-            //    Se proyectan campos directos y subconsultas como columnas.
-            var query = QueryBuilder
-                .From("UNI54L07", "S38FILEBA").As(u54)
-
-                // -- Proyección: columnas principales necesarias para armar la respuesta.
-                .Select(($"{u54}.ST_CODIGO_TARJETA", "Numero"))
-                .Select(($"{u54}.ST_CENTRO_COSTO_IMPR_TARJETA", agImpCod))
-                .Select(($"{u54}.ST_CENTRO_COSTO_APERTURA", agApeCod))
-
-                // -- Proyección: subconsultas correlacionadas (traen “Nombre en tarjeta”, “Cuenta” y “Nombre de Estatus”).
-                .Select(($"{subSelNombre}", subNombre))
-                .Select(($"{subSelCuenta}", subCuenta))
-                .Select(($"{subSelEstatus}", subEstatus))
-
-                // -- Proyección: nombres de agencias usando subconsulta por centro de costo (imprime/apertura).
-                .Select(($"{subSelAgImpNom}", agImpNom))
-                .Select(($"{subSelAgApeNom}", agApeNom))
-
-                // -- Filtros base: BIN, agencias, estado "no impresa" y antigüedad.
-                .WhereRaw($"{u54}.ST_BIN_TARJETA = '{bin.Trim()}'")
-                .WhereRaw($"{u54}.ST_CENTRO_COSTO_IMPR_TARJETA = {agenciaImprime}")
-                .WhereRaw($"{u54}.ST_CENTRO_COSTO_APERTURA = {agenciaApertura}")
-                .WhereRaw($"{u54}.ST_FECHA_IMPRESION = 0")
-                .WhereRaw($"{u54}.ST_HORA_IMPRESION = 0")
-                .WhereRaw($"{u54}.ST_USUARIO_IMPRESION = ''")
-                .WhereRaw($"{u54}.ST_FECHA_APERTURA >= {numericDate}")
-
-                // -- Orden: se replica el ordenamiento que ya utilizabas.
-                .OrderBy($"{u54}.ST_CODIGO_TARJETA")
-                .OrderBy($"{u54}.ST_CENTRO_COSTO_IMPR_TARJETA")
-                .OrderBy($"{u54}.ST_CENTRO_COSTO_APERTURA")
-                .OrderBy($"{u54}.ST_FECHA_IMPRESION")
-                .OrderBy($"{u54}.ST_HORA_IMPRESION")
-                .OrderBy($"{u54}.ST_USUARIO_IMPRESION")
-
-                // -- Nota: Si esperas volúmenes enormes, puedes encadenar .FetchFirst(N) y/o .Offset(M) (AS400-compatible).
-                .Build();
-
-            using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-            command.CommandText = query.Sql;                 // El builder genera el SQL final ya listo para ejecutar.
-            command.CommandType = System.Data.CommandType.Text;
-            command.CommandTimeout = 0;
-
-            // -- Ejecución en un único viaje a BD.
-            using DbDataReader reader = await command.ExecuteReaderAsync();
-
-            // -- Preparación del contenedor de respuesta (reseteo por seguridad).
-            _getDetalleTarjetasImprimirResponseDto = new();
-
-            // -- Variables para setear datos de agencias una única vez (como en tu lógica original).
-            string? agenciaImpCodVal = null;
-            string? agenciaImpNomVal = null;
-            string? agenciaApeCodVal = null;
-            string? agenciaApeNomVal = null;
-
-            if (reader.HasRows)
+            string statusCode = success switch
             {
-                while (await reader.ReadAsync())
-                {
-                    // -- Mapeo directo desde columnas proyectadas.
-                    var numeroTarjeta = reader["Numero"]?.ToString() ?? "";
-                    var nombreTarjeta = reader[subNombre]?.ToString() ?? "";
-                    var numeroCuenta = reader[subCuenta]?.ToString() ?? "";
-                    var motivo = reader[subEstatus]?.ToString() ?? "";
+                "success" => "200",
+                "Unauthorized" => "401",
+                _ => "400"
+            };
 
-                    var agImpCodRow = reader[agImpCod]?.ToString() ?? "";
-                    var agImpNomRow = reader[agImpNom]?.ToString() ?? "";
-                    var agApeCodRow = reader[agApeCod]?.ToString() ?? "";
-                    var agApeNomRow = reader[agApeNom]?.ToString() ?? "";
+            if (succes1 && succes2)
+            {
+                _getAuthResponseDto.Codigo.Message = motivo;
+                _getAuthResponseDto.Codigo.Error = statusCode;
+                _getAuthResponseDto.Codigo.Status = success;
+                _getAuthResponseDto.Codigo.TimeStamp = string.Format("{0:HH:mm:ss tt}", DateTime.Now);
 
-                    // -- Primera fila fija los datos de agencia a nivel de cabecera (como hacías con bandera1).
-                    if (agenciaImpCodVal is null)
-                    {
-                        agenciaImpCodVal = agImpCodRow;
-                        agenciaImpNomVal = agImpNomRow;
-                        agenciaApeCodVal = agApeCodRow;
-                        agenciaApeNomVal = agApeNomRow;
-
-                        _getDetalleTarjetasImprimirResponseDto.Agencia.AgenciaImprimeCodigo = agenciaImpCodVal;
-                        _getDetalleTarjetasImprimirResponseDto.Agencia.AgenciaImprimeNombre = agenciaImpNomVal;
-                        _getDetalleTarjetasImprimirResponseDto.Agencia.AgenciaAperturaCodigo = agenciaApeCodVal;
-                        _getDetalleTarjetasImprimirResponseDto.Agencia.AgenciaAperturaNombre = agenciaApeNomVal;
-                    }
-
-                    // -- Se agrega la tarjeta a la lista final (una sola pasada; sin más consultas).
-                    _getDetalleTarjetasImprimirResponseDto.Tarjetas.Add(new()
-                    {
-                        Nombre = nombreTarjeta,
-                        Numero = numeroTarjeta,
-                        FechaEmision = "",     // Mantengo vacíos si no están en UNI54L07; si existen, puedes agregarlos en el SELECT.
-                        FechaVencimiento = "",
-                        Motivo = motivo,
-                        NumeroCuenta = numeroCuenta
-                    });
-                }
+                return _getAuthResponseDto;
             }
+            else
+            {
+                GetAuthResponseDto getAuthResponseDto = new GetAuthResponseDto();
+                getAuthResponseDto.Codigo.Message = "No se pudo guardar datos de log";
+                getAuthResponseDto.Codigo.Error = "400";
+                getAuthResponseDto.Codigo.Status = "BadRequest";
+                getAuthResponseDto.Codigo.TimeStamp = string.Format("{0:HH:mm:ss tt}", DateTime.Now);
 
-            // -- Bloque de código de estatus final homogéneo.
-            _getDetalleTarjetasImprimirResponseDto.Codigo.Message = "Exitoso";
-            _getDetalleTarjetasImprimirResponseDto.Codigo.Status = "success";
-            _getDetalleTarjetasImprimirResponseDto.Codigo.Error = "200";
-            _getDetalleTarjetasImprimirResponseDto.Codigo.TimeStamp = $"{DateTime.Now:HH:mm:ss tt}";
-
-            return _getDetalleTarjetasImprimirResponseDto;
+                return getAuthResponseDto;
+            }
         }
         catch (Exception ex)
         {
-            // -- Estandarización de errores en respuesta; mensajes seguros para el cliente.
-            var resp = new GetDetallesTarjetasImprimirResponseDto();
-            resp.Codigo.Message = ex.Message;
-            resp.Codigo.Status = "BadRequest";
-            resp.Codigo.Error = "400";
-            resp.Codigo.TimeStamp = $"{DateTime.Now:HH:mm:ss tt}";
-            return resp;
+            GetAuthResponseDto getAuthResponseDto = new GetAuthResponseDto();
+            getAuthResponseDto.Codigo.Message = ex.Message;
+            getAuthResponseDto.Codigo.Error = "400";
+            getAuthResponseDto.Codigo.Status = "BadRequest";
+            getAuthResponseDto.Codigo.TimeStamp = string.Format("{0:HH:mm:ss tt}", DateTime.Now);
+
+            return getAuthResponseDto;
+        }
+    }
+
+    private void PreConsultaCorrelativo(out int correlativo)
+    {
+        string sqlQuery = "SELECT * FROM BCAH96DTA.IETD01LOG ORDER BY LOGA01AID DESC";
+        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+        command.CommandText = sqlQuery;
+        command.CommandType = System.Data.CommandType.Text;
+
+        using DbDataReader reader = command.ExecuteReader();
+        if (reader.Read())
+        {
+            object correlativo2 = reader.GetValue(reader.GetOrdinal("LOGA01AID"));
+            correlativo = Convert.ToInt32(correlativo2);
+            correlativo++;
+        }
+        else
+        {
+            correlativo = 0;
+        }
+
+    }
+
+    private void RegistraLogLoginGeneral(int correlativo, string userID, string motivo, string exitoso, string idSesion, out DateTime as400, out MachineInfo machineInfo, out bool wasSuccessful)
+    {
+        DateTime nowUTC = DateTime.Now;
+        as400 = new(nowUTC.Year, nowUTC.Month, nowUTC.Day, nowUTC.Hour, nowUTC.Minute, nowUTC.Second, DateTimeKind.Local);
+
+        machineInfo = _machineInfoService.GetMachineInfo();
+
+        FieldsQueryL param = new();
+
+        string sqlQuery = "INSERT INTO BCAH96DTA.ETD01LOG (LOGA01AID, LOGA02UID, LOGA03TST,  LOGA04SUC,  LOGA05IPA,  LOGA06MNA,  LOGA07SID,  LOGA08FRE,  LOGA09ACO,  LOGA10UAG,  LOGA11BRO,  LOGA12SOP,  LOGA13DIS) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+        command.CommandText = sqlQuery;
+        command.CommandType = System.Data.CommandType.Text;
+
+        param.AddOleDbParameter(command, "LOGA01AID", OleDbType.Numeric, correlativo); //Numero de Intento
+        param.AddOleDbParameter(command, "LOGA02UID", OleDbType.Char, userID); //UserID
+        param.AddOleDbParameter(command, "LOGA03TST", OleDbType.DBTimeStamp, as400); //Hora y Fecha
+        param.AddOleDbParameter(command, "LOGA04SUC", OleDbType.Char, exitoso); //Exitoso o no
+        param.AddOleDbParameter(command, "LOGA05IPA", OleDbType.Char, machineInfo.ClientIPAddress); //Ip Cliente
+        param.AddOleDbParameter(command, "LOGA06MNA", OleDbType.Char, machineInfo.HostName); //Nombre Maquina
+        param.AddOleDbParameter(command, "LOGA07SID", OleDbType.Char, idSesion); //ID Sesion
+        param.AddOleDbParameter(command, "LOGA08FRE", OleDbType.Char, motivo); //Razon Fallo
+        param.AddOleDbParameter(command, "LOGA09ACO", OleDbType.Numeric, 0); //Conteo Intentos
+        param.AddOleDbParameter(command, "LOGA10UAG", OleDbType.Char, machineInfo.UserAgent); //User Agent
+        param.AddOleDbParameter(command, "LOGA11BRO", OleDbType.Char, machineInfo.Browser); //Navegador
+        param.AddOleDbParameter(command, "LOGA12SOP", OleDbType.Char, machineInfo.OS); //Sistema Operativo
+        param.AddOleDbParameter(command, "LOGA13DIS", OleDbType.Char, machineInfo.Device);//Dispositivo  modificar luego
+
+        int resultado = command.ExecuteNonQuery();
+        wasSuccessful = resultado > 0;
+    }
+
+    private void RegistraLogPersonal(string userID, DateTime fecha, string exitoso, MachineInfo machineInfo, string token, out bool wasSuccessful)
+    {
+        bool bandera = false;
+        int intentos = 0;
+        DateTime fechaAnterior = DateTime.MinValue;
+
+        /*PreConsulta Registro Usuario*/
+        FieldsQueryL param = new();
+
+        string sqlQuery = "SELECT * FROM BCAH96DTA.IETD02LOG WHERE LOGB01UID = ?";
+
+        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+        command.CommandText = sqlQuery;
+        command.CommandType = System.Data.CommandType.Text;
+
+        param.AddOleDbParameter(command, "LOGB01UID", OleDbType.Char, userID);
+
+        using DbDataReader reader = command.ExecuteReader();
+
+        if (reader.Read())
+        {
+            string fecha2 = reader["LOGB02UIL"].ToString()!;
+            if (DateTime.TryParseExact(fecha2, "yyyy-MM-dd-HH.mm.ss.ffffff", CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out fechaAnterior)) { }
+
+            object intentos1 = reader.GetValue(reader.GetOrdinal("LOGB03TIL"));
+            intentos = Convert.ToInt32(intentos1);
+            bandera = true;
+        }
+
+        reader.Close();
+
+        /*Inserta Registro Usuario si no existe*/
+        if (exitoso.Equals("1"))
+        {
+            intentos++;
+        }
+        else if (exitoso.Equals("0"))
+        {
+            intentos = 0;
+        }
+
+        if (bandera)
+        {
+            //Actualiza
+
+            sqlQuery = "UPDATE BCAH96DTA.IETD02LOG SET LOGB02UIL = ?, LOGB03TIL = ?, LOGB04SEA = ?,  LOGB05UDI = ?, LOGB06UTD = ?, LOGB07UNA = ?, LOGB09UIF = ?, LOGB10TOK = ?  WHERE LOGB01UID = ?";
+            using var command2 = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+            command2.CommandText = sqlQuery;
+            command2.CommandType = System.Data.CommandType.Text;
+
+            param.AddOleDbParameter(command2, "LOGB02UIL", OleDbType.DBTimeStamp, fecha);
+            param.AddOleDbParameter(command2, "LOGB03TIL", OleDbType.Numeric, intentos); //Cantidad Intentos
+            param.AddOleDbParameter(command2, "LOGB04SEA", OleDbType.Char, exitoso); //Sesion Activa
+            param.AddOleDbParameter(command2, "LOGB05UDI", OleDbType.Char, machineInfo.ClientIPAddress);//Ultima Dirección IP
+            param.AddOleDbParameter(command2, "LOGB06UTD", OleDbType.Char, machineInfo.Device);//Ultimo Dispositivo
+            param.AddOleDbParameter(command2, "LOGB07UNA", OleDbType.Char, machineInfo.Browser);//Ultimo Navegador
+            param.AddOleDbParameter(command2, "LOGB09UIF", OleDbType.DBTimeStamp, fechaAnterior); //Ultimo intento
+            param.AddOleDbParameter(command2, "LOGB10TOK", OleDbType.Char, token); //Token/idSession
+            param.AddOleDbParameter(command2, "LOGB01UID", OleDbType.Char, userID);
+
+            int resultado = command2.ExecuteNonQuery();
+            wasSuccessful = resultado > 0;
+        }
+        else
+        {
+            //Inserta
+            sqlQuery = "INSERT INTO BCAH96DTA.ETD02LOG (LOGB01UID, LOGB02UIL, LOGB03TIL,  LOGB04SEA,  LOGB05UDI,  LOGB06UTD,  LOGB07UNA,  LOGB08CBI,  LOGB09UIF,  LOGB10TOK) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            using var command2 = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+            command2.CommandText = sqlQuery;
+            command2.CommandType = System.Data.CommandType.Text;
+
+            param.AddOleDbParameter(command2, "LOGB01UID", OleDbType.Char, userID);
+            param.AddOleDbParameter(command2, "LOGB02UIL", OleDbType.DBTimeStamp, fecha);
+            param.AddOleDbParameter(command2, "LOGB03TIL", OleDbType.Numeric, intentos); //Cantidad Intentos
+            param.AddOleDbParameter(command2, "LOGB04SEA", OleDbType.Char, exitoso); //Sesion Activa
+            param.AddOleDbParameter(command2, "LOGB05UDI", OleDbType.Char, machineInfo.ClientIPAddress);//Ultima Dirección IP
+            param.AddOleDbParameter(command2, "LOGB06UTD", OleDbType.Char, machineInfo.Device);//Ultimo Dispositivo
+            param.AddOleDbParameter(command2, "LOGB07UNA", OleDbType.Char, machineInfo.Browser);//Ultimo Navegador
+            param.AddOleDbParameter(command2, "LOGB08CBI", OleDbType.Char, "");// Bloqueo Por intento
+            param.AddOleDbParameter(command2, "LOGB09UIF", OleDbType.DBTimeStamp, fecha); //Ultimo intento
+            param.AddOleDbParameter(command2, "LOGB10TOK", OleDbType.Char, token); //Token/idSession
+
+            int resultado = command2.ExecuteNonQuery();
+            wasSuccessful = resultado > 0;
         }
     }
 }
+               
