@@ -1,119 +1,120 @@
-using System;
-using System.Globalization;
+Ahora convierte este método para que utilice RestUtilities.QueryBuilder
 
-namespace QueryBuilder.Helpers
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.RegistraImpresion;
+
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.RegistraImpresion;
+
+/// <summary>
+/// Interfaz IRegistraImpresionService
+/// </summary>
+public interface IRegistraImpresionService
 {
-    // ==============================================================
-    // Tipos auxiliares para valores tipados en DB2 for i (AS/400)
-    // ==============================================================
+    /// <summary>
+    /// Método que registra la impresión.
+    /// </summary>
+    /// <param name="postRegistraImpresionDto"></param>
+    /// <returns>Retorna si el registro fue exitoso o no.</returns>
+    Task<bool> RegistraImpresion(PostRegistraImpresionDto postRegistraImpresionDto);
+}
+
+
+using Connections.Abstractions;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.RegistraImpresion;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Repository.IRepository.RegistraImpresion;
+
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.RegistraImpresion;
+
+/// <summary>
+/// Clase de Servicio RegistraImpresionService.
+/// </summary>
+/// <param name="_connection">Instancia de IDatabaseConnection.</param>
+/// <param name="_contextAccessor">Instancia de IHttpContextAccessor.</param>
+public class RegistraImpresionService(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : IRegistraImpresionService
+{
+    /// <inheritdoc />
+    public async Task<bool> RegistraImpresion(PostRegistraImpresionDto postRegistraImpresionDto)
+    {
+        RegistraImpresionRepository _registraImpresionRepository = new(_connection, _contextAccessor);
+
+        await Task.Delay(1);
+
+        _registraImpresionRepository.GuardaImpresionUNI5400(postRegistraImpresionDto, out bool exito);
+
+        return exito;
+    }
+}
+
+
+using API_1_TERCEROS_REMESADORAS.Utilities;
+using Connections.Abstractions;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.RegistraImpresion;
+using System.Data.OleDb;
+
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Repository.IRepository.RegistraImpresion;
+
+/// <summary>
+/// Clase RegistraImpresionRepository.
+/// </summary>
+/// <param name="_connection">IInstancia de IDatabaseConnection.</param>
+/// <param name="_contextAccessor">Instancia de IHttpContextAccessor.</param>
+public class RegistraImpresionRepository(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor)
+{
 
     /// <summary>
-    /// Valor “tipado” para DB2 i: genera un fragmento con un <c>?</c> y el tipo,
-    /// p. ej. <c>CAST(? AS VARCHAR(20))</c>, <c>CAST(? AS TIMESTAMP)</c>, etc.
-    /// Pensado para <c>USING (SELECT ... FROM SYSIBM.SYSDUMMY1)</c> y MERGE/INSERT.
+    /// Actualiza datos en tabla S38FILEBA.UNI5400
     /// </summary>
-    public readonly struct Db2ITyped
+    /// <param name="postRegistraImpresionDto">Objeto Dto.</param>
+    /// <param name="exito">Resultado del guardo de la impresión.</param>
+    public void GuardaImpresionUNI5400(PostRegistraImpresionDto postRegistraImpresionDto, out bool exito)
     {
-        /// <summary>Fragmento SQL con el marcador <c>?</c> y el tipo (p. ej. <c>CAST(? AS VARCHAR(20))</c>).</summary>
-        public string Sql { get; }
+        _connection.Open();
+        FieldsQueryL param = new();
 
-        /// <summary>Valor que se ligará al marcador <c>?</c>.</summary>
-        public object? Value { get; }
+        DateTime now = DateTime.Now;
 
-        private Db2ITyped(string sql, object? value)
+        string numeroTarjeta = postRegistraImpresionDto.NumeroTarjeta;
+        string usuarioImpresion = postRegistraImpresionDto.UsuarioICBS;
+        int fechaImpresion = now.Year * 10000 + now.Month * 100 + now.Day;
+        int horaImpresion = now.Hour * 10000 + now.Minute * 100 + now.Second;
+
+        string sqlQuery = "UPDATE S38FILEBA.UNI5400 SET ST_FECHA_IMPRESION = ?, ST_HORA_IMPRESION = ?,  ST_USUARIO_IMPRESION = ? WHERE ST_CODIGO_TARJETA = ?";
+        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+        command.CommandText = sqlQuery;
+        command.CommandType = System.Data.CommandType.Text;
+
+
+        param.AddOleDbParameter(command, "ST_FECHA_IMPRESION", OleDbType.Numeric, fechaImpresion);
+        param.AddOleDbParameter(command, "ST_HORA_IMPRESION", OleDbType.Numeric, horaImpresion);
+        param.AddOleDbParameter(command, "ST_USUARIO_IMPRESION", OleDbType.Char, usuarioImpresion);
+        param.AddOleDbParameter(command, "ST_CODIGO_TARJETA", OleDbType.Char, numeroTarjeta);
+
+        int update = command.ExecuteNonQuery();
+
+        if (update > 0)
         {
-            Sql = sql;
-            Value = value;
+            exito = true;
+
+            GuardaNombreUNI00MTA(postRegistraImpresionDto.NumeroTarjeta, postRegistraImpresionDto.NombreEnTarjeta);
         }
-
-        // -----------------------
-        // Helpers de normalización
-        // -----------------------
-
-        /// <summary>Recorta a <paramref name="size"/> si excede; null → "".</summary>
-        private static string Fit(string? s, int size)
-            => string.IsNullOrEmpty(s) ? string.Empty : (s.Length > size ? s[..size] : s);
-
-        /// <summary>Convierte a timestamp canónico DB2: yyyy-MM-dd-HH.mm.ss.ffffff</summary>
-        private static string ToDb2Ts(DateTime dt)
-            => dt.ToString("yyyy-MM-dd-HH.mm.ss.ffffff", CultureInfo.InvariantCulture);
-
-        // -------------
-        // Cadenas
-        // -------------
-
-        public static Db2ITyped VarChar(string? value, int size)
-            => new($"CAST(? AS VARCHAR({size}))", Fit(value, size));
-
-        public static Db2ITyped VarChar(object? value, int size)
-            => value is string s ? VarChar(s, size)
-                                 : new($"CAST(? AS VARCHAR({size}))", value);
-
-        public static Db2ITyped Char(string? value, int size)
-            => new($"CAST(? AS CHAR({size}))", Fit(value, size));
-
-        public static Db2ITyped Char(object? value, int size)
-            => value switch
-            {
-                string s => Char(s, size),
-                char c   => Char(c.ToString(), size),
-                _        => new Db2ITyped($"CAST(? AS CHAR({size}))", value)
-            };
-
-        // --------
-        // Numéricos
-        // --------
-
-        public static Db2ITyped Decimal(decimal value, int precision, int scale)
-            => new($"CAST(? AS DECIMAL({precision},{scale}))", value);
-
-        public static Db2ITyped Decimal(object? value, int precision, int scale)
+        else
         {
-            if (value is string s &&
-                decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d))
-                return Decimal(d, precision, scale);
-
-            return new($"CAST(? AS DECIMAL({precision},{scale}))", value);
+            exito = false;
         }
+    }
 
-        public static Db2ITyped Integer(int value)  => new("CAST(? AS INTEGER)", value);
-        public static Db2ITyped Integer(object? v)  => new("CAST(? AS INTEGER)", v);
-        public static Db2ITyped BigInt(long value)  => new("CAST(? AS BIGINT)", value);
-        public static Db2ITyped BigInt(object? v)   => new("CAST(? AS BIGINT)", v);
-        public static Db2ITyped Double(double v)    => new("CAST(? AS DOUBLE)", v);
-        public static Db2ITyped Double(object? v)   => new("CAST(? AS DOUBLE)", v);
+    /*Buscamos datos de cuenta en  S38FILEBA.UNI00MTA*/
+    private void GuardaNombreUNI00MTA(string codigoTarjeta, string nombreEnTarjeta)
+    {
+        FieldsQueryL param = new();
 
-        // ----------
-        // Temporalidad
-        // ----------
+        string sqlQuery = "UPDATE S38FILEBA.UNI00MTA SET MTNET = ? WHERE MTCTJ = ?";
+        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+        command.CommandText = sqlQuery;
+        command.CommandType = System.Data.CommandType.Text;
 
-        /// <summary>
-        /// TIMESTAMP tipado usando <c>CAST(? AS TIMESTAMP)</c>. Envía el valor como
-        /// string canónico DB2 (yyyy-MM-dd-HH.mm.ss.ffffff) para evitar desbordes del proveedor.
-        /// </summary>
-        public static Db2ITyped Timestamp(DateTime value)
-            => new("CAST(? AS TIMESTAMP)", ToDb2Ts(value));
+        param.AddOleDbParameter(command, "MTNET", OleDbType.Char,nombreEnTarjeta);
+        param.AddOleDbParameter(command, "MTCTJ", OleDbType.Char, codigoTarjeta);
 
-        public static Db2ITyped Timestamp(DateTime? value)
-            => value.HasValue ? new Db2ITyped("CAST(? AS TIMESTAMP)", ToDb2Ts(value.Value))
-                              : new Db2ITyped("CAST(? AS TIMESTAMP)", null);
-
-        /// <summary>
-        /// TIMESTAMP desde cadena ya formateada en canónico DB2
-        /// (yyyy-MM-dd-HH.mm.ss[.ffffff]).
-        /// </summary>
-        public static Db2ITyped Timestamp(string db2Canonical)
-            => new("CAST(? AS TIMESTAMP)", db2Canonical ?? string.Empty);
-
-        /// <summary>DATE como <c>CAST(? AS DATE)</c> con valor <c>yyyy-MM-dd</c>.</summary>
-        public static Db2ITyped Date(DateTime value)
-            => new("CAST(? AS DATE)", value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-
-        /// <summary>TIME como <c>CAST(? AS TIME)</c> con valor <c>HH.mm.ss</c>.</summary>
-        public static Db2ITyped Time(TimeSpan value)
-            => new("CAST(? AS TIME)", DateTime.MinValue.Add(value).ToString("HH.mm.ss", CultureInfo.InvariantCulture));
-
-        public static Db2ITyped Time(DateTime value)
-            => new("CAST(? AS TIME)", value.ToString("HH.mm.ss", CultureInfo.InvariantCulture));
+        command.ExecuteNonQuery();
     }
 }
