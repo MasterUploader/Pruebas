@@ -1,197 +1,226 @@
-Actualiza estos métodos y controladores, para que usen RestUtilities.QueryBuilder:
-
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.Auth;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Services.AuthService;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Services.MachineInformationService;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Utils;
+using System.Net.Mime;
 
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Controllers;
-
-/// <summary>
-/// Controlador AuthController, es el que contiene los Endpoints necesarios para el correcto funcionamiento de los servicios de autenticación del Sitio de embosado.
-/// </summary>
-[Route("api/[controller]")]
-[ApiController]
-public class AuthController(IAuthService _authService, ISessionManagerService _sessionManagerService, IMachineInfoService _machineInfoService) : ControllerBase
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Controllers
 {
     /// <summary>
-    /// Objeto DTO de Respuesta para autenticación.
+    /// Endpoints de autenticación para el sitio de embosado.
     /// </summary>
-    protected GetAuthResponseDto _getAuthResponseDto = new();
-    private readonly ResponseHandler _responseHandler = new();
-
-
-    /// <summary>
-    /// Método que se encarga de realizar el proceso de logueo para los usuarios del sitio de embosado de tarjetas de Debito.
-    /// </summary>
-    /// <param name="loginDto"></param>
-    /// <returns></returns>
-    [HttpPost]
-    [Route("Login")]
-    public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
+    [ApiController]
+    [Route("api/[controller]")]
+    [Produces(MediaTypeNames.Application.Json)]
+    public class AuthController : ControllerBase
     {
-        _getAuthResponseDto = await _authService.AuthenticateAsync(loginDto);
+        private readonly IAuthService _authService;
+        private readonly ISessionManagerService _sessionManagerService;
+        private readonly IMachineInfoService _machineInfoService;
+        private readonly ILogger<AuthController> _logger;
+        private readonly ResponseHandler _responseHandler = new();
 
-        return _responseHandler.HandleResponse(_getAuthResponseDto, _getAuthResponseDto.Codigo.Status);
+        public AuthController(
+            IAuthService authService,
+            ISessionManagerService sessionManagerService,
+            IMachineInfoService machineInfoService,
+            ILogger<AuthController> logger)
+        {
+            _authService = authService;
+            _sessionManagerService = sessionManagerService;
+            _machineInfoService = machineInfoService;
+            _logger = logger;
+        }
+
+        /// <summary>
+        /// Realiza el proceso de logueo contra AD y registra actividad.
+        /// </summary>
+        [HttpPost("Login")]
+        [ProducesResponseType(typeof(GetAuthResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(GetAuthResponseDto), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
+        {
+            if (!ModelState.IsValid)
+            {
+                var dto = new GetAuthResponseDto
+                {
+                    Codigo =
+                    {
+                        Status = "BadRequest",
+                        Error = "400",
+                        Message = "Solicitud inválida.",
+                        TimeStamp = DateTime.Now.ToString("HH:mm:ss tt")
+                    }
+                };
+                return _responseHandler.HandleResponse(dto, dto.Codigo.Status);
+            }
+
+            try
+            {
+                _logger.LogInformation("Login solicitado para usuario {User}.", loginDto?.User);
+                var response = await _authService.AuthenticateAsync(loginDto);
+                return _responseHandler.HandleResponse(response, response.Codigo.Status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error en Login para usuario {User}.", loginDto?.User);
+                var dto = new GetAuthResponseDto
+                {
+                    Codigo =
+                    {
+                        Status = "BadRequest",
+                        Error = "400",
+                        Message = ex.Message,
+                        TimeStamp = DateTime.Now.ToString("HH:mm:ss tt")
+                    }
+                };
+                return _responseHandler.HandleResponse(dto, dto.Codigo.Status);
+            }
+        }
+
+        /// <summary>
+        /// Mantiene viva la sesión (extiende 15 minutos).
+        /// </summary>
+        [HttpPost("Heartbeat")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> HeartBeat([FromBody] string userName)
+        {
+            // Aquí puedes invocar tu servicio de sesión si lo deseas.
+            // HeartbeatService hb = new(_sessionManagerService, _machineInfoService);
+            // await hb.HeartbeatAsync(userName);
+
+            return Ok();
+        }
     }
-
-    /// <summary>
-    /// Clase que se encarga de actualizar el estado de la sesión del usuario, agrega 15 minutos más al tiempo de sesión.
-    /// </summary>
-    /// <param name="userName"></param>
-    /// <returns></returns>
-    [HttpPost]
-    [Route("Heartbeat")]
-    public async Task<IActionResult> HeartBeat([FromBody] string userName)
-    {
-        HeartbeatService _heartbeatService = new(_sessionManagerService, _machineInfoService);
-        // _getAuthResponseDto = await _heartbeatService.HeartbeatAsync(userName)
-
-        // return _responseHandler.HandleResponse(_getAuthResponseDto, _getAuthResponseDto.Codigo.Status)
-
-        return Ok();
-    }
-}
-
-
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.Auth;
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.AuthService;
-
-/// <summary>
-/// Interfaz IAuthService, de la clase de Servicio AuthService.
-/// </summary>
-public interface IAuthService
-{
-    /// <summary>
-    /// Método AuthenticateAsync, encargado del proceso de Logueo de un usuario.
-    /// Válida el usuario y contraseña contra el AD, devolviendo los parametros de AD.
-    /// Si los párametros coinciden con los autorizados se procede con el logueo.
-    /// </summary>
-    /// <param name="getAuthDto">Objeto de tipo LoginDto.</param>
-    /// <returns>Retorna respuesta HTTP con objeto GetAuthResponseDto.</returns>
-    Task<GetAuthResponseDto> AuthenticateAsync(LoginDto getAuthDto);
 }
 
 
 using API_1_TERCEROS_REMESADORAS.Utilities;
 using Connections.Abstractions;
+using Microsoft.AspNetCore.Http;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.Auth;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Repository.IRepository.Auth;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Services.MachineInformationService;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Utils;
+using QueryBuilder.Builders;
+using QueryBuilder.Enums;
+using QueryBuilder.Helpers;
 using SUNITP.LIB.ActiveDirectoryV2;
-using System.Data;
 using System.Data.Common;
-using System.Data.OleDb;
 
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.AuthService;
-
-/// <summary>
-/// Clase de servicio AuthService, encargada del proceso de autenticación de usuarios para el sitio de embosado de tarjetas de debito.
-/// </summary>
-/// <param name="_machineInfoService">Instancia de IMachineInfoService.</param>
-/// <param name="_sessionManagerService">Instancia de ISessionManagerService.</param>
-/// <param name="_connection">Instancia de IDatabaseConnection.</param>
-/// <param name="_contextAccessor">Instancia de IHttpContextAccessor.</param>
-public class AuthService(IMachineInfoService _machineInfoService, ISessionManagerService _sessionManagerService, IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : IAuthService
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.AuthService
 {
-    /// <inheritdoc />
-    protected ActiveDirectoryHN _activeDirectoryHN = new();
-    /// <inheritdoc />
-    protected GetAuthResponseDto _getAuthResponseDto = new();
-
     /// <summary>
-    /// Método de Autenticación asincrono.
+    /// Servicio de autenticación de usuarios para embosado.
     /// </summary>
-    /// <param name="getAuthDto">Objeto Dto que se recibe para realizar el logueo.</param>
-    /// <returns>Retorna un objeto GetauthResponseDto.</returns>
-    public async Task<GetAuthResponseDto> AuthenticateAsync(LoginDto getAuthDto)
+    /// <param name="_machineInfoService">Servicio de información de máquina.</param>
+    /// <param name="_sessionManagerService">Servicio de sesiones/JWT.</param>
+    /// <param name="_connection">Conexión a base de datos (AS400/OleDb).</param>
+    /// <param name="_contextAccessor">Accessor de HttpContext.</param>
+    public class AuthService(
+        IMachineInfoService _machineInfoService,
+        ISessionManagerService _sessionManagerService,
+        IDatabaseConnection _connection,
+        IHttpContextAccessor _contextAccessor) : IAuthService
     {
+        protected ActiveDirectoryHN _activeDirectoryHN = new();
+        protected GetAuthResponseDto _getAuthResponseDto = new();
 
-        try
+        /// <inheritdoc />
+        public async Task<GetAuthResponseDto> AuthenticateAsync(LoginDto getAuthDto)
+        {
+            try
+            {
+                _connection.Open();
+
+                AuthServiceRepository _authServiceRepository = new(_machineInfoService, _connection, _contextAccessor);
+
+                bool estado = _activeDirectoryHN.GetActiveDirectory(out string domain, out string activeDirectory);
+                if (!estado)
+                    return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "No se encontro el Dominio de Red o Active Directory", "1", "vacio", "Unauthorized");
+
+                var auth = new ServiceActiveDirectoryV2();
+                var autenticateUser = auth.AutenticateUser(domain, getAuthDto.User, getAuthDto.Password, "");
+                if (!autenticateUser.IAuthenticationAuthorized)
+                    return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Credenciales Inválidas", "1", "vacio", "Unauthorized");
+
+                bool bandera = autenticateUser.UserRoles?.Any(r => r.Equals(activeDirectory)) == true;
+                if (!bandera)
+                    return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Usuario no pertenece al Grupo AD", "1", "vacio", "Unauthorized");
+
+                // Genera token
+                var token = await _sessionManagerService.GenerateTokenAsync(getAuthDto);
+                _getAuthResponseDto.Token.Token = token.Item2;
+                _getAuthResponseDto.Token.Expiration = token.Item1.ValidTo;
+
+                // Datos usuario (AD)
+                _getAuthResponseDto.ActiveDirectoryData.NombreUsuario = autenticateUser.UserName;
+                _getAuthResponseDto.ActiveDirectoryData.UsuarioICBS = TraeUsuarioICBS(getAuthDto.User);
+
+                // departmentNumber
+                var department = autenticateUser.UserProperties?
+                    .FirstOrDefault(p => p.propertyName.Equals("departmentNumber"))?
+                    .propertyValues?.FirstOrDefault();
+
+                if (!string.IsNullOrWhiteSpace(department))
+                {
+                    _getAuthResponseDto.ActiveDirectoryData.AgenciaAperturaCodigo = department;
+                    _getAuthResponseDto.ActiveDirectoryData.AgenciaImprimeCodigo = department;
+                }
+
+                return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Logueado Exitosamente", "0", token.Item2, "success");
+            }
+            catch (Exception ex)
+            {
+                _getAuthResponseDto.Codigo.Message = ex.Message;
+                _getAuthResponseDto.Codigo.Error = "400";
+                _getAuthResponseDto.Codigo.Status = "BadRequest";
+                _getAuthResponseDto.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
+                return _getAuthResponseDto;
+            }
+        }
+
+        /// <summary>
+        /// Obtiene el usuario ICBS desde ICBSSMSSPN.SCP001 usando RestUtilities.QueryBuilder.
+        /// </summary>
+        private string TraeUsuarioICBS(string usuarioRed)
         {
             _connection.Open();
+            if (!_connection.IsConnected) return string.Empty;
 
-            AuthServiceRepository _authServiceRepository = new(_machineInfoService, _connection, _contextAccessor);
+            // En tu lógica original: usuarioRed se normaliza a "HN" + usuarioRed
+            usuarioRed = "HN" + (usuarioRed ?? string.Empty);
 
-            bool estado = _activeDirectoryHN.GetActiveDirectory(out string domain, out string activeDirectory); //Valida si existe domino y AD en el archivo ConnectionData.json
-            if (!estado) return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "No se encontro el Dominio de Red o Active Directory", "1", "vacio", "Unauthorized");
-            var auth = new ServiceActiveDirectoryV2();
-            var autenticateUser = auth.AutenticateUser(domain, getAuthDto.User, getAuthDto.Password, "");
+            // SELECT SCUSER FROM ICBSSMSSPN.SCP001 WHERE SCJBNA = :usuarioRed FETCH FIRST 1 ROW ONLY
+            var qb = new SelectQueryBuilder("SCP001", "ICBSSMSSPN")
+                .Select("SCUSER")
+                .WhereRaw($"SCJBNA = {SqlHelper.FormatValue(usuarioRed)}")
+                .Limit(1);
 
-            if (!autenticateUser.IAuthenticationAuthorized) return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Credenciales Inválidas", "1", "vacio", "Unauthorized");
+            var query = qb.Build();
 
-            bool bandera = false;
-            foreach (var _ in from string role in autenticateUser.UserRoles
-                              where role.Equals(activeDirectory)
-                              select new { })
-            {
-                bandera = true;
-            }
+            // Puedes usar la sobrecarga que añade parámetros automáticamente si usas placeholders:
+            using var cmd = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+            cmd.CommandText = query.Sql;
+            cmd.CommandType = System.Data.CommandType.Text;
 
-            if (!bandera) return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Usuario no pertenece al Grupo AD", "1", "vacio", "Unauthorized");
+            using DbDataReader reader = cmd.ExecuteReader();
+            if (!reader.HasRows) return string.Empty;
 
-            await Task.Delay(500);
-            var token = _sessionManagerService.GenerateTokenAsync(getAuthDto);
-
-            _getAuthResponseDto.Token.Token = token.Result.Item2;
-            _getAuthResponseDto.Token.Expiration = token.Result.Item1.ValidTo;
-
-            //Datos Usuario
-            _getAuthResponseDto.ActiveDirectoryData.NombreUsuario = autenticateUser.UserName;
-            _getAuthResponseDto.ActiveDirectoryData.UsuarioICBS = TraeUsuarioICBS(getAuthDto.User);
-
-            foreach (var value in from propiedades in autenticateUser.UserProperties
-                                  where propiedades.propertyName.Equals("departmentNumber")
-                                  from value in propiedades.propertyValues
-                                  select value)
-            {
-                _getAuthResponseDto.ActiveDirectoryData.AgenciaAperturaCodigo = value;
-                _getAuthResponseDto.ActiveDirectoryData.AgenciaImprimeCodigo = value;
-            }
-
-            return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Logueado Exitosamente", "0", token.Result.Item2, "success");
-        }
-        catch (Exception ex)
-        {
-            _getAuthResponseDto.Codigo.Message = ex.Message;
-            _getAuthResponseDto.Codigo.Error = "400";
-            _getAuthResponseDto.Codigo.Status = "BadRequest";
-            _getAuthResponseDto.Codigo.TimeStamp = string.Format("{0:HH:mm:ss tt}", DateTime.Now);
-
-            return _getAuthResponseDto;
-        }
-    }
-
-    private string TraeUsuarioICBS(string usuarioRed)
-    {
-        FieldsQueryL param = new();
-        string usuarioICBS = "";
-        usuarioRed = "HN" + usuarioRed;
-
-        string sqlQuery = "SELECT * FROM ICBSSMSSPN.SCP001 WHERE SCJBNA = ?";
-        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-        command.CommandText = sqlQuery;
-        command.CommandType = System.Data.CommandType.Text;
-
-        param.AddOleDbParameter(command, "SCJBNA", OleDbType.Char, usuarioRed);
-
-        using DbDataReader reader = command.ExecuteReader();
-
-        if (reader.HasRows)
-        {
             while (reader.Read())
             {
-                usuarioICBS = reader.GetString(reader.GetOrdinal("SCUSER"));
+                // Devuelve el primer SCUSER encontrado
+                var ordinal = reader.GetOrdinal("SCUSER");
+                if (!reader.IsDBNull(ordinal))
+                    return reader.GetString(ordinal);
             }
+
+            return string.Empty;
         }
-
-        reader.Close();
-
-        return usuarioICBS;
     }
 }
+
