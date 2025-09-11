@@ -118,3 +118,5 @@ public class RegistraImpresionRepository(IDatabaseConnection _connection, IHttpC
         command.ExecuteNonQuery();
     }
 }
+
+Entregamelo completo para copiar y pegar
