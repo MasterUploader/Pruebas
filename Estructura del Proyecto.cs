@@ -80,3 +80,5 @@ LOGB08CBI          ETD02LOG           CHARACTER                 1
 LOGB09UIF          ETD02LOG           TIMESTAMP                26     6 
 LOGB10TOK          ETD02LOG           CHARACTER              2000       
 
+Sera que coloque mal el tipo de dato o su tamaño?
+
