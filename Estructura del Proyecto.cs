@@ -78,6 +78,7 @@ public MergeQueryBuilder UsingValuesTypedRow(params (string Column, Db2ITyped Va
     return this;
 }
 
+
 /// <summary>
 /// Construye el SQL MERGE final y su lista de parámetros (para DB2 i: placeholders <c>?</c>).
 /// <para>Orden de parámetros:</para>
@@ -233,7 +234,3 @@ public QueryResult Build()
         Parameters = _parameters
     };
 }
-
-
-
-
