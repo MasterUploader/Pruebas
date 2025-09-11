@@ -439,4 +439,220 @@ namespace QueryBuilder.Builders
             return this;
         }
 
-        /// <summary>Mapea una columna de <c>INSERT</c>
+        /// <summary>Mapea una columna de <c>INSERT</c> (NO-MATCH) a un parámetro (<c>?</c>).</summary>
+        public MergeQueryBuilder MapParam(string targetColumn, object? value)
+        {
+            AddInsertMap(targetColumn, "?", InsertValueKind.Param, value);
+            return this;
+        }
+
+        /// <summary>
+        /// Condición adicional para <c>WHEN NOT MATCHED</c> (se emite como
+        /// <c>WHEN NOT MATCHED AND (...)</c>).
+        /// </summary>
+        public MergeQueryBuilder WhenNotMatchedAnd(string andConditionSql)
+        {
+            _notMatchedAndCondition = string.IsNullOrWhiteSpace(andConditionSql) ? null : andConditionSql.Trim();
+            return this;
+        }
+
+        /// <summary>
+        /// Variante “rápida” para <c>INSERT</c> (NO-MATCH): recibe pares (columna destino, expresión SQL).
+        /// </summary>
+        public MergeQueryBuilder WhenNotMatchedInsert(params (string TargetColumn, string Expression)[] mappings)
+        {
+            if (mappings is null || mappings.Length == 0) return this;
+
+            foreach (var (col, expr) in mappings)
+                AddInsertMap(col, expr, InsertValueKind.Raw, null);
+
+            return this;
+        }
+
+        // ---------------------------------------------------------------------
+        // Build
+        // ---------------------------------------------------------------------
+
+        /// <summary>
+        /// Construye el SQL <c>MERGE</c> final y el arreglo de parámetros en el orden posicional
+        /// adecuado para DB2 i (OleDb).
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Si faltan datos esenciales (tabla, fuente USING, condición ON, etc.).
+        /// </exception>
+        public QueryResult Build()
+        {
+            _parameters.Clear();
+
+            if (string.IsNullOrWhiteSpace(_targetTable))
+                throw new InvalidOperationException("Debe especificarse la tabla destino.");
+            if (_sourceKind == SourceKind.None)
+                throw new InvalidOperationException("Debe especificarse la fuente USING (VALUES o SELECT).");
+            if (string.IsNullOrWhiteSpace(_onConditionSql))
+                throw new InvalidOperationException("Debe especificarse la condición ON.");
+
+            if (_sourceKind == SourceKind.Values && _sourceColumns.Count == 0)
+                throw new InvalidOperationException("Para USING (VALUES) debe definir nombres de columnas de la fuente.");
+
+            var sb = new StringBuilder();
+
+            // Comentario (si lo hay)
+            if (!string.IsNullOrWhiteSpace(_comment))
+                sb.AppendLine(_comment);
+
+            // MERGE INTO <lib.tabla> AS T
+            sb.Append("MERGE INTO ");
+            if (!string.IsNullOrWhiteSpace(_targetLibrary))
+                sb.Append(_targetLibrary).Append('.');
+            sb.Append(_targetTable).Append(' ').Append("AS ").Append(_targetAlias).Append('\n');
+
+            // USING (...)
+            sb.Append("USING (");
+            if (_sourceKind == SourceKind.Values)
+            {
+                sb.Append("VALUES").Append('\n');
+
+                if (_sourceValuesTypedRows.Count > 0)
+                {
+                    // Modo tipado: se emite el SQL de tipo y se cargan los valores
+                    var rowSqls = new List<string>(_sourceValuesTypedRows.Count);
+                    foreach (var row in _sourceValuesTypedRows)
+                    {
+                        rowSqls.Add("(" + string.Join(", ", row.Select(e => e.Sql)) + ")");
+                        foreach (var e in row)
+                            _parameters.Add(e.Val); // 1) parámetros de USING (tipados)
+                    }
+                    sb.Append(string.Join(",\n", rowSqls));
+                }
+                else
+                {
+                    // Modo simple: "?, ?, ?" + parámetros en orden
+                    var rowSqls = new List<string>(_sourceValuesRows.Count);
+                    foreach (var row in _sourceValuesRows)
+                    {
+                        rowSqls.Add("(" + string.Join(", ", Enumerable.Repeat("?", row.Length)) + ")");
+                        _parameters.AddRange(row); // 1) parámetros de USING (simples)
+                    }
+                    sb.Append(string.Join(",\n", rowSqls));
+                }
+            }
+            else // SELECT
+            {
+                var sel = _sourceSelect!.Build();
+                if (sel.Parameters is { Count: > 0 })
+                    _parameters.AddRange(sel.Parameters); // 1) parámetros del SELECT
+
+                sb.Append(sel.Sql);
+            }
+            sb.Append(')');
+
+            // Alias y columnas de la fuente S
+            sb.Append(' ').Append("AS ").Append(_sourceAlias);
+            if (_sourceColumns.Count > 0)
+                sb.Append('(').Append(string.Join(", ", _sourceColumns)).Append(')');
+            sb.Append('\n');
+
+            // ON ...
+            sb.Append("ON ").Append(_onConditionSql).Append('\n');
+
+            // WHEN MATCHED THEN UPDATE SET ...
+            var anyUpdate = _matchedSet.Count > 0 || _updateAssignmentsRaw.Count > 0;
+            if (anyUpdate)
+            {
+                sb.Append("WHEN MATCHED");
+                if (!string.IsNullOrWhiteSpace(_matchedAndCondition))
+                    sb.Append(" AND (").Append(_matchedAndCondition).Append(')');
+                sb.Append(" THEN UPDATE SET").Append('\n');
+
+                var assigns = new List<string>();
+
+                // Asignaciones tipadas (SourceExpr / Raw / Param)
+                foreach (var s in _matchedSet)
+                {
+                    string rhs = s.Kind switch
+                    {
+                        SetValueKind.SourceExpr => s.Expression!, // ej. S.COL
+                        SetValueKind.Raw       => s.Expression!, // ej. CASE ...
+                        SetValueKind.Param     => "?",           // parametrizado
+                        _ => throw new InvalidOperationException("Tipo de asignación inválido.")
+                    };
+
+                    if (s.Kind == SetValueKind.Param)
+                        _parameters.Add(s.Value); // 2) parámetros de UPDATE
+
+                    assigns.Add($"{_targetAlias}.{s.TargetColumn} = {rhs}");
+                }
+
+                // Asignaciones RAW completas (si las hay)
+                assigns.AddRange(_updateAssignmentsRaw);
+
+                sb.Append(string.Join(",\n", assigns)).Append('\n');
+            }
+
+            // WHEN NOT MATCHED THEN INSERT ...
+            if (_notMatchedInsert.Count > 0)
+            {
+                sb.Append("WHEN NOT MATCHED");
+                if (!string.IsNullOrWhiteSpace(_notMatchedAndCondition))
+                    sb.Append(" AND (").Append(_notMatchedAndCondition).Append(')');
+                sb.Append(" THEN INSERT").Append('\n');
+
+                var cols = _notMatchedInsert.Select(m => m.TargetColumn).ToArray();
+                sb.Append('(').Append(string.Join(", ", cols)).Append(')').Append('\n');
+
+                sb.Append("VALUES").Append('\n');
+
+                var vals = new List<string>(_notMatchedInsert.Count);
+                foreach (var m in _notMatchedInsert)
+                {
+                    string rhs = m.Kind switch
+                    {
+                        InsertValueKind.SourceExpr => m.Expression!, // ej. S.UID
+                        InsertValueKind.Raw       => m.Expression!,  // ej. '' o CASE ...
+                        InsertValueKind.Param     => "?",            // parametrizado
+                        _ => throw new InvalidOperationException("Tipo de mapeo inválido.")
+                    };
+
+                    if (m.Kind == InsertValueKind.Param)
+                        _parameters.Add(m.Value); // 3) parámetros de INSERT
+
+                    vals.Add(rhs);
+                }
+
+                sb.Append('(').Append(string.Join(", ", vals)).Append(')').Append('\n');
+            }
+
+            return new QueryResult
+            {
+                Sql = sb.ToString(),
+                Parameters = _parameters
+            };
+        }
+
+        // ---------------------------------------------------------------------
+        // Helpers privados
+        // ---------------------------------------------------------------------
+
+        private void AddMatchedSet(string targetColumn, string? expression, SetValueKind kind, object? value)
+        {
+            if (string.IsNullOrWhiteSpace(targetColumn))
+                throw new ArgumentNullException(nameof(targetColumn));
+
+            if (kind != SetValueKind.Param && string.IsNullOrWhiteSpace(expression))
+                throw new ArgumentNullException(nameof(expression), "La expresión no puede ser vacía para SourceExpr/Raw.");
+
+            _matchedSet.Add(new SetAssignment(targetColumn.Trim(), kind, expression?.Trim(), value));
+        }
+
+        private void AddInsertMap(string targetColumn, string? expression, InsertValueKind kind, object? value)
+        {
+            if (string.IsNullOrWhiteSpace(targetColumn))
+                throw new ArgumentNullException(nameof(targetColumn));
+
+            if (kind != InsertValueKind.Param && string.IsNullOrWhiteSpace(expression))
+                throw new ArgumentNullException(nameof(expression), "La expresión no puede ser vacía para SourceExpr/Raw.");
+
+            _notMatchedInsert.Add(new InsertMapping(targetColumn.Trim(), kind, expression?.Trim(), value));
+        }
+    }
+}
