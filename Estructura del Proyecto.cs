@@ -1,144 +1,118 @@
-// ================================================================
-// IRegistraImpresionService.cs
-// ================================================================
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.RegistraImpresion;
+Actualmente el código de UpdateQueryBuilder esta así:
 
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.RegistraImpresion
+
+using QueryBuilder.Helpers;
+using QueryBuilder.Models;
+using System;
+using System.Collections.Generic;
+using System.Linq.Expressions;
+using System.Linq;
+using System.Text;
+
+namespace QueryBuilder.Builders;
+
+/// <summary>
+/// Generador de sentencias UPDATE compatibles con AS400 y otros motores.
+/// Permite actualizar registros con columnas específicas y condiciones.
+/// </summary>
+public class UpdateQueryBuilder(string _tableName, string? _library = null)
 {
+    private readonly Dictionary<string, object?> _setColumns = new();
+    private string? _whereClause;
+    private string? _comment;
+
     /// <summary>
-    /// Servicio para registrar eventos de impresión de tarjetas.
+    /// Agrega un comentario SQL al inicio del UPDATE para trazabilidad o debugging.
     /// </summary>
-    public interface IRegistraImpresionService
+    /// <param name="comment">Texto del comentario.</param>
+    /// <returns>Instancia modificada de <see cref="UpdateQueryBuilder"/>.</returns>
+    public UpdateQueryBuilder WithComment(string comment)
     {
-        /// <summary>
-        /// Registra la impresión en las tablas correspondientes.
-        /// </summary>
-        /// <param name="postRegistraImpresionDto">Datos necesarios para el registro.</param>
-        /// <returns><see langword="true"/> si el registro fue exitoso; en caso contrario <see langword="false"/>.</returns>
-        Task<bool> RegistraImpresion(PostRegistraImpresionDto postRegistraImpresionDto);
+        if (!string.IsNullOrWhiteSpace(comment))
+            _comment = $"-- {comment}";
+        return this;
+    }
+
+    /// <summary>
+    /// Define una columna y su nuevo valor a actualizar.
+    /// </summary>
+    /// <param name="column">Nombre de la columna.</param>
+    /// <param name="value">Valor a establecer.</param>
+    /// <returns>Instancia modificada del builder.</returns>
+    public UpdateQueryBuilder Set(string column, object? value)
+    {
+        _setColumns[column] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula WHERE para el UPDATE usando SQL crudo.
+    /// </summary>
+    /// <param name="sql">Condición SQL como cadena.</param>
+    /// <returns>Instancia modificada del builder.</returns>
+    public UpdateQueryBuilder Where(string sql)
+    {
+        _whereClause = sql;
+        return this;
+    }
+
+    /// <summary>
+    /// Agrega una cláusula WHERE para el UPDATE utilizando expresiones lambda.
+    /// </summary>
+    /// <typeparam name="T">Tipo de objeto sobre el cual se basa la expresión.</typeparam>
+    /// <param name="expression">Expresión lambda que representa la condición WHERE.</param>
+    /// <returns>Instancia modificada del builder.</returns>
+    public UpdateQueryBuilder Where<T>(Expression<Func<T, bool>> expression)
+    {
+        _whereClause = ExpressionToSqlConverter.Convert(expression);
+        return this;
+    }
+
+    /// <summary>
+    /// Construye y retorna la consulta UPDATE generada.
+    /// </summary>
+    public QueryResult Build()
+    {
+        if (string.IsNullOrWhiteSpace(_tableName))
+            throw new InvalidOperationException("Debe especificarse el nombre de la tabla para UPDATE.");
+
+        if (_setColumns.Count == 0)
+            throw new InvalidOperationException("Debe especificar al menos una columna para actualizar.");
+
+        var sb = new StringBuilder();
+
+        if (!string.IsNullOrWhiteSpace(_comment))
+            sb.AppendLine(_comment);
+
+        var fullTable = string.IsNullOrWhiteSpace(_library) ? _tableName : $"{_library}.{_tableName}";
+        sb.Append($"UPDATE {fullTable} SET ");
+
+        var sets = _setColumns
+            .Select(pair => $"{pair.Key} = {SqlHelper.FormatValue(pair.Value)}");
+
+        sb.Append(string.Join(",", sets));
+
+        if (!string.IsNullOrWhiteSpace(_whereClause))
+        {
+            sb.Append(" WHERE ");
+            sb.Append(_whereClause);
+        }
+
+        return new QueryResult
+        {
+            Sql = sb.ToString()
+        };
     }
 }
 
+Por lo tanto me dan los siguientes errores:
 
+Severity	Code	Description	Project	File	Line	Suppression State	Details
+Error (active)	CS1729	'UpdateQueryBuilder' does not contain a constructor that takes 3 arguments	MS_BAN_43_Embosado_Tarjetas_Debito	C:\Git\MS_BAN_43_EmbosadoTarjetasDebito\BACKEND\MS_BAN_43_Embosado_Tarjetas_Debito\Repository\IRepository\RegistraImpresion\RegistraImpresionRepository.cs	42		
+Severity	Code	Description	Project	File	Line	Suppression State	Details
+Error (active)	CS1061	'UpdateQueryBuilder' does not contain a definition for 'WhereEq' and no accessible extension method 'WhereEq' accepting a first argument of type 'UpdateQueryBuilder' could be found (are you missing a using directive or an assembly reference?)	MS_BAN_43_Embosado_Tarjetas_Debito	C:\Git\MS_BAN_43_EmbosadoTarjetasDebito\BACKEND\MS_BAN_43_Embosado_Tarjetas_Debito\Repository\IRepository\RegistraImpresion\RegistraImpresionRepository.cs	75		
 
-// ================================================================
-// RegistraImpresionService.cs
-// ================================================================
-using Connections.Abstractions;
-using Microsoft.AspNetCore.Http;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.RegistraImpresion;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Repository.IRepository.RegistraImpresion;
+Entonces mejora la clase UpdateQueryBuilder, siempre considerando que SqlDialect.Db2i debe ser opcional, ademas crea el método WhereEq que hace falta.
+    Y tambien un método WhereNot, cuando el Where sea distinto, y si hay alguna otra opción incluyela.
 
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.RegistraImpresion
-{
-    /// <summary>
-    /// Implementación del servicio de registro de impresión.
-    /// </summary>
-    /// <param name="_connection">Conexión a base de datos (AS/400).</param>
-    /// <param name="_contextAccessor">Accessor del contexto HTTP (opcional para logging/trazabilidad).</param>
-    public class RegistraImpresionService(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor)
-        : IRegistraImpresionService
-    {
-        /// <inheritdoc />
-        public async Task<bool> RegistraImpresion(PostRegistraImpresionDto postRegistraImpresionDto)
-        {
-            var repo = new RegistraImpresionRepository(_connection, _contextAccessor);
-            // No hay I/O previo aquí; mantenemos la firma async por consistencia.
-            await Task.Yield();
-
-            repo.GuardaImpresionUNI5400(postRegistraImpresionDto, out bool exito);
-            return exito;
-        }
-    }
-}
-
-
-
-
-// ================================================================
-// RegistraImpresionRepository.cs
-// ================================================================
-using Connections.Abstractions;
-using Microsoft.AspNetCore.Http;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.RegistraImpresion;
-using QueryBuilder.Builders;
-using QueryBuilder.Enums;
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Repository.IRepository.RegistraImpresion
-{
-    /// <summary>
-    /// Repositorio para persistir el registro de impresión en AS/400.
-    /// </summary>
-    /// <param name="_connection">Conexión a base de datos.</param>
-    /// <param name="_contextAccessor">Accessor del contexto HTTP (opcional para logging/trazabilidad).</param>
-    public class RegistraImpresionRepository(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor)
-    {
-        /// <summary>
-        /// Actualiza <c>S38FILEBA.UNI5400</c> con la fecha, hora y usuario que realizó la impresión.
-        /// Además, si el <paramref name="postRegistraImpresionDto"/> trae el nombre para la tarjeta,
-        /// actualiza <c>S38FILEBA.UNI00MTA.MTNET</c>.
-        /// </summary>
-        /// <param name="postRegistraImpresionDto">DTO con los datos de impresión.</param>
-        /// <param name="exito">Indica si la operación fue exitosa.</param>
-        public void GuardaImpresionUNI5400(PostRegistraImpresionDto postRegistraImpresionDto, out bool exito)
-        {
-            _connection.Open();
-
-            var now = DateTime.Now;
-            // Formatos que usa la tabla (numéricos YYYYMMDD y HHMMSS)
-            int fechaImpresion = now.Year * 10000 + now.Month * 100 + now.Day;
-            int horaImpresion  = now.Hour * 10000 + now.Minute * 100 + now.Second;
-
-            string numeroTarjeta   = postRegistraImpresionDto.NumeroTarjeta?.Trim() ?? string.Empty;
-            string usuarioImpresor = postRegistraImpresionDto.UsuarioICBS?.Trim() ?? string.Empty;
-
-            // ========================= UPDATE S38FILEBA.UNI5400 =========================
-            // UPDATE S38FILEBA.UNI5400
-            //    SET ST_FECHA_IMPRESION = ?,
-            //        ST_HORA_IMPRESION  = ?,
-            //        ST_USUARIO_IMPRESION = ?
-            //  WHERE ST_CODIGO_TARJETA = ?
-            var updUni5400 = new UpdateQueryBuilder("UNI5400", "S38FILEBA", SqlDialect.Db2i)
-                .Set("ST_FECHA_IMPRESION",  fechaImpresion)
-                .Set("ST_HORA_IMPRESION",   horaImpresion)
-                .Set("ST_USUARIO_IMPRESION",usuarioImpresor)
-                .WhereEq("ST_CODIGO_TARJETA", numeroTarjeta)
-                .Build();
-
-            using (var cmd = _connection.GetDbCommand(updUni5400, _contextAccessor.HttpContext))
-            {
-                var changed = cmd.ExecuteNonQuery();
-                exito = changed > 0;
-            }
-
-            // Si actualizó UNI5400, actualizar también el nombre impreso en UNI00MTA (si viene).
-            if (exito && !string.IsNullOrWhiteSpace(postRegistraImpresionDto.NombreEnTarjeta))
-            {
-                GuardaNombreUNI00MTA(numeroTarjeta, postRegistraImpresionDto.NombreEnTarjeta!);
-            }
-        }
-
-        /// <summary>
-        /// Actualiza el nombre impreso en <c>S38FILEBA.UNI00MTA</c>.
-        /// </summary>
-        /// <param name="codigoTarjeta">Número/código de la tarjeta (MTCTJ).</param>
-        /// <param name="nombreEnTarjeta">Nombre a imprimir (MTNET).</param>
-        private void GuardaNombreUNI00MTA(string codigoTarjeta, string nombreEnTarjeta)
-        {
-            // ========================= UPDATE S38FILEBA.UNI00MTA =========================
-            // UPDATE S38FILEBA.UNI00MTA
-            //    SET MTNET = ?
-            //  WHERE MTCTJ = ?
-            var updUni00mta = new UpdateQueryBuilder("UNI00MTA", "S38FILEBA", SqlDialect.Db2i)
-                .Set("MTNET", nombreEnTarjeta?.Trim() ?? string.Empty)
-                .WhereEq("MTCTJ", codigoTarjeta?.Trim() ?? string.Empty)
-                .Build();
-
-            using var cmd = _connection.GetDbCommand(updUni00mta, _contextAccessor.HttpContext);
-            cmd.ExecuteNonQuery();
-        }
-    }
-}
-
-
-
+    Entregame la clase completa.
