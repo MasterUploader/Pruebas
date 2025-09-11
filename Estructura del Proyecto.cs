@@ -1,213 +1,197 @@
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.ValidaImpresion;
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion
-{
-    /// <summary>
-    /// Interfaz del servicio de validación de impresión.
-    /// </summary>
-    public interface IValidaImpresionService
-    {
-        /// <summary>
-        /// Valida si la tarjeta ya fue impresa (consultando UNI5400).
-        /// </summary>
-        /// <param name="getValidaImpresionDto">Parámetros de validación.</param>
-        /// <returns>DTO con el resultado de la validación.</returns>
-        Task<GetValidaImpresionResponseDto> ValidaImpresionAsync(GetValidaImpresionDto getValidaImpresionDto);
-    }
-}
-
-
-using Connections.Abstractions;
-using Microsoft.AspNetCore.Http;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.ValidaImpresion;
-using QueryBuilder.Builders;
-using QueryBuilder.Enums;
-using QueryBuilder.Helpers;
-using System.Data.Common;
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion
-{
-    /// <summary>
-    /// Servicio que valida si una tarjeta fue impresa consultando la tabla S38FILEBA.UNI5400.
-    /// </summary>
-    /// <remarks>
-    /// Criterio: existe registro para ST_CODIGO_TARJETA con fecha/hora de impresión &gt; 0 y usuario no vacío.
-    /// </remarks>
-    public class ValidaImpresionService : IValidaImpresionService
-    {
-        private readonly IDatabaseConnection _connection;
-        private readonly IHttpContextAccessor _contextAccessor;
-
-        public ValidaImpresionService(IDatabaseConnection connection, IHttpContextAccessor contextAccessor)
-        {
-            _connection = connection;
-            _contextAccessor = contextAccessor;
-        }
-
-        /// <inheritdoc />
-        public async Task<GetValidaImpresionResponseDto> ValidaImpresionAsync(GetValidaImpresionDto getValidaImpresionDto)
-        {
-            var resp = new GetValidaImpresionResponseDto();
-
-            // Validación básica
-            var codigoTarjeta = (getValidaImpresionDto?.CodigoTarjeta ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(codigoTarjeta))
-            {
-                resp.Imprime = false;
-                resp.Codigo.Status = "BadRequest";
-                resp.Codigo.Error = "400";
-                resp.Codigo.Message = "El parámetro 'CodigoTarjeta' es obligatorio.";
-                resp.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
-                return resp;
-            }
-
-            _connection.Open();
-            if (!_connection.IsConnected)
-            {
-                resp.Imprime = false;
-                resp.Codigo.Status = "BadRequest";
-                resp.Codigo.Error = "400";
-                resp.Codigo.Message = "No hay conexión con la base de datos.";
-                resp.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
-                return resp;
-            }
-
-            // Construcción de SELECT con RestUtilities.QueryBuilder
-            // WHERE:
-            //   ST_CODIGO_TARJETA = <tarjeta>
-            //   AND ST_FECHA_IMPRESION > 0
-            //   AND ST_HORA_IMPRESION > 0
-            //   AND COALESCE(ST_USUARIO_IMPRESION, '') <> ''
-            // ORDER BY (para consistencia/determinismo)
-            var qb = new SelectQueryBuilder("UNI5400", "S38FILEBA")
-                .Select("ST_CODIGO_TARJETA", "ST_CENTRO_COSTO_IMPR_TARJETA", "ST_CENTRO_COSTO_APERTURA",
-                        "ST_FECHA_IMPRESION", "ST_HORA_IMPRESION", "ST_USUARIO_IMPRESION")
-                // Usamos SqlHelper.FormatValue para evitar inyección y formatear valores
-                .WhereRaw($"ST_CODIGO_TARJETA = {SqlHelper.FormatValue(codigoTarjeta)}")
-                .WhereRaw("ST_FECHA_IMPRESION > 0")
-                .WhereRaw("ST_HORA_IMPRESION > 0")
-                .WhereRaw("COALESCE(ST_USUARIO_IMPRESION, '') <> ''")
-                .OrderBy(("ST_CODIGO_TARJETA", SortDirection.Asc),
-                         ("ST_CENTRO_COSTO_IMPR_TARJETA", SortDirection.Asc),
-                         ("ST_CENTRO_COSTO_APERTURA", SortDirection.Asc),
-                         ("ST_FECHA_IMPRESION", SortDirection.Asc),
-                         ("ST_HORA_IMPRESION", SortDirection.Asc),
-                         ("ST_USUARIO_IMPRESION", SortDirection.Asc));
-
-            var query = qb.Build();
-
-            // Ejecutar
-            using var cmd = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-            cmd.CommandText = query.Sql;               // Si usas parámetros en tu builder, puedes usar GetDbCommand(query, ctx)
-            cmd.CommandType = System.Data.CommandType.Text;
-
-            using DbDataReader reader = await cmd.ExecuteReaderAsync();
-
-            if (reader.HasRows)
-            {
-                resp.Imprime = true;
-                resp.Codigo.Status = "success";
-                resp.Codigo.Error = "200";
-                resp.Codigo.Message = "Tarjeta impresa";
-                resp.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
-                return resp;
-            }
-
-            resp.Imprime = false;
-            resp.Codigo.Status = "success";
-            resp.Codigo.Error = "200";
-            resp.Codigo.Message = "Tarjeta no impresa";
-            resp.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
-            return resp;
-        }
-    }
-}
-
+Actualiza estos métodos y controladores, para que usen RestUtilities.QueryBuilder:
 
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.ValidaImpresion;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.Auth;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.AuthService;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.MachineInformationService;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Utils;
-using System.Net.Mime;
 
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Controllers
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Controllers;
+
+/// <summary>
+/// Controlador AuthController, es el que contiene los Endpoints necesarios para el correcto funcionamiento de los servicios de autenticación del Sitio de embosado.
+/// </summary>
+[Route("api/[controller]")]
+[ApiController]
+public class AuthController(IAuthService _authService, ISessionManagerService _sessionManagerService, IMachineInfoService _machineInfoService) : ControllerBase
 {
     /// <summary>
-    /// Endpoints de validación de impresión.
+    /// Objeto DTO de Respuesta para autenticación.
     /// </summary>
-    [ApiController]
-    [Route("api/[controller]")]
-    [Produces(MediaTypeNames.Application.Json)]
-    public class ValidaImpresionController : ControllerBase
+    protected GetAuthResponseDto _getAuthResponseDto = new();
+    private readonly ResponseHandler _responseHandler = new();
+
+
+    /// <summary>
+    /// Método que se encarga de realizar el proceso de logueo para los usuarios del sitio de embosado de tarjetas de Debito.
+    /// </summary>
+    /// <param name="loginDto"></param>
+    /// <returns></returns>
+    [HttpPost]
+    [Route("Login")]
+    public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
     {
-        private readonly IValidaImpresionService _validaImpresion;
-        private readonly ILogger<ValidaImpresionController> _logger;
-        private readonly ResponseHandler _responseHandler = new();
+        _getAuthResponseDto = await _authService.AuthenticateAsync(loginDto);
 
-        public ValidaImpresionController(
-            IValidaImpresionService validaImpresion,
-            ILogger<ValidaImpresionController> logger)
-        {
-            _validaImpresion = validaImpresion;
-            _logger = logger;
-        }
+        return _responseHandler.HandleResponse(_getAuthResponseDto, _getAuthResponseDto.Codigo.Status);
+    }
 
-        /// <summary>
-        /// Valida si la tarjeta fue impresa (consulta UNI5400).
-        /// </summary>
-        /// <param name="getValidaImpresionDto">Parámetros de búsqueda.</param>
-        /// <returns>Respuesta HTTP con el resultado de la validación.</returns>
-        [HttpGet("ValidaImpresion")]
-        [ProducesResponseType(typeof(GetValidaImpresionResponseDto), StatusCodes.Status200OK)]
-        [ProducesResponseType(typeof(GetValidaImpresionResponseDto), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> ValidaImpresion([FromQuery] GetValidaImpresionDto getValidaImpresionDto)
-        {
-            if (!ModelState.IsValid)
-            {
-                var msg = string.Join(" | ", ModelState.Values
-                    .SelectMany(v => v.Errors)
-                    .Select(e => string.IsNullOrWhiteSpace(e.ErrorMessage) ? e.Exception?.Message : e.ErrorMessage)
-                    .Where(s => !string.IsNullOrWhiteSpace(s)));
+    /// <summary>
+    /// Clase que se encarga de actualizar el estado de la sesión del usuario, agrega 15 minutos más al tiempo de sesión.
+    /// </summary>
+    /// <param name="userName"></param>
+    /// <returns></returns>
+    [HttpPost]
+    [Route("Heartbeat")]
+    public async Task<IActionResult> HeartBeat([FromBody] string userName)
+    {
+        HeartbeatService _heartbeatService = new(_sessionManagerService, _machineInfoService);
+        // _getAuthResponseDto = await _heartbeatService.HeartbeatAsync(userName)
 
-                var bad = BuildError("BadRequest", "400",
-                    string.IsNullOrWhiteSpace(msg) ? "Solicitud inválida." : msg);
+        // return _responseHandler.HandleResponse(_getAuthResponseDto, _getAuthResponseDto.Codigo.Status)
 
-                return _responseHandler.HandleResponse(bad, bad.Codigo.Status);
-            }
-
-            try
-            {
-                _logger.LogInformation("Validando impresión de tarjeta. Filtros: {@dto}", getValidaImpresionDto);
-
-                var respuesta = await _validaImpresion.ValidaImpresionAsync(getValidaImpresionDto);
-
-                // Garantiza respuesta no nula para el handler
-                respuesta ??= BuildError("BadRequest", "400", "No se obtuvo respuesta del servicio.");
-
-                return _responseHandler.HandleResponse(respuesta, respuesta.Codigo.Status);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error al validar impresión. Filtros: {@dto}", getValidaImpresionDto);
-
-                var error = BuildError("BadRequest", "400", ex.Message);
-                return _responseHandler.HandleResponse(error, error.Codigo.Status);
-            }
-        }
-
-        private static GetValidaImpresionResponseDto BuildError(string status, string code, string message)
-            => new GetValidaImpresionResponseDto
-            {
-                Imprime = false,
-                Codigo = new GetValidaImpresionResponseDto.CodigoRespuesta
-                {
-                    Status = status,
-                    Error = code,
-                    Message = message,
-                    TimeStamp = DateTime.Now.ToString("HH:mm:ss tt")
-                }
-            };
+        return Ok();
     }
 }
 
+
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.Auth;
+
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.AuthService;
+
+/// <summary>
+/// Interfaz IAuthService, de la clase de Servicio AuthService.
+/// </summary>
+public interface IAuthService
+{
+    /// <summary>
+    /// Método AuthenticateAsync, encargado del proceso de Logueo de un usuario.
+    /// Válida el usuario y contraseña contra el AD, devolviendo los parametros de AD.
+    /// Si los párametros coinciden con los autorizados se procede con el logueo.
+    /// </summary>
+    /// <param name="getAuthDto">Objeto de tipo LoginDto.</param>
+    /// <returns>Retorna respuesta HTTP con objeto GetAuthResponseDto.</returns>
+    Task<GetAuthResponseDto> AuthenticateAsync(LoginDto getAuthDto);
+}
+
+
+using API_1_TERCEROS_REMESADORAS.Utilities;
+using Connections.Abstractions;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.Auth;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Repository.IRepository.Auth;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.MachineInformationService;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Utils;
+using SUNITP.LIB.ActiveDirectoryV2;
+using System.Data;
+using System.Data.Common;
+using System.Data.OleDb;
+
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.AuthService;
+
+/// <summary>
+/// Clase de servicio AuthService, encargada del proceso de autenticación de usuarios para el sitio de embosado de tarjetas de debito.
+/// </summary>
+/// <param name="_machineInfoService">Instancia de IMachineInfoService.</param>
+/// <param name="_sessionManagerService">Instancia de ISessionManagerService.</param>
+/// <param name="_connection">Instancia de IDatabaseConnection.</param>
+/// <param name="_contextAccessor">Instancia de IHttpContextAccessor.</param>
+public class AuthService(IMachineInfoService _machineInfoService, ISessionManagerService _sessionManagerService, IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : IAuthService
+{
+    /// <inheritdoc />
+    protected ActiveDirectoryHN _activeDirectoryHN = new();
+    /// <inheritdoc />
+    protected GetAuthResponseDto _getAuthResponseDto = new();
+
+    /// <summary>
+    /// Método de Autenticación asincrono.
+    /// </summary>
+    /// <param name="getAuthDto">Objeto Dto que se recibe para realizar el logueo.</param>
+    /// <returns>Retorna un objeto GetauthResponseDto.</returns>
+    public async Task<GetAuthResponseDto> AuthenticateAsync(LoginDto getAuthDto)
+    {
+
+        try
+        {
+            _connection.Open();
+
+            AuthServiceRepository _authServiceRepository = new(_machineInfoService, _connection, _contextAccessor);
+
+            bool estado = _activeDirectoryHN.GetActiveDirectory(out string domain, out string activeDirectory); //Valida si existe domino y AD en el archivo ConnectionData.json
+            if (!estado) return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "No se encontro el Dominio de Red o Active Directory", "1", "vacio", "Unauthorized");
+            var auth = new ServiceActiveDirectoryV2();
+            var autenticateUser = auth.AutenticateUser(domain, getAuthDto.User, getAuthDto.Password, "");
+
+            if (!autenticateUser.IAuthenticationAuthorized) return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Credenciales Inválidas", "1", "vacio", "Unauthorized");
+
+            bool bandera = false;
+            foreach (var _ in from string role in autenticateUser.UserRoles
+                              where role.Equals(activeDirectory)
+                              select new { })
+            {
+                bandera = true;
+            }
+
+            if (!bandera) return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Usuario no pertenece al Grupo AD", "1", "vacio", "Unauthorized");
+
+            await Task.Delay(500);
+            var token = _sessionManagerService.GenerateTokenAsync(getAuthDto);
+
+            _getAuthResponseDto.Token.Token = token.Result.Item2;
+            _getAuthResponseDto.Token.Expiration = token.Result.Item1.ValidTo;
+
+            //Datos Usuario
+            _getAuthResponseDto.ActiveDirectoryData.NombreUsuario = autenticateUser.UserName;
+            _getAuthResponseDto.ActiveDirectoryData.UsuarioICBS = TraeUsuarioICBS(getAuthDto.User);
+
+            foreach (var value in from propiedades in autenticateUser.UserProperties
+                                  where propiedades.propertyName.Equals("departmentNumber")
+                                  from value in propiedades.propertyValues
+                                  select value)
+            {
+                _getAuthResponseDto.ActiveDirectoryData.AgenciaAperturaCodigo = value;
+                _getAuthResponseDto.ActiveDirectoryData.AgenciaImprimeCodigo = value;
+            }
+
+            return _authServiceRepository.RegistraLogsUsuario(_getAuthResponseDto, getAuthDto.User, "Logueado Exitosamente", "0", token.Result.Item2, "success");
+        }
+        catch (Exception ex)
+        {
+            _getAuthResponseDto.Codigo.Message = ex.Message;
+            _getAuthResponseDto.Codigo.Error = "400";
+            _getAuthResponseDto.Codigo.Status = "BadRequest";
+            _getAuthResponseDto.Codigo.TimeStamp = string.Format("{0:HH:mm:ss tt}", DateTime.Now);
+
+            return _getAuthResponseDto;
+        }
+    }
+
+    private string TraeUsuarioICBS(string usuarioRed)
+    {
+        FieldsQueryL param = new();
+        string usuarioICBS = "";
+        usuarioRed = "HN" + usuarioRed;
+
+        string sqlQuery = "SELECT * FROM ICBSSMSSPN.SCP001 WHERE SCJBNA = ?";
+        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+        command.CommandText = sqlQuery;
+        command.CommandType = System.Data.CommandType.Text;
+
+        param.AddOleDbParameter(command, "SCJBNA", OleDbType.Char, usuarioRed);
+
+        using DbDataReader reader = command.ExecuteReader();
+
+        if (reader.HasRows)
+        {
+            while (reader.Read())
+            {
+                usuarioICBS = reader.GetString(reader.GetOrdinal("SCUSER"));
+            }
+        }
+
+        reader.Close();
+
+        return usuarioICBS;
+    }
+}
