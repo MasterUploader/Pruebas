@@ -1,136 +1,213 @@
-Actualiza estos metodos para que usen RestYtilities.QueryBuilder, y actualiza el controlador.
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.ValidaImpresion;
 
-    using Microsoft.AspNetCore.Mvc;
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion
+{
+    /// <summary>
+    /// Interfaz del servicio de validación de impresión.
+    /// </summary>
+    public interface IValidaImpresionService
+    {
+        /// <summary>
+        /// Valida si la tarjeta ya fue impresa (consultando UNI5400).
+        /// </summary>
+        /// <param name="getValidaImpresionDto">Parámetros de validación.</param>
+        /// <returns>DTO con el resultado de la validación.</returns>
+        Task<GetValidaImpresionResponseDto> ValidaImpresionAsync(GetValidaImpresionDto getValidaImpresionDto);
+    }
+}
+
+
+using Connections.Abstractions;
+using Microsoft.AspNetCore.Http;
+using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.ValidaImpresion;
+using QueryBuilder.Builders;
+using QueryBuilder.Enums;
+using QueryBuilder.Helpers;
+using System.Data.Common;
+
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion
+{
+    /// <summary>
+    /// Servicio que valida si una tarjeta fue impresa consultando la tabla S38FILEBA.UNI5400.
+    /// </summary>
+    /// <remarks>
+    /// Criterio: existe registro para ST_CODIGO_TARJETA con fecha/hora de impresión &gt; 0 y usuario no vacío.
+    /// </remarks>
+    public class ValidaImpresionService : IValidaImpresionService
+    {
+        private readonly IDatabaseConnection _connection;
+        private readonly IHttpContextAccessor _contextAccessor;
+
+        public ValidaImpresionService(IDatabaseConnection connection, IHttpContextAccessor contextAccessor)
+        {
+            _connection = connection;
+            _contextAccessor = contextAccessor;
+        }
+
+        /// <inheritdoc />
+        public async Task<GetValidaImpresionResponseDto> ValidaImpresionAsync(GetValidaImpresionDto getValidaImpresionDto)
+        {
+            var resp = new GetValidaImpresionResponseDto();
+
+            // Validación básica
+            var codigoTarjeta = (getValidaImpresionDto?.CodigoTarjeta ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(codigoTarjeta))
+            {
+                resp.Imprime = false;
+                resp.Codigo.Status = "BadRequest";
+                resp.Codigo.Error = "400";
+                resp.Codigo.Message = "El parámetro 'CodigoTarjeta' es obligatorio.";
+                resp.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
+                return resp;
+            }
+
+            _connection.Open();
+            if (!_connection.IsConnected)
+            {
+                resp.Imprime = false;
+                resp.Codigo.Status = "BadRequest";
+                resp.Codigo.Error = "400";
+                resp.Codigo.Message = "No hay conexión con la base de datos.";
+                resp.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
+                return resp;
+            }
+
+            // Construcción de SELECT con RestUtilities.QueryBuilder
+            // WHERE:
+            //   ST_CODIGO_TARJETA = <tarjeta>
+            //   AND ST_FECHA_IMPRESION > 0
+            //   AND ST_HORA_IMPRESION > 0
+            //   AND COALESCE(ST_USUARIO_IMPRESION, '') <> ''
+            // ORDER BY (para consistencia/determinismo)
+            var qb = new SelectQueryBuilder("UNI5400", "S38FILEBA")
+                .Select("ST_CODIGO_TARJETA", "ST_CENTRO_COSTO_IMPR_TARJETA", "ST_CENTRO_COSTO_APERTURA",
+                        "ST_FECHA_IMPRESION", "ST_HORA_IMPRESION", "ST_USUARIO_IMPRESION")
+                // Usamos SqlHelper.FormatValue para evitar inyección y formatear valores
+                .WhereRaw($"ST_CODIGO_TARJETA = {SqlHelper.FormatValue(codigoTarjeta)}")
+                .WhereRaw("ST_FECHA_IMPRESION > 0")
+                .WhereRaw("ST_HORA_IMPRESION > 0")
+                .WhereRaw("COALESCE(ST_USUARIO_IMPRESION, '') <> ''")
+                .OrderBy(("ST_CODIGO_TARJETA", SortDirection.Asc),
+                         ("ST_CENTRO_COSTO_IMPR_TARJETA", SortDirection.Asc),
+                         ("ST_CENTRO_COSTO_APERTURA", SortDirection.Asc),
+                         ("ST_FECHA_IMPRESION", SortDirection.Asc),
+                         ("ST_HORA_IMPRESION", SortDirection.Asc),
+                         ("ST_USUARIO_IMPRESION", SortDirection.Asc));
+
+            var query = qb.Build();
+
+            // Ejecutar
+            using var cmd = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+            cmd.CommandText = query.Sql;               // Si usas parámetros en tu builder, puedes usar GetDbCommand(query, ctx)
+            cmd.CommandType = System.Data.CommandType.Text;
+
+            using DbDataReader reader = await cmd.ExecuteReaderAsync();
+
+            if (reader.HasRows)
+            {
+                resp.Imprime = true;
+                resp.Codigo.Status = "success";
+                resp.Codigo.Error = "200";
+                resp.Codigo.Message = "Tarjeta impresa";
+                resp.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
+                return resp;
+            }
+
+            resp.Imprime = false;
+            resp.Codigo.Status = "success";
+            resp.Codigo.Error = "200";
+            resp.Codigo.Message = "Tarjeta no impresa";
+            resp.Codigo.TimeStamp = DateTime.Now.ToString("HH:mm:ss tt");
+            return resp;
+        }
+    }
+}
+
+
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.ValidaImpresion;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion;
 using MS_BAN_43_Embosado_Tarjetas_Debito.Utils;
-using System.Data.OleDb;
+using System.Net.Mime;
 
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Controllers;
-
-/// <summary>
-/// Controlador que contiene los Endpoints de Validación de la impresión.
-/// </summary>
-[Route("api/[controller]")]
-[ApiController]
-public class ValidaImpresionController (IValidaImpresionService _validaImpresion) : ControllerBase
-{
-    /// <inheritdoc />
-    protected GetValidaImpresionResponseDto _getValidaImpresionResponseDto = new();
-
-    private readonly ResponseHandler _responseHandler = new();
- 
-    /// <summary>
-    /// Endpoint que valida la impresión.
-    /// </summary>
-    /// <param name="getValidaImpresionDto">Objeto Dto</param>
-    /// <returns>Retorna una respuesta Http</returns>
-    [HttpGet]
-    [Route("ValidaImpresion")]
-    public async Task<IActionResult> ValidaImpresion([FromQuery] GetValidaImpresionDto getValidaImpresionDto)
-    {
-        await Task.Delay(1);
-        try
-        {
-            var respuesta = _validaImpresion.ValidaImpresion(getValidaImpresionDto);
-
-            return _responseHandler.HandleResponse(respuesta, respuesta.Codigo.Status);
-        }
-        catch (Exception ex)
-        {
-            GetValidaImpresionResponseDto getValidaImpresionResponseDto = new();
-
-            getValidaImpresionResponseDto.Imprime = true;
-            getValidaImpresionResponseDto.Codigo.Message = ex.Message;
-            getValidaImpresionResponseDto.Codigo.Status = "BadRequest";
-            getValidaImpresionResponseDto.Codigo.Error = "400";
-            getValidaImpresionResponseDto.Codigo.TimeStamp = string.Format("{0:HH:mm:ss tt}", DateTime.Now);
-
-            return _responseHandler.HandleResponse(getValidaImpresionResponseDto, getValidaImpresionResponseDto.Codigo.Status);
-        }
-    }
-}
-
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.ValidaImpresion;
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion;
-
-/// <summary>
-/// Interfaz IValidaImpresion
-/// </summary>
-public interface IValidaImpresionService
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Controllers
 {
     /// <summary>
-    /// Método encargado de Validar si la impresión se realizo correctamente.
+    /// Endpoints de validación de impresión.
     /// </summary>
-    /// <param name="getValidaImpresionDto">Objeto Dto.</param>
-    /// <returns>Retorna  objeto GetValidaImpresionResponseDto.</returns>
-    GetValidaImpresionResponseDto ValidaImpresion(GetValidaImpresionDto getValidaImpresionDto);
-}
-
-using API_1_TERCEROS_REMESADORAS.Utilities;
-using Connections.Abstractions;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Models.Dtos.ValidaImpresion;
-using System.Data.Common;
-using System.Data.OleDb;
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Services.ValidaImpresion;
-
-/// <summary>
-/// Clase de servicio ValidaImpresionService
-/// </summary>
-/// <param name="_connection">Instancia de IDatabaseConnection.</param>
-/// <param name="_contextAccessor">Instancia de IHttpContextAccessor.</param>
-public class ValidaImpresionService(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : IValidaImpresionService
-{
-    /// <inheritdoc />
-    protected GetValidaImpresionResponseDto _getValidaImpresionResponseDto = new();
-
-    /// <inheritdoc />
-    public GetValidaImpresionResponseDto ValidaImpresion(GetValidaImpresionDto getValidaImpresionDto)
+    [ApiController]
+    [Route("api/[controller]")]
+    [Produces(MediaTypeNames.Application.Json)]
+    public class ValidaImpresionController : ControllerBase
     {
-        string codigoTarjeta = getValidaImpresionDto.CodigoTarjeta;
+        private readonly IValidaImpresionService _validaImpresion;
+        private readonly ILogger<ValidaImpresionController> _logger;
+        private readonly ResponseHandler _responseHandler = new();
 
-        return BusquedaUNI5400(codigoTarjeta);
-    }
-
-    /*Busca datos en tabla S38FILEBA.UNI5400*/
-    private GetValidaImpresionResponseDto BusquedaUNI5400(string codigoTarjeta)
-    {
-        _connection.Open();
-        FieldsQueryL param = new();
-
-        //string sqlQuery = "SELECT * FROM S38FILEBA.UNI5400 WHERE ST_CODIGO_TARJETA  = ? OR ST_FECHA_IMPRESION > ? OR ST_HORA_IMPRESION > ? OR ST_USUARIO_IMPRESION != ? ORDER BY ST_CODIGO_TARJETA , ST_CENTRO_COSTO_IMPR_TARJETA , ST_CENTRO_COSTO_APERTURA , ST_FECHA_IMPRESION , ST_HORA_IMPRESION , ST_USUARIO_IMPRESION";
-        string sqlQuery = "SELECT * FROM S38FILEBA.UNI5400 WHERE ST_CODIGO_TARJETA  = ? AND (ST_FECHA_IMPRESION > ? AND ST_HORA_IMPRESION > ? AND ST_USUARIO_IMPRESION != ? ) ORDER BY ST_CODIGO_TARJETA , ST_CENTRO_COSTO_IMPR_TARJETA , ST_CENTRO_COSTO_APERTURA , ST_FECHA_IMPRESION , ST_HORA_IMPRESION , ST_USUARIO_IMPRESION";
-        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-        command.CommandText = sqlQuery;
-        command.CommandType = System.Data.CommandType.Text;
-
-        param.AddOleDbParameter(command, "ST_CODIGO_TARJETA", OleDbType.Char, codigoTarjeta);
-        param.AddOleDbParameter(command, "ST_FECHA_IMPRESION", OleDbType.Numeric, 0);
-        param.AddOleDbParameter(command, "ST_HORA_IMPRESION", OleDbType.Numeric, 0);
-        param.AddOleDbParameter(command, "ST_USUARIO_IMPRESION", OleDbType.Char, "");
-
-        using DbDataReader reader = command.ExecuteReader();
-
-        if (reader.HasRows)
+        public ValidaImpresionController(
+            IValidaImpresionService validaImpresion,
+            ILogger<ValidaImpresionController> logger)
         {
-            _getValidaImpresionResponseDto.Imprime = true;
-            _getValidaImpresionResponseDto.Codigo.Message = "Tarjeta impresa";
-            _getValidaImpresionResponseDto.Codigo.Status = "success";
-            _getValidaImpresionResponseDto.Codigo.Error = "200";
-            _getValidaImpresionResponseDto.Codigo.TimeStamp = string.Format("{0:HH:mm:ss tt}", DateTime.Now);
-
-            return _getValidaImpresionResponseDto;
+            _validaImpresion = validaImpresion;
+            _logger = logger;
         }
 
-        _getValidaImpresionResponseDto.Imprime = false;
-        _getValidaImpresionResponseDto.Codigo.Message = "Tarjeta no impresa";
-        _getValidaImpresionResponseDto.Codigo.Status = "success";
-        _getValidaImpresionResponseDto.Codigo.Error = "200";
-        _getValidaImpresionResponseDto.Codigo.TimeStamp = string.Format("{0:HH:mm:ss tt}", DateTime.Now);
+        /// <summary>
+        /// Valida si la tarjeta fue impresa (consulta UNI5400).
+        /// </summary>
+        /// <param name="getValidaImpresionDto">Parámetros de búsqueda.</param>
+        /// <returns>Respuesta HTTP con el resultado de la validación.</returns>
+        [HttpGet("ValidaImpresion")]
+        [ProducesResponseType(typeof(GetValidaImpresionResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(GetValidaImpresionResponseDto), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> ValidaImpresion([FromQuery] GetValidaImpresionDto getValidaImpresionDto)
+        {
+            if (!ModelState.IsValid)
+            {
+                var msg = string.Join(" | ", ModelState.Values
+                    .SelectMany(v => v.Errors)
+                    .Select(e => string.IsNullOrWhiteSpace(e.ErrorMessage) ? e.Exception?.Message : e.ErrorMessage)
+                    .Where(s => !string.IsNullOrWhiteSpace(s)));
 
-        return _getValidaImpresionResponseDto;
+                var bad = BuildError("BadRequest", "400",
+                    string.IsNullOrWhiteSpace(msg) ? "Solicitud inválida." : msg);
+
+                return _responseHandler.HandleResponse(bad, bad.Codigo.Status);
+            }
+
+            try
+            {
+                _logger.LogInformation("Validando impresión de tarjeta. Filtros: {@dto}", getValidaImpresionDto);
+
+                var respuesta = await _validaImpresion.ValidaImpresionAsync(getValidaImpresionDto);
+
+                // Garantiza respuesta no nula para el handler
+                respuesta ??= BuildError("BadRequest", "400", "No se obtuvo respuesta del servicio.");
+
+                return _responseHandler.HandleResponse(respuesta, respuesta.Codigo.Status);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al validar impresión. Filtros: {@dto}", getValidaImpresionDto);
+
+                var error = BuildError("BadRequest", "400", ex.Message);
+                return _responseHandler.HandleResponse(error, error.Codigo.Status);
+            }
+        }
+
+        private static GetValidaImpresionResponseDto BuildError(string status, string code, string message)
+            => new GetValidaImpresionResponseDto
+            {
+                Imprime = false,
+                Codigo = new GetValidaImpresionResponseDto.CodigoRespuesta
+                {
+                    Status = status,
+                    Error = code,
+                    Message = message,
+                    TimeStamp = DateTime.Now.ToString("HH:mm:ss tt")
+                }
+            };
     }
 }
+
