@@ -2,53 +2,51 @@ using Connections.Abstractions;
 using RestUtilities.QueryBuilder;
 using System.Data.Common;
 
-namespace TuNamespace;
+namespace Adquirencia.Services;
 
 /// <summary>
-/// Servicio que sustituye el CALL FECTIM de CLLE usando un SELECT a DB2 for i.
+/// DTO que modela la tabla BNKPRD01.TAP001 para consultas tipadas.
 /// </summary>
-/// <remarks>
-/// - Produce FAAAAMMDD (yyyyMMdd) y HORA (HHmmss) como en el PGM original.
-/// - Usa SYSIBM.SYSDUMMY1 (tabla dummy: siempre 1 fila).
-/// - Devuelve tupla con bandera de éxito, fecha y hora.
-/// </remarks>
-public class FechaHoraService(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor)
+public class TAP001
+{
+    /// <summary>Clave de banco (NUMERIC 3).</summary>
+    public int DSBK { get; set; }
+
+    /// <summary>
+    /// Fecha de sistema en formato IBM i CYYMMDD (NUMERIC 7).
+    /// C = 0 => 19xx, C = 1 => 20xx.
+    /// </summary>
+    public int DSCDT { get; set; }
+}
+
+/// <summary>
+/// Servicio con la lógica equivalente a la subrutina RPGLE VerFecha.
+/// </summary>
+public class FechaService(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor)
 {
     /// <summary>
-    /// Equivalente a: 
-    /// <c>CALL FECTIM PARM(&FAAAAMMDD &HORA)</c>.
+    /// Lee DSCDT desde BNKPRD01.TAP001 (DSBK=001) y retorna:
+    /// - el valor bruto DSCDT (CYYMMDD)
+    /// - la fecha formateada YYYYMMDD
     /// </summary>
-    /// <returns>
-    /// (respuesta: true/false, fecsys: "yyyyMMdd" (8), horasys: "HHmmss" (7))
-    /// </returns>
-    public (bool respuesta, string fecsys, string horasys) FecReal()
+    /// <returns>found, dscdtCyyMmDd, yyyyMMdd</returns>
+    public (bool found, int dscdt, string yyyyMMdd) VerFecha()
     {
-        // Variables de salida: simulan los PARM de CLLE.
-        string fecsys = string.Empty;   // &FAAAAMMDD (8)
-        string horasys = string.Empty;  // &HORA      (7)
+        // Valores de salida predeterminados para conservar contrato estable.
+        var dscdt = 0;            // valor crudo CYYMMDD
+        var yyyyMMdd = string.Empty;
 
         try
         {
             _connection.Open();
 
-            // ================== SQL generado ==================
-            // SELECT
-            //   VARCHAR_FORMAT(CURRENT_DATE, 'YYYYMMDD') AS FAAAAMMDD,
-            //   VARCHAR_FORMAT(CURRENT_TIME, 'HH24MISS') AS HORA
-            // FROM SYSIBM.SYSDUMMY1
-            //
-            // Notas:
-            // - 'YYYYMMDD' -> 8 caracteres (yyyyMMdd)
-            // - 'HH24MISS' -> 6 caracteres (HHmmss). En CLLE definiste LEN(7),
-            //   así que abajo lo ajustamos a longitud 7 con PadRight(7).
-            // ==================================================
+            // SELECT DSCDT FROM BNKPRD01.TAP001 WHERE DSBK = 1 FETCH FIRST 1 ROW ONLY
+            // - Se usa DTO para habilitar lambdas tipadas y evitar cadenas mágicas.
             var query = QueryBuilder.Core.QueryBuilder
-                .From("SYSDUMMY1", "SYSIBM")
-                .Select(
-                    "VARCHAR_FORMAT(CURRENT_DATE, 'YYYYMMDD') AS FAAAAMMDD",
-                    "VARCHAR_FORMAT(CURRENT_TIME, 'HH24MISS') AS HORA"
-                )
-                .FetchNext(1)
+                .From("TAP001", "BNKPRD01")
+                .Select<TAP001>(x => x.DSCDT)             // solo la columna necesaria
+                .Where<TAP001>(x => x.DSBK == 1)          // DSBK = 001 en RPGLE
+                .FetchNext(1)                              // equivalente a CHAIN + %FOUND
                 .Build();
 
             using var cmd = _connection.GetDbCommand(_contextAccessor.HttpContext!);
@@ -56,22 +54,42 @@ public class FechaHoraService(IDatabaseConnection _connection, IHttpContextAcces
 
             using var rd = cmd.ExecuteReader();
             if (!rd.Read())
-                return (false, fecsys, horasys);
+                return (false, dscdt, yyyyMMdd);
 
-            // Lectura directa por índice para máximo rendimiento
-            fecsys  = rd.GetString(0);                 // "yyyyMMdd" (8)
-            horasys = rd.GetString(1).PadRight(7);     // "HHmmss" -> ajustado a LEN(7)
+            // Lectura directa: índice 0 porque solo seleccionamos DSCDT.
+            dscdt = rd.GetInt32(0);
 
-            return (true, fecsys, horasys);
-        }
-        catch
-        {
-            // Si hay error, mantenemos contrato similar al PGM (bandera false)
-            return (false, fecsys, horasys);
+            // Conversión de CYYMMDD → YYYYMMDD para uso homogéneo en .NET/SQL.
+            yyyyMMdd = ConvertCyyMmDdToYyyyMmDd(dscdt);
+
+            return (true, dscdt, yyyyMMdd);
         }
         finally
         {
             _connection.Close();
         }
+    }
+
+    /// <summary>
+    /// Convierte un entero en formato IBM i CYYMMDD (p. ej. 1240912) a "YYYYMMDD".
+    /// </summary>
+    /// <remarks>
+    /// - C: siglo relativo a 1900 (0=>1900, 1=>2000, etc.).  
+    /// - YY: año dentro del siglo.  
+    /// - MM: mes, DD: día.
+    /// </remarks>
+    private static string ConvertCyyMmDdToYyyyMmDd(int cyymmdd)
+    {
+        // Separación de C, YY, MM, DD usando división/módulo para evitar parseos de string.
+        var c  =  cyymmdd / 1000000;                 // dígito del siglo
+        var yy = (cyymmdd / 10000) % 100;            // dos dígitos de año
+        var mm = (cyymmdd / 100)   % 100;            // mes
+        var dd =  cyymmdd          % 100;            // día
+
+        // Año absoluto: 1900 + (C * 100) + YY. Para C=1 => 2000+YY.
+        var yyyy = 1900 + (c * 100) + yy;
+
+        // Composición sin separadores para uso en sistemas que requieren 8 caracteres.
+        return $"{yyyy:0000}{mm:00}{dd:00}";
     }
 }
