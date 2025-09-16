@@ -1,83 +1,120 @@
-Convierteleo a clase
+namespace Adquirencia.Models.Db2;
 
+/// <summary>
+/// Representa la tabla BNKPRD01.CFP102.
+/// Contiene información de sucursales bancarias, incluyendo nombre, dirección,
+/// códigos regionales, feriados y parámetros operativos.
+/// </summary>
+public class CFP102()
+{
+    /// <summary>Bank Number (NUMERIC 3).</summary>
+    public int CFBANK { get; set; }
 
-Estructura de la tabla BNKPRD01/CFP102
-CFBANK             CFP102             NUMERIC                   3        
-CFBRCH             CFP102             NUMERIC                   3        
-CFBRNM             CFP102             CHARACTER                40        
-CFBRA1             CFP102             CHARACTER                30        
-CFBRA2             CFP102             CHARACTER                30        
-CFBZIP             CFP102             NUMERIC                   5        
-CFBRPC             CFP102             CHARACTER                10        
-CFBRST             CFP102             NUMERIC                   2        
-CFBRRG             CFP102             DECIMAL                   3        
-CFBSB              CFP102             NUMERIC                   6        
-CFBMGN             CFP102             CHARACTER                30        
-CFHB01             CFP102             DECIMAL                   7        
-CFHB02             CFP102             DECIMAL                   7        
-CFHB03             CFP102             DECIMAL                   7       
-CFHB04             CFP102             DECIMAL                   7       
-CFHB05             CFP102             DECIMAL                   7       
-CFHB06             CFP102             DECIMAL                   7       
-CFHB07             CFP102             DECIMAL                   7       
-CFHB08             CFP102             DECIMAL                   7       
-CFHB09             CFP102             DECIMAL                   7       
-CFHB10             CFP102             DECIMAL                   7       
-CFHB11             CFP102             DECIMAL                   7       
-CFHB12             CFP102             DECIMAL                   7       
-CFHB13             CFP102             DECIMAL                   7       
-CFHB14             CFP102             DECIMAL                   7       
-CFHB15             CFP102             DECIMAL                   7       
-CFHB16             CFP102             DECIMAL                   7        
-CFHB17             CFP102             DECIMAL                   7        
-CFHB18             CFP102             DECIMAL                   7        
-CFHB19             CFP102             DECIMAL                   7        
-CFHB20             CFP102             DECIMAL                   7        
-CFHB21             CFP102             DECIMAL                   7        
-CFHB22             CFP102             DECIMAL                   7        
-CFHB23             CFP102             DECIMAL                   7        
-CFHB24             CFP102             DECIMAL                   7        
-CFBWK              CFP102             CHARACTER                 7        
-CFBRTM             CFP102             DECIMAL                   6        
+    /// <summary>Branch Number (NUMERIC 3).</summary>
+    public int CFBRCH { get; set; }
 
+    /// <summary>Branch Name (CHAR 40).</summary>
+    public string CFBRNM { get; set; } = string.Empty;
 
+    /// <summary>Branch Address 1 (CHAR 30).</summary>
+    public string CFBRA1 { get; set; } = string.Empty;
 
-Descripcion
-Campo              Archivo            Texto                            
-CFBANK             CFP102             Bank Number                        
-CFBRCH             CFP102             Branch Number                      
-CFBRNM             CFP102             Branch Name                        
-CFBRA1             CFP102             Branch Address 1                   
-CFBRA2             CFP102             Branch Address 2                   
-CFBZIP             CFP102             Zip Code                           
-CFBRPC             CFP102             Postal Code                        
-CFBRST             CFP102             State Code for Branches            
-CFBRRG             CFP102             Region Number                      
-CFBSB              CFP102             Bank State Branch                  
-CFBMGN             CFP102             Branch Manager Name                
-CFHB01             CFP102             Holiday 1                          
-CFHB02             CFP102             Holiday 2                          
-CFHB03             CFP102             Holiday 3                          
-CFHB04             CFP102             Holiday 4                          
-CFHB05             CFP102             Holiday 5                          
-CFHB06             CFP102             Holiday 6                          
-CFHB07             CFP102             Holiday 7                          
-CFHB08             CFP102             Holiday 8                          
-CFHB09             CFP102             Holiday 9                          
-CFHB10             CFP102             Holiday 10                         
-CFHB11             CFP102             Holiday 11                         
-CFHB12             CFP102             Holiday 12                         
-CFHB13             CFP102             Holiday 13                         
-CFHB14             CFP102             Holiday 14                         
-CFHB15             CFP102             Holiday 15                         
-CFHB16             CFP102             Holiday 16                      
-CFHB17             CFP102             Holiday 17                      
-CFHB18             CFP102             Holiday 18                      
-CFHB19             CFP102             Holiday 19                      
-CFHB20             CFP102             Holiday 20                      
-CFHB21             CFP102             Holiday 21                      
-CFHB22             CFP102             Holiday 22                      
-CFHB23             CFP102             Holiday 23                      
-CFHB24             CFP102             Holiday 24                      
-CFBWK              CFP102             Branch Week Definition          
-CFBRTM             CFP102             Time of funds release           
+    /// <summary>Branch Address 2 (CHAR 30).</summary>
+    public string CFBRA2 { get; set; } = string.Empty;
+
+    /// <summary>Zip Code (NUMERIC 5).</summary>
+    public int CFBZIP { get; set; }
+
+    /// <summary>Postal Code (CHAR 10).</summary>
+    public string CFBRPC { get; set; } = string.Empty;
+
+    /// <summary>State Code for Branches (NUMERIC 2).</summary>
+    public int CFBRST { get; set; }
+
+    /// <summary>Region Number (DECIMAL 3).</summary>
+    public decimal CFBRRG { get; set; }
+
+    /// <summary>Bank State Branch (NUMERIC 6).</summary>
+    public int CFBSB { get; set; }
+
+    /// <summary>Branch Manager Name (CHAR 30).</summary>
+    public string CFBMGN { get; set; } = string.Empty;
+
+    /// <summary>Holiday 1 (DECIMAL 7).</summary>
+    public decimal CFHB01 { get; set; }
+
+    /// <summary>Holiday 2 (DECIMAL 7).</summary>
+    public decimal CFHB02 { get; set; }
+
+    /// <summary>Holiday 3 (DECIMAL 7).</summary>
+    public decimal CFHB03 { get; set; }
+
+    /// <summary>Holiday 4 (DECIMAL 7).</summary>
+    public decimal CFHB04 { get; set; }
+
+    /// <summary>Holiday 5 (DECIMAL 7).</summary>
+    public decimal CFHB05 { get; set; }
+
+    /// <summary>Holiday 6 (DECIMAL 7).</summary>
+    public decimal CFHB06 { get; set; }
+
+    /// <summary>Holiday 7 (DECIMAL 7).</summary>
+    public decimal CFHB07 { get; set; }
+
+    /// <summary>Holiday 8 (DECIMAL 7).</summary>
+    public decimal CFHB08 { get; set; }
+
+    /// <summary>Holiday 9 (DECIMAL 7).</summary>
+    public decimal CFHB09 { get; set; }
+
+    /// <summary>Holiday 10 (DECIMAL 7).</summary>
+    public decimal CFHB10 { get; set; }
+
+    /// <summary>Holiday 11 (DECIMAL 7).</summary>
+    public decimal CFHB11 { get; set; }
+
+    /// <summary>Holiday 12 (DECIMAL 7).</summary>
+    public decimal CFHB12 { get; set; }
+
+    /// <summary>Holiday 13 (DECIMAL 7).</summary>
+    public decimal CFHB13 { get; set; }
+
+    /// <summary>Holiday 14 (DECIMAL 7).</summary>
+    public decimal CFHB14 { get; set; }
+
+    /// <summary>Holiday 15 (DECIMAL 7).</summary>
+    public decimal CFHB15 { get; set; }
+
+    /// <summary>Holiday 16 (DECIMAL 7).</summary>
+    public decimal CFHB16 { get; set; }
+
+    /// <summary>Holiday 17 (DECIMAL 7).</summary>
+    public decimal CFHB17 { get; set; }
+
+    /// <summary>Holiday 18 (DECIMAL 7).</summary>
+    public decimal CFHB18 { get; set; }
+
+    /// <summary>Holiday 19 (DECIMAL 7).</summary>
+    public decimal CFHB19 { get; set; }
+
+    /// <summary>Holiday 20 (DECIMAL 7).</summary>
+    public decimal CFHB20 { get; set; }
+
+    /// <summary>Holiday 21 (DECIMAL 7).</summary>
+    public decimal CFHB21 { get; set; }
+
+    /// <summary>Holiday 22 (DECIMAL 7).</summary>
+    public decimal CFHB22 { get; set; }
+
+    /// <summary>Holiday 23 (DECIMAL 7).</summary>
+    public decimal CFHB23 { get; set; }
+
+    /// <summary>Holiday 24 (DECIMAL 7).</summary>
+    public decimal CFHB24 { get; set; }
+
+    /// <summary>Branch Week Definition (CHAR 7).</summary>
+    public string CFBWK { get; set; } = string.Empty;
+
+    /// <summary>Time of funds release (DECIMAL 6).</summary>
+    public decimal CFBRTM { get; set; }
+}
