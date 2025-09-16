@@ -5,33 +5,55 @@ using Microsoft.AspNetCore.Http;
 namespace Adquirencia.Services.Config;
 
 /// <summary>
-/// Lee el perfil operativo (FTTSKY) desde una Data Area de IBM i.
-/// Si la DTAARA cambia, el sistema usará el nuevo perfil sin redeploy.
+/// Lee el perfil (FTTSKY) desde la DTAARA BCAH96DTA/ADQDTA usando funciones disponibles
+/// en tu versión de IBM i. Si la función no existe, retorna string.Empty.
 /// </summary>
 public class PerfilDesdeDataAreaService(IDatabaseConnection _cn, IHttpContextAccessor _ctx)
 {
     /// <summary>
-    /// Obtiene el perfil desde la DTAARA BCAH96DTA/ADQDTA.
+    /// Intenta leer la DTAARA con DATA_AREA_INFO, luego con DATA_AREA. Si ninguna existe, retorna "".
     /// </summary>
-    /// <remarks>
-    /// Usa la función SQL nativa <c>QSYS2.DATA_AREA_VALUE</c>.
-    /// </remarks>
     public string ObtenerPerfil()
     {
-        // Nota: DATA_AREA_VALUE devuelve VARBINARY; lo casteamos a VARCHAR(13).
-        const string sql =
-            "SELECT CAST(QSYS2.DATA_AREA_VALUE('BCAH96DTA','ADQDTA') AS VARCHAR(13)) AS PERFIL " +
-            "FROM SYSIBM.SYSDUMMY1";
-
         _cn.Open();
         try
         {
             using var cmd = _cn.GetDbCommand(_ctx.HttpContext!);
-            cmd.CommandText = sql;
 
-            using var rd = cmd.ExecuteReader();
-            if (rd.Read() && !rd.IsDBNull(0))
-                return rd.GetString(0).Trim();
+            // ====== Intento 1: QSYS2.DATA_AREA_INFO (recomendado en IBM i recientes) ======
+            // Nota funcional: VALUE puede ser CHAR/VARCHAR; lo casteamos a VARCHAR(128) y TRIM.
+            try
+            {
+                cmd.CommandText =
+                    "SELECT RTRIM(CAST(VALUE AS VARCHAR(128))) " +
+                    "FROM TABLE(QSYS2.DATA_AREA_INFO(DATA_AREA_LIBRARY => 'BCAH96DTA', DATA_AREA_NAME => 'ADQDTA')) X";
+                using (var rd = cmd.ExecuteReader())
+                {
+                    if (rd.Read() && !rd.IsDBNull(0))
+                        return rd.GetString(0).Trim();
+                }
+            }
+            catch
+            {
+                // ignoramos y probamos el siguiente método
+            }
+
+            // ====== Intento 2: QSYS2.DATA_AREA (algunas releases lo exponen así) ======
+            try
+            {
+                cmd.CommandText =
+                    "SELECT RTRIM(CAST(VALUE AS VARCHAR(128))) " +
+                    "FROM TABLE(QSYS2.DATA_AREA(LIBRARY => 'BCAH96DTA', NAME => 'ADQDTA')) T";
+                using (var rd = cmd.ExecuteReader())
+                {
+                    if (rd.Read() && !rd.IsDBNull(0))
+                        return rd.GetString(0).Trim();
+                }
+            }
+            catch
+            {
+                // si tampoco existe, devolvemos vacío y que el caller use la ruta por cuenta/comercio
+            }
 
             return string.Empty;
         }
