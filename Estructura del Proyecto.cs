@@ -1,120 +1,110 @@
-namespace Adquirencia.Models.Db2;
+Convierteleo a clase
 
-/// <summary>
-/// Representa la tabla BNKPRD01.CFP102.
-/// Contiene información de sucursales bancarias, incluyendo nombre, dirección,
-/// códigos regionales, feriados y parámetros operativos.
-/// </summary>
-public class CFP102()
-{
-    /// <summary>Bank Number (NUMERIC 3).</summary>
-    public int CFBANK { get; set; }
+Estructura de la tabla BNKPRD01/CFP801
+CFTSBK             CFP801             NUMERIC                   3        
+CFTSKY             CFP801             CHARACTER                13        
+CFTSPD             CFP801             CHARACTER                30        
+CFTSPK             CFP801             CHARACTER                 6        
+CFTSTE             CFP801             NUMERIC                   4        
+CFTSBR             CFP801             NUMERIC                   3        
+CFTSTI             CFP801             NUMERIC                   4        
+CFTSFP             CFP801             CHARACTER                10        
+CFTSSC             CFP801             NUMERIC                   1        
+CFTSS1             CFP801             NUMERIC                   2        
+CFTSS2             CFP801             NUMERIC                   2        
+CFTSS3             CFP801             NUMERIC                   2        
+CFTSS4             CFP801             NUMERIC                   2        
+CFTSS5             CFP801             NUMERIC                   2       
+CFTSS6             CFP801             NUMERIC                   2       
+CFTSST             CFP801             NUMERIC                   1       
+CFTSOR             CFP801             NUMERIC                   1       
+CFTSB              CFP801             NUMERIC                   1       
+CFTSGE             CFP801             NUMERIC                   1       
+CFTSGC             CFP801             DECIMAL                  12       
+CFTCCC             CFP801             DECIMAL                   5       
+CFTSGD             CFP801             DECIMAL                  12       
+CFTCCD             CFP801             DECIMAL                   5       
+CFTSCC             CFP801             NUMERIC                   1       
+CFTPC1             CFP801             CHARACTER                 4       
+CFTPD1             CFP801             CHARACTER                 4       
+CFTRC1             CFP801             CHARACTER                 4       
+CFTRD1             CFP801             CHARACTER                 4       
+CFTPC2             CFP801             CHARACTER                 4       
+CFTPD2             CFP801             CHARACTER                 4       
+CFTRC2             CFP801             CHARACTER                 4       
+CFTRD2             CFP801             CHARACTER                 4       
+CFTPC3             CFP801             CHARACTER                 4       
+CFTPD3             CFP801             CHARACTER                 4       
+CFTRC3             CFP801             CHARACTER                 4       
+CFTRD3             CFP801             CHARACTER                 4       
+CFTPC4             CFP801             CHARACTER                 4       
+CFTPD4             CFP801             CHARACTER                 4       
+CFTRC4             CFP801             CHARACTER                 4       
+CFTRD4             CFP801             CHARACTER                 4        
+CFTPC5             CFP801             CHARACTER                 4        
+CFTPD5             CFP801             CHARACTER                 4        
+CFTRC5             CFP801             CHARACTER                 4        
+CFTRD5             CFP801             CHARACTER                 4        
+CFTPC6             CFP801             CHARACTER                 4        
+CFTPD6             CFP801             CHARACTER                 4        
+CFTRC6             CFP801             CHARACTER                 4        
+CFTRD6             CFP801             CHARACTER                 4        
+CFTSBC             CFP801             CHARACTER                 4        
+CFTSBD             CFP801             CHARACTER                 4        
+CFTSRD             CFP801             CHARACTER                30             
 
-    /// <summary>Branch Number (NUMERIC 3).</summary>
-    public int CFBRCH { get; set; }
 
-    /// <summary>Branch Name (CHAR 40).</summary>
-    public string CFBRNM { get; set; } = string.Empty;
 
-    /// <summary>Branch Address 1 (CHAR 30).</summary>
-    public string CFBRA1 { get; set; } = string.Empty;
-
-    /// <summary>Branch Address 2 (CHAR 30).</summary>
-    public string CFBRA2 { get; set; } = string.Empty;
-
-    /// <summary>Zip Code (NUMERIC 5).</summary>
-    public int CFBZIP { get; set; }
-
-    /// <summary>Postal Code (CHAR 10).</summary>
-    public string CFBRPC { get; set; } = string.Empty;
-
-    /// <summary>State Code for Branches (NUMERIC 2).</summary>
-    public int CFBRST { get; set; }
-
-    /// <summary>Region Number (DECIMAL 3).</summary>
-    public decimal CFBRRG { get; set; }
-
-    /// <summary>Bank State Branch (NUMERIC 6).</summary>
-    public int CFBSB { get; set; }
-
-    /// <summary>Branch Manager Name (CHAR 30).</summary>
-    public string CFBMGN { get; set; } = string.Empty;
-
-    /// <summary>Holiday 1 (DECIMAL 7).</summary>
-    public decimal CFHB01 { get; set; }
-
-    /// <summary>Holiday 2 (DECIMAL 7).</summary>
-    public decimal CFHB02 { get; set; }
-
-    /// <summary>Holiday 3 (DECIMAL 7).</summary>
-    public decimal CFHB03 { get; set; }
-
-    /// <summary>Holiday 4 (DECIMAL 7).</summary>
-    public decimal CFHB04 { get; set; }
-
-    /// <summary>Holiday 5 (DECIMAL 7).</summary>
-    public decimal CFHB05 { get; set; }
-
-    /// <summary>Holiday 6 (DECIMAL 7).</summary>
-    public decimal CFHB06 { get; set; }
-
-    /// <summary>Holiday 7 (DECIMAL 7).</summary>
-    public decimal CFHB07 { get; set; }
-
-    /// <summary>Holiday 8 (DECIMAL 7).</summary>
-    public decimal CFHB08 { get; set; }
-
-    /// <summary>Holiday 9 (DECIMAL 7).</summary>
-    public decimal CFHB09 { get; set; }
-
-    /// <summary>Holiday 10 (DECIMAL 7).</summary>
-    public decimal CFHB10 { get; set; }
-
-    /// <summary>Holiday 11 (DECIMAL 7).</summary>
-    public decimal CFHB11 { get; set; }
-
-    /// <summary>Holiday 12 (DECIMAL 7).</summary>
-    public decimal CFHB12 { get; set; }
-
-    /// <summary>Holiday 13 (DECIMAL 7).</summary>
-    public decimal CFHB13 { get; set; }
-
-    /// <summary>Holiday 14 (DECIMAL 7).</summary>
-    public decimal CFHB14 { get; set; }
-
-    /// <summary>Holiday 15 (DECIMAL 7).</summary>
-    public decimal CFHB15 { get; set; }
-
-    /// <summary>Holiday 16 (DECIMAL 7).</summary>
-    public decimal CFHB16 { get; set; }
-
-    /// <summary>Holiday 17 (DECIMAL 7).</summary>
-    public decimal CFHB17 { get; set; }
-
-    /// <summary>Holiday 18 (DECIMAL 7).</summary>
-    public decimal CFHB18 { get; set; }
-
-    /// <summary>Holiday 19 (DECIMAL 7).</summary>
-    public decimal CFHB19 { get; set; }
-
-    /// <summary>Holiday 20 (DECIMAL 7).</summary>
-    public decimal CFHB20 { get; set; }
-
-    /// <summary>Holiday 21 (DECIMAL 7).</summary>
-    public decimal CFHB21 { get; set; }
-
-    /// <summary>Holiday 22 (DECIMAL 7).</summary>
-    public decimal CFHB22 { get; set; }
-
-    /// <summary>Holiday 23 (DECIMAL 7).</summary>
-    public decimal CFHB23 { get; set; }
-
-    /// <summary>Holiday 24 (DECIMAL 7).</summary>
-    public decimal CFHB24 { get; set; }
-
-    /// <summary>Branch Week Definition (CHAR 7).</summary>
-    public string CFBWK { get; set; } = string.Empty;
-
-    /// <summary>Time of funds release (DECIMAL 6).</summary>
-    public decimal CFBRTM { get; set; }
-}
+Descripcion
+Campo              Archivo            Texto                            
+CFTSBK             CFP801             Bank Number                      
+CFTSKY             CFP801             Profile Name                     
+CFTSPD             CFP801             Profile Description              
+CFTSPK             CFP801             Profile Key - Must be uniqu      
+CFTSTE             CFP801             Tran Server Teller Number        
+CFTSBR             CFP801             Tran Server Branch Number        
+CFTSTI             CFP801             Tran Server Till Number          
+CFTSFP             CFP801             Input Formatting Program Na      
+CFTSSC             CFP801             Input Source Code                
+CFTSS1             CFP801             Process To First Subsystem       
+CFTSS2             CFP801             Process To Second Subsystem      
+CFTSS3             CFP801             Process To Third Subsystem       
+CFTSS4             CFP801             Process To Fourth Subsystem      
+CFTSS5             CFP801             Process To Fifth Subsystem       
+CFTSS6             CFP801             Process To Sixth Subsystem       
+CFTSST             CFP801             Active/Inactive Status Code      
+CFTSOR             CFP801             Initial Override Code            
+CFTSB              CFP801             File Must Balance Code           
+CFTSGE             CFP801             Generate Balancing Entry Co      
+CFTSGC             CFP801             GL Credit Balancing Account      
+CFTCCC             CFP801             GL Cost Center Credit            
+CFTSGD             CFP801             GL Debit Balancing Account       
+CFTCCD             CFP801             GL Cost Center Debit             
+CFTSCC             CFP801             GL Cost Center Code              
+CFTPC1             CFP801             Teller Posting Credit Tranc      
+CFTPD1             CFP801             Teller Posting Debit Tranco   
+CFTRC1             CFP801             Teller Reject Credit Tranco   
+CFTRD1             CFP801             Teller Reject Debit Trancod   
+CFTPC2             CFP801             Teller Posting Credit Tranc   
+CFTPD2             CFP801             Teller Posting Debit Tranco   
+CFTRC2             CFP801             Teller Reject Credit Tranco   
+CFTRD2             CFP801             Teller Reject Debit Trancod   
+CFTPC3             CFP801             Teller Posting Credit Tranc   
+CFTPD3             CFP801             Teller Posting Debit Tranco   
+CFTRC3             CFP801             Teller Reject Credit Tranco   
+CFTRD3             CFP801             Teller Reject Debit Trancod   
+CFTPC4             CFP801             Teller Posting Credit Tranc   
+CFTPD4             CFP801             Teller Posting Debit Tranco   
+CFTRC4             CFP801             Teller Reject Credit Tranco 
+CFTRD4             CFP801             Teller Reject Debit Trancod     
+CFTPC5             CFP801             Teller Posting Credit Tranc     
+CFTPD5             CFP801             Teller Posting Debit Tranco     
+CFTRC5             CFP801             Teller Reject Credit Tranco     
+CFTRD5             CFP801             Teller Reject Debit Trancod     
+CFTPC6             CFP801             Teller Posting Credit Tranc     
+CFTPD6             CFP801             Teller Posting Debit Tranco     
+CFTRC6             CFP801             Teller Reject Credit Tranco     
+CFTRD6             CFP801             Teller Reject Debit Trancod     
+CFTSBC             CFP801             Teller Balancing CR Trancod     
+CFTSBD             CFP801             Teller Balancing DR Trancod     
+CFTSRD             CFP801             Reject Trans Description             
