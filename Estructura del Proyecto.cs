@@ -1,96 +1,272 @@
-namespace Adquirencia.Models.Db2;
+using System.Data.Common;
+using System.Globalization;
+using Connections.Abstractions;
+using Microsoft.AspNetCore.Http;
+using RestUtilities.QueryBuilder;
+
+namespace Adquirencia.Consultas;
 
 /// <summary>
-/// Representa el maestro de comercios <c>BCAH96DTA.ADQ02COM</c>.
-/// Centraliza metadatos de identificación, ubicación, naturaleza contable
-/// y parámetros de cálculo (intercambio, tasa de descuento, IVA).
+/// Resuelve el perfil (FTTSKY) a partir de una cuenta de depósito, consultando ADQ02COM
+/// y validando contra CFP801/CFP102. Implementa estrategias en cascada para ambientes
+/// donde el perfil puede estar ligado al comercio o a la cuenta.
 /// </summary>
-public class ADQ02COM()
+/// <remarks>
+/// Estrategia:
+/// 1) ADQ02COM.A02CTDE = cuenta → obtener A02COME (comercio)
+/// 2) Candidato A: perfil = comercio (A02COME) padded a 13; validar existencia en CFP801
+/// 3) Candidato B: si existe CFP102, buscar por CUX1AC = cuenta para traer CFTSKY
+/// 4) (Opcional) Confirmar candidato en POP801 (existe algún lote con FTTSKY=candidato)
+/// </remarks>
+public class PerfilPorCuentaService(IDatabaseConnection _cn, IHttpContextAccessor _ctx)
 {
-    /// <summary>ARCHIVO (CHAR 17). Identificador lógico del archivo de origen.</summary>
-    public string A02FILE { get; set; } = string.Empty;
+    /// <summary>
+    /// Devuelve el primer perfil encontrado para una cuenta de depósito.
+    /// </summary>
+    /// <param name="numeroCuenta">Cuenta en texto tal como se guarda en ADQ02COM.A02CTDE (CHAR 20).</param>
+    /// <returns>Perfil (FTTSKY) o string.Empty si no se pudo resolver.</returns>
+    public string ObtenerPerfilPorCuenta(string numeroCuenta)
+    {
+        // 1) Buscar comercio(s) por cuenta en ADQ02COM
+        var comercios = BuscarComerciosPorCuenta(numeroCuenta);
+        foreach (var com in comercios)
+        {
+            // 2) Candidato por convención: perfil = comercio padded a 13
+            var perfilCand = PadLeftDigits(com.ToString(CultureInfo.InvariantCulture), 13);
+            if (ExistePerfil(perfilCand))
+                return perfilCand;
 
-    /// <summary>NO. SECUENCIA (NUM 7). Secuencia del registro en el archivo.</summary>
-    public int A02SECU { get; set; }
+            // 3) Candidato por CFP102 (si tu mapeo cuenta↔perfil existe)
+            var perfilPorCta = BuscarPerfilEnCfp102(numeroCuenta);
+            if (!string.IsNullOrWhiteSpace(perfilPorCta))
+                return perfilPorCta;
 
-    /// <summary>TIPO DE REGISTRO (CHAR 2). Clasifica el tipo de fila en la interfaz.</summary>
-    public string A02TIPR { get; set; } = string.Empty;
+            // 4) Confirmación opcional en POP801: si hay lotes con ese perfil candidato, lo aceptamos
+            if (ExisteLoteConPerfil(perfilCand))
+                return perfilCand;
+        }
 
-    /// <summary>FECHA DATOS (CHAR 8). Usado para auditoría y vigencia de datos (formato texto).</summary>
-    public string A02FEDA { get; set; } = string.Empty;
-
-    /// <summary>FIID ENTIDAD (CHAR 4). Identificador de la entidad/fiid adquirente o emisora.</summary>
-    public string A02FIID { get; set; } = string.Empty;
-
-    /// <summary>No ENTI. OTORGA PROSA (NUM 5). Código interno de entidad otorgante.</summary>
-    public int A02ENPR { get; set; }
+        // Si no hubo match, intentamos directo por CFP102 (por si no hubo match en ADQ02COM)
+        var perfilSoloCuenta = BuscarPerfilEnCfp102(numeroCuenta);
+        return perfilSoloCuenta;
+    }
 
     /// <summary>
-    /// CLAVE DEL COMERCIO (NUM 15). Identificador del comercio.
+    /// Devuelve todos los perfiles posibles para una cuenta (útil para auditoría).
     /// </summary>
-    /// <remarks>Se usa <see cref="long"/> para soportar hasta 15 dígitos sin pérdida.</remarks>
-    public long A02COME { get; set; }
+    public List<string> ObtenerPerfilesPosibles(string numeroCuenta)
+    {
+        var perfiles = new List<string>();
 
-    /// <summary>IND. MULTICORTE (CHAR 1). Indicador funcional de cortes múltiples en liquidaciones.</summary>
-    public string A02CORT { get; set; } = string.Empty;
+        // Comercios asociados a la cuenta
+        var comercios = BuscarComerciosPorCuenta(numeroCuenta);
+        foreach (var com in comercios)
+        {
+            var cand = PadLeftDigits(com.ToString(CultureInfo.InvariantCulture), 13);
+            if (ExistePerfil(cand) && !perfiles.Contains(cand))
+                perfiles.Add(cand);
 
-    /// <summary>ESPACIOS 1 (CHAR 16). Relleno reservado para expansiones/compatibilidad.</summary>
-    public string A02FIL1 { get; set; } = string.Empty;
+            var cfp102 = BuscarPerfilEnCfp102(numeroCuenta);
+            if (!string.IsNullOrWhiteSpace(cfp102) && !perfiles.Contains(cfp102))
+                perfiles.Add(cfp102);
 
-    /// <summary>NOMBRE COMERCIO (CHAR 30). Denominación comercial registrada.</summary>
-    public string A02NACO { get; set; } = string.Empty;
+            if (ExisteLoteConPerfil(cand) && !perfiles.Contains(cand))
+                perfiles.Add(cand);
+        }
 
-    /// <summary>FAMILIA DEL COMERCIO (NUM 4). Agrupador para reglas y reportes.</summary>
-    public int A02CATC { get; set; }
+        // Si no hubo comercios (o no devolvieron match), probar CFP102 directo
+        if (perfiles.Count == 0)
+        {
+            var cfp102 = BuscarPerfilEnCfp102(numeroCuenta);
+            if (!string.IsNullOrWhiteSpace(cfp102))
+                perfiles.Add(cfp102);
+        }
 
-    /// <summary>DIRECCION DEL COMERCIO (CHAR 40). Domicilio principal declarado.</summary>
-    public string A02DIRC { get; set; } = string.Empty;
+        return perfiles;
+    }
 
-    /// <summary>POBLACION DEL COMERCIO (CHAR 13). Ciudad o población.</summary>
-    public string A02POBC { get; set; } = string.Empty;
+    // ========================= CONSULTAS A DATOS (QueryBuilder) =========================
 
-    /// <summary>CODIGO POSTAL (CHAR 10). Código postal del domicilio.</summary>
-    public string A02CODP { get; set; } = string.Empty;
+    /// <summary>
+    /// En ADQ02COM, busca todos los comercios (A02COME) que tienen la cuenta A02CTDE indicada.
+    /// </summary>
+    private List<long> BuscarComerciosPorCuenta(string cuenta)
+    {
+        var res = new List<long>();
 
-    /// <summary>PAIS ORIGEN TX (CHAR 3). País ISO/Nacional para origen de transacción.</summary>
-    public string A02PAIO { get; set; } = string.Empty;
+        var q = QueryBuilder.Core.QueryBuilder
+            .From("ADQ02COM", "BCAH96DTA")
+            .Select<ADQ02COM>(x => x.A02COME)
+            .Where<ADQ02COM>(x => x.A02CTDE == cuenta) // match exacto sobre CHAR(20)
+            .Build();
 
-    /// <summary>DB FACTOR CUOTA INTERCAMBIO (CHAR 1). Indicador del lado débito para CI.</summary>
-    public string A02DFCI { get; set; } = string.Empty;
+        _cn.Open();
+        try
+        {
+            using var cmd = _cn.GetDbCommand(_ctx.HttpContext!);
+            cmd.CommandText = q.Sql;
 
-    /// <summary>DB VALOR CUOTA INTERCAMBIO (DEC 4,2). Valor aplicado en débito para CI.</summary>
-    public decimal A02DVCI { get; set; }
+            using var rd = cmd.ExecuteReader();
+            while (rd.Read())
+            {
+                if (!rd.IsDBNull(0))
+                    res.Add(rd.GetInt64(0));
+            }
+        }
+        finally
+        {
+            _cn.Close();
+        }
 
-    /// <summary>CR FACTOR CUOTA INTERCAMBIO (CHAR 1). Indicador del lado crédito para CI.</summary>
-    public string A02CFCI { get; set; } = string.Empty;
+        return res;
+    }
 
-    /// <summary>CR VALOR CUOTA INTERCAMBIO (DEC 4,2). Valor aplicado en crédito para CI.</summary>
-    public decimal A02CVCI { get; set; }
+    /// <summary>
+    /// Verifica existencia de un perfil en CFP801 (CFTSBK=1, CFTSKY = perfil).
+    /// </summary>
+    private bool ExistePerfil(string perfil)
+    {
+        var q = QueryBuilder.Core.QueryBuilder
+            .From("CFP801", "BNKPRD01")
+            .Select<CFP801>(x => x.CFTSKY)
+            .Where<CFP801>(x => x.CFTSBK == 1)
+            .Where<CFP801>(x => x.CFTSKY == perfil)
+            .FetchNext(1)
+            .Build();
 
-    /// <summary>DB FACTOR TASA DESCUENTO (CHAR 1). Indicador del lado débito para TD.</summary>
-    public string A02DFTD { get; set; } = string.Empty;
+        _cn.Open();
+        try
+        {
+            using var cmd = _cn.GetDbCommand(_ctx.HttpContext!);
+            cmd.CommandText = q.Sql;
+            using var rd = cmd.ExecuteReader();
+            return rd.Read();
+        }
+        finally
+        {
+            _cn.Close();
+        }
+    }
 
-    /// <summary>DB VALOR TASA DESCUENTO (DEC 4,2). Tasa de descuento en débito.</summary>
-    public decimal A02DVTD { get; set; }
+    /// <summary>
+    /// Busca un perfil por cuenta en CFP102 si existe el mapeo cuenta↔perfil (CUX1AC).
+    /// </summary>
+    private string BuscarPerfilEnCfp102(string cuenta)
+    {
+        // Si en tu site CUX1AC se almacena con padding/solo dígitos, ajusta aquí:
+        var cuentaNorm = NormalizarCuenta12(cuenta);
 
-    /// <summary>CR FACTOR TASA DESCUENTO (CHAR 1). Indicador del lado crédito para TD.</summary>
-    public string A02CFTD { get; set; } = string.Empty;
+        var q = QueryBuilder.Core.QueryBuilder
+            .From("CFP102", "BNKPRD01")
+            .Select<CFP102>(x => x.CFTSKY)
+            .Where<CFP102>(x => x.CFTSBK == 1)
+            .Where<CFP102>(x => x.CUX1AC == cuentaNorm)
+            .FetchNext(1)
+            .Build();
 
-    /// <summary>CR VALOR TASA DESCUENTO (DEC 4,2). Tasa de descuento en crédito.</summary>
-    public decimal A02CVTD { get; set; }
+        _cn.Open();
+        try
+        {
+            using var cmd = _cn.GetDbCommand(_ctx.HttpContext!);
+            cmd.CommandText = q.Sql;
+            using var rd = cmd.ExecuteReader();
+            return rd.Read() && !rd.IsDBNull(0) ? rd.GetString(0).Trim() : string.Empty;
+        }
+        finally
+        {
+            _cn.Close();
+        }
+    }
 
-    /// <summary>FACTOR DE IVA (DEC 4,2). Factor impuesto para cálculo de IVA.</summary>
-    public decimal A02FAIV { get; set; }
+    /// <summary>
+    /// Comprueba si existen lotes en POP801 para un perfil dado (sanidad de dato).
+    /// </summary>
+    private bool ExisteLoteConPerfil(string perfil)
+    {
+        var q = QueryBuilder.Core.QueryBuilder
+            .From("POP801", "BNKPRD01")
+            .Select<POP801>(x => x.FTSBT)
+            .Where<POP801>(x => x.FTTSBK == 1)
+            .Where<POP801>(x => x.FTTSKY == perfil)
+            .FetchNext(1)
+            .Build();
 
-    /// <summary>GIRO DEL COMERCIO (NUM 4). Clasificación del giro para reglas de negocio.</summary>
-    public int A02GICO { get; set; }
+        _cn.Open();
+        try
+        {
+            using var cmd = _cn.GetDbCommand(_ctx.HttpContext!);
+            cmd.CommandText = q.Sql;
+            using var rd = cmd.ExecuteReader();
+            return rd.Read();
+        }
+        finally
+        {
+            _cn.Close();
+        }
+    }
 
-    /// <summary>CUENTA DEPOSITO (CHAR 20). Cuenta destino para abonos/settlement.</summary>
-    public string A02CTDE { get; set; } = string.Empty;
+    // ========================= UTILIDADES DE FORMATO =========================
 
-    /// <summary>RUC CONTRIBUYENTE (CHAR 22). Identificador fiscal del comercio.</summary>
-    public string A02RUCC { get; set; } = string.Empty;
+    /// <summary>
+    /// Normaliza una cadena numérica a 12 dígitos (CUX1AC, típico en CFP102).
+    /// </summary>
+    private static string NormalizarCuenta12(string? cuenta)
+    {
+        cuenta = (cuenta ?? string.Empty).Trim();
+        var digits = new string(cuenta.Where(char.IsDigit).ToArray());
+        if (digits.Length > 12) digits = digits[^12..];
+        return digits.PadLeft(12, '0');
+    }
 
-    /// <summary>ESPACIOS 2 (CHAR 124). Campo de relleno para compatibilidad futura.</summary>
-    public string A02FIL2 { get; set; } = string.Empty;
+    /// <summary>
+    /// Rellena con ceros a la izquierda hasta alcanzar 'len' (para CFTSKY=13, por ejemplo).
+    /// </summary>
+    private static string PadLeftDigits(string s, int len)
+    {
+        var digits = new string((s ?? string.Empty).Where(char.IsDigit).ToArray());
+        if (digits.Length > len) digits = digits[^len..];
+        return digits.PadLeft(len, '0');
+    }
 }
+
+// ========================= DTOs mínimos tipados =========================
+
+/// <summary>ADQ02COM (BCAH96DTA) - Campos usados en las consultas.</summary>
+public class ADQ02COM
+{
+    public long   A02COME { get; set; }          // NUM(15)
+    public string A02CTDE { get; set; } = "";    // CHAR(20)
+}
+
+/// <summary>CFP801 (BNKPRD01) - Maestro de perfiles.</summary>
+public class CFP801
+{
+    public int    CFTSBK { get; set; }           // NUM(3)
+    public string CFTSKY { get; set; } = "";     // CHAR(13)
+}
+
+/// <summary>CFP102 (BNKPRD01) - Relación cuenta↔perfil (si aplica en tu site).</summary>
+public class CFP102
+{
+    public int    CFTSBK { get; set; }           // NUM(3)
+    public string CFTSKY { get; set; } = "";     // CHAR(13)
+    public string CUX1AC { get; set; } = "";     // CHAR(12) cuenta
+}
+
+/// <summary>POP801 (BNKPRD01) - Cabecera de lote (para validar existencia de perfil).</summary>
+public class POP801
+{
+    public int    FTTSBK { get; set; }           // NUM(3) → 1
+    public string FTTSKY { get; set; } = "";     // CHAR(13)
+    public int    FTSBT  { get; set; }           // NUM(3)
+}
+
+
+var svc = new Adquirencia.Consultas.PerfilPorCuentaService(_connection, _httpContext);
+
+var perfil = svc.ObtenerPerfilPorCuenta("00123456789012345678");
+// → "0000001234567" (ejemplo) o "" si no se pudo resolver
+
+var perfiles = svc.ObtenerPerfilesPosibles("00123456789012345678");
+// → ["0000001234567", "0000007654321"] (si hubiera más de uno)
+
