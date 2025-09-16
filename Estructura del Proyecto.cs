@@ -1,65 +1,43 @@
-using Connections.Abstractions;
-using Microsoft.AspNetCore.Http;
+Conviertelo a clase
 
-namespace Adquirencia.Api.Empresas.Services;
+Estructura de la tabla PO801
+Campo              Archivo            Tipo               Longitud  Escal
+FTTSBK             POP801             NUMERIC                   3       
+FTTSKY             POP801             CHARACTER                13       
+FTTSDT             POP801             DECIMAL                   7       
+FTSBT              POP801             NUMERIC                   3       
+FTTSOR             POP801             CHARACTER                10       
+FTTSST             POP801             NUMERIC                   2       
+FTTSDI             POP801             NUMERIC                   5       
+FTTSCI             POP801             NUMERIC                   5       
+FTTSID             POP801             NUMERIC                  15     2 
+FTTSIC             POP801             NUMERIC                  15     2 
+FTTSDP             POP801             NUMERIC                   5       
+FTTSCP             POP801             NUMERIC                   5       
+FTTSPD             POP801             NUMERIC                  15     2 
+FTTSPC             POP801             NUMERIC                  15     2 
+FTTSBD             POP801             NUMERIC                  15     2 
+FTTSLD             POP801             NUMERIC                  15     2 
+FTTSBC             POP801             NUMERIC                  15     2 
+FTTSLC             POP801             NUMERIC                  15     2 
 
-/// <summary>
-/// Orquesta el flujo completo: fecha operativa → nuevo lote → asientos D/C para empresas.
-/// </summary>
-/// <remarks>
-/// - Centraliza la operación atómica de generación de lote y asientos.
-/// - Permite reemplazar el número de corte del request por el del lote generado.
-/// - Reutiliza servicios previos: FechaService, LoteService, PosteoEmpresaService.
-/// </remarks>
-public class LoteEmpresasOrchestrator(
-    IDatabaseConnection _as400,
-    IHttpContextAccessor _context,
-    FechaService _fechaService,         // VerFecha (TAP001 → DSCDT CYYMMDD)
-    LoteService _loteService,           // VerUltLote / NuevoLote (POP801)
-    PosteoEmpresaService _posteoService // D/C en libro (GLC002 u otro PF)
-)
-{
-    /// <summary>
-    /// Ejecuta el flujo: fecha operativa → crea/avanza lote → registra D/C.
-    /// </summary>
-    /// <param name="req">Payload del endpoint (empresas).</param>
-    /// <param name="usuarioOrigen">Usuario trazador.</param>
-    /// <returns>Número de lote y respuesta de posteo.</returns>
-    public (int numeroLote, PosteoEmpresaResponse posteo) ProcesarConLote(PosteoEmpresaRequest req, string usuarioOrigen)
-    {
-        // 1) Fecha operativa (TAP001 → DSCDT CYYMMDD + YYYYMMDD para consistencia)
-        var (found, dscdt, _) = _fechaService.VerFecha();
-        if (!found) throw new InvalidOperationException("No se pudo obtener fecha operativa (TAP001).");
-
-        // 2) Perfil de lote (FTTSKY): asumimos que se usa el código de comercio como perfil.
-        var perfilKey = string.IsNullOrWhiteSpace(req.CodigoComercio) ? "EMPRESA" : req.CodigoComercio;
-
-        // 3) Obtener último FTSBT para el perfil y crear siguiente (NuevoLote)
-        //    Si ya tienes VerUltLote(perfil), úsalo para leer el último y pásalo a NuevoLote.
-        var ultimo = _loteService.VerUltLote(perfilKey);               // lee POP801 (ORDER BY DESC FETCH 1)
-        var (nuevoLote, okLote) = _loteService.NuevoLote(perfilKey, usuarioOrigen, dscdt, ultimo);
-        if (!okLote) throw new InvalidOperationException("No se pudo crear el nuevo lote (POP801).");
-
-        // 4) Usar el número de lote como “Número de corte” para los asientos
-        var reqConLote = new PosteoEmpresaRequest
-        {
-            NumeroCuenta        = req.NumeroCuenta,
-            MontoDebitado       = req.MontoDebitado,
-            MontoAcreditado     = req.MontoAcreditado,
-            CodigoComercio      = req.CodigoComercio,
-            NombreComercio      = req.NombreComercio,
-            Terminal            = req.Terminal,
-            Descripción         = req.Descripción,
-            NaturalezaContable  = req.NaturalezaContable,   // 'C' / 'D'
-            NumeroDeCorte       = nuevoLote.ToString(),      // ← sobreescribimos con el lote generado
-            IdTransaccionUnico  = req.IdTransaccionUnico,
-            Estado              = req.Estado,
-            DescripcionEstado   = req.DescripcionEstado
-        };
-
-        // 5) Contabilizar D/C (dos asientos balanceados) con el número de lote
-        var posteo = _posteoService.Procesar(reqConLote, usuarioOrigen);
-
-        return (nuevoLote, posteo);
-    }
-}
+Descripcion
+Campo              Archivo            Texto                            
+FTTSBK             POP801             Bank Number                      
+FTTSKY             POP801             Transaction Server Profile       
+FTTSDT             POP801             Processing Date - Effective      
+FTSBT              POP801             Batch Number (001-999)           
+FTTSOR             POP801             Originated By                    
+FTTSST             POP801             File Status                      
+FTTSDI             POP801             Total Debit Items Count          
+FTTSCI             POP801             Total Credit Items Count         
+FTTSID             POP801             Total Debit Amount - LCYE        
+FTTSIC             POP801             Total Credit Amount - LCYE       
+FTTSDP             POP801             Total Debit Items Posted         
+FTTSCP             POP801             Total Credit Items Posted        
+FTTSPD             POP801             Total Debit Amount Posted   
+FTTSPC             POP801             Total Credit Amount Posted 
+FTTSBD             POP801             FCYE Debit Balancing Entry 
+FTTSLD             POP801             LCYE Debit Balancing Entry 
+FTTSBC             POP801             FCYE Credit Balancing Entry
+FTTSLC             POP801             LCYE Credit Balancing Entry     
