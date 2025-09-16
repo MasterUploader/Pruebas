@@ -1,65 +1,56 @@
-using System.Data.Common;
-using Connections.Abstractions;
+PGM        PARM(&PERFIL)
+/* ------------------------------------------------------------------ */
+/*  GETADQPER: Retorna el perfil desde la DTAARA BCAH96DTA/ADQDTA      */
+/*  - Sin entradas; 1 salida: &PERFIL (13)                             */
+/*  - Evita dependencias de funciones SQL (DATA_AREA_*)                */
+/* ------------------------------------------------------------------ */
+             DCL        VAR(&PERFIL) TYPE(*CHAR) LEN(13)
+             DCL        VAR(&VAL)    TYPE(*CHAR) LEN(13)
+
+/* Lee la data area (ajusta lib/nombre si cambia) */
+             RTVDTAARA  DTAARA(BCAH96DTA/ADQDTA) RTNVAR(&VAL)
+
+/* Mueve a salida (right-trim básico) */
+             CHGVAR     VAR(&PERFIL) VALUE(&VAL)
+
+             ENDPGM
+
+
+
+
+             using Connections.Abstractions;
 using Microsoft.AspNetCore.Http;
+using RestUtilities.QueryBuilder;
 
 namespace Adquirencia.Services.Config;
 
 /// <summary>
-/// Lee el perfil (FTTSKY) desde la DTAARA BCAH96DTA/ADQDTA usando funciones disponibles
-/// en tu versión de IBM i. Si la función no existe, retorna string.Empty.
+/// Obtiene el perfil (FTTSKY) desde la DTAARA BCAH96DTA/ADQDTA
+/// invocando un CL wrapper con ProgramCallBuilder (sin dependencias de funciones SQL).
 /// </summary>
+/// <remarks>
+/// - El CL devuelve SOLO salidas (sin entradas) para ajustarse al patrón OutChar de ProgramCallBuilder.
+/// - Si más adelante deseas parametrizar librería/nombre o longitud, se añade una versión con InChar.
+/// </remarks>
 public class PerfilDesdeDataAreaService(IDatabaseConnection _cn, IHttpContextAccessor _ctx)
 {
     /// <summary>
-    /// Intenta leer la DTAARA con DATA_AREA_INFO, luego con DATA_AREA. Si ninguna existe, retorna "".
+    /// Lee la DTAARA y retorna el perfil (recorte derecho y trim).
     /// </summary>
     public string ObtenerPerfil()
     {
-        _cn.Open();
-        try
-        {
-            using var cmd = _cn.GetDbCommand(_ctx.HttpContext!);
+        // ================== CL llamado: ICBSUSER/GETADQPER ==================
+        // OUT: PERFIL  CHAR(13)  ← valor de la data area ADQDTA
+        var call = ProgramCallBuilder
+            .ForConnection(_cn, "ICBSUSER", "GETADQPER")  // biblioteca y programa CL
+            .OutChar("PERFIL", 13)                        // único parámetro de salida
+            .WithTimeout(30)
+            .Call(_ctx.HttpContext!);                     // síncrono; usa CallAsync si prefieres
 
-            // ====== Intento 1: QSYS2.DATA_AREA_INFO (recomendado en IBM i recientes) ======
-            // Nota funcional: VALUE puede ser CHAR/VARCHAR; lo casteamos a VARCHAR(128) y TRIM.
-            try
-            {
-                cmd.CommandText =
-                    "SELECT RTRIM(CAST(VALUE AS VARCHAR(128))) " +
-                    "FROM TABLE(QSYS2.DATA_AREA_INFO(DATA_AREA_LIBRARY => 'BCAH96DTA', DATA_AREA_NAME => 'ADQDTA')) X";
-                using (var rd = cmd.ExecuteReader())
-                {
-                    if (rd.Read() && !rd.IsDBNull(0))
-                        return rd.GetString(0).Trim();
-                }
-            }
-            catch
-            {
-                // ignoramos y probamos el siguiente método
-            }
+        // Lectura directa del resultado
+        if (call.Result.TryGetString("PERFIL", out var perfil))
+            return (perfil ?? string.Empty).Trim();
 
-            // ====== Intento 2: QSYS2.DATA_AREA (algunas releases lo exponen así) ======
-            try
-            {
-                cmd.CommandText =
-                    "SELECT RTRIM(CAST(VALUE AS VARCHAR(128))) " +
-                    "FROM TABLE(QSYS2.DATA_AREA(LIBRARY => 'BCAH96DTA', NAME => 'ADQDTA')) T";
-                using (var rd = cmd.ExecuteReader())
-                {
-                    if (rd.Read() && !rd.IsDBNull(0))
-                        return rd.GetString(0).Trim();
-                }
-            }
-            catch
-            {
-                // si tampoco existe, devolvemos vacío y que el caller use la ruta por cuenta/comercio
-            }
-
-            return string.Empty;
-        }
-        finally
-        {
-            _cn.Close();
-        }
+        return string.Empty;
     }
 }
