@@ -1265,3 +1265,59 @@ IPD  d BinCha          S              6a   inz(*blanks)
 
 
 Esto se encarga del proceso de lotes, debito y credito para comercios, ahora el debito y el credito se enviara totalizado y solo debeo de postear ese debito y credito, extraeme ese pedazo de codigo a un programa c#
+
+Este es el objeto Dto que recibire:
+
+using Newtonsoft.Json;
+using System.ComponentModel.DataAnnotations;
+
+namespace MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Transacciones.GuardarTransacciones;
+
+public class GuardarTransaccionesDto
+{
+    [Required(ErrorMessage ="El número de cuenta es obligatorio.")]
+    [JsonProperty ("numeroCuenta")]
+    public string NumeroCuenta { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "El monto es obligatorio.")]
+    [JsonProperty("montoDebitado")]
+    public string MontoDebitado { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "El monto es obligatorio.")]
+    [JsonProperty("montoAcreditado")]
+    public string MontoAcreditado { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "El código comercio es obligatorio.")]
+    [JsonProperty("codigoComercio")]
+    public string CodigoComercio { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "El nombre del comercio es obligatorio.")]
+    [JsonProperty("nombreComercio")]
+    public string NombreComercio { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "El número de terminal es obligatorio.")]
+    [JsonProperty("terminal")]
+    public string Terminal { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "La descripción es obligatorio.")]
+    [JsonProperty("descripción")]
+    public string Descripcion { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "La Naturaleza contable es obligatoria.")]
+    [JsonProperty("naturalezaContable")]
+    [RegularExpression("^[CD]$", ErrorMessage ="La naturaleza contable solamente puede ser C o D")]
+    public string NaturalezaContable { get; set; } = string.Empty;
+
+    [JsonProperty("numeroDeCorte")]
+    public string NumeroDeCorte {  get; set; } = string.Empty;
+
+    [JsonProperty("idTransaccionUnico")]
+    public string IdTransaccionUnico {  get; set; } = string.Empty;
+
+    [JsonProperty("estado")]
+    public string Estado { get; set; } = string.Empty;
+    [JsonProperty("descripcionEstado")]
+    public string DescripcionEstado { get; set; } = string.Empty;
+}
+
+
