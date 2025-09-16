@@ -1,43 +1,98 @@
-Conviertelo a clase
+namespace Adquirencia.Models.Db2;
 
-Estructura de la tabla PO801
-Campo              Archivo            Tipo               Longitud  Escal
-FTTSBK             POP801             NUMERIC                   3       
-FTTSKY             POP801             CHARACTER                13       
-FTTSDT             POP801             DECIMAL                   7       
-FTSBT              POP801             NUMERIC                   3       
-FTTSOR             POP801             CHARACTER                10       
-FTTSST             POP801             NUMERIC                   2       
-FTTSDI             POP801             NUMERIC                   5       
-FTTSCI             POP801             NUMERIC                   5       
-FTTSID             POP801             NUMERIC                  15     2 
-FTTSIC             POP801             NUMERIC                  15     2 
-FTTSDP             POP801             NUMERIC                   5       
-FTTSCP             POP801             NUMERIC                   5       
-FTTSPD             POP801             NUMERIC                  15     2 
-FTTSPC             POP801             NUMERIC                  15     2 
-FTTSBD             POP801             NUMERIC                  15     2 
-FTTSLD             POP801             NUMERIC                  15     2 
-FTTSBC             POP801             NUMERIC                  15     2 
-FTTSLC             POP801             NUMERIC                  15     2 
+/// <summary>
+/// Representa la tabla BNKPRD01.POP801 (Batch Header).
+/// Contiene información de control de lotes: perfil, fecha, totales y estados.
+/// </summary>
+public class POP801
+{
+    /// <summary>
+    /// Bank Number (NUMERIC 3).
+    /// </summary>
+    public int FTTSBK { get; set; }
 
-Descripcion
-Campo              Archivo            Texto                            
-FTTSBK             POP801             Bank Number                      
-FTTSKY             POP801             Transaction Server Profile       
-FTTSDT             POP801             Processing Date - Effective      
-FTSBT              POP801             Batch Number (001-999)           
-FTTSOR             POP801             Originated By                    
-FTTSST             POP801             File Status                      
-FTTSDI             POP801             Total Debit Items Count          
-FTTSCI             POP801             Total Credit Items Count         
-FTTSID             POP801             Total Debit Amount - LCYE        
-FTTSIC             POP801             Total Credit Amount - LCYE       
-FTTSDP             POP801             Total Debit Items Posted         
-FTTSCP             POP801             Total Credit Items Posted        
-FTTSPD             POP801             Total Debit Amount Posted   
-FTTSPC             POP801             Total Credit Amount Posted 
-FTTSBD             POP801             FCYE Debit Balancing Entry 
-FTTSLD             POP801             LCYE Debit Balancing Entry 
-FTTSBC             POP801             FCYE Credit Balancing Entry
-FTTSLC             POP801             LCYE Credit Balancing Entry     
+    /// <summary>
+    /// Transaction Server Profile (CHAR 13).
+    /// </summary>
+    public string FTTSKY { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Processing Date - Effective (DECIMAL 7, formato CYYMMDD).
+    /// </summary>
+    public int FTTSDT { get; set; }
+
+    /// <summary>
+    /// Batch Number (001-999) (NUMERIC 3).
+    /// </summary>
+    public int FTSBT { get; set; }
+
+    /// <summary>
+    /// Originated By (CHAR 10).
+    /// </summary>
+    public string FTTSOR { get; set; } = string.Empty;
+
+    /// <summary>
+    /// File Status (NUMERIC 2).
+    /// </summary>
+    public int FTTSST { get; set; }
+
+    /// <summary>
+    /// Total Debit Items Count (NUMERIC 5).
+    /// </summary>
+    public int FTTSDI { get; set; }
+
+    /// <summary>
+    /// Total Credit Items Count (NUMERIC 5).
+    /// </summary>
+    public int FTTSCI { get; set; }
+
+    /// <summary>
+    /// Total Debit Amount - LCYE (NUMERIC 15,2).
+    /// </summary>
+    public decimal FTTSID { get; set; }
+
+    /// <summary>
+    /// Total Credit Amount - LCYE (NUMERIC 15,2).
+    /// </summary>
+    public decimal FTTSIC { get; set; }
+
+    /// <summary>
+    /// Total Debit Items Posted (NUMERIC 5).
+    /// </summary>
+    public int FTTSDP { get; set; }
+
+    /// <summary>
+    /// Total Credit Items Posted (NUMERIC 5).
+    /// </summary>
+    public int FTTSCP { get; set; }
+
+    /// <summary>
+    /// Total Debit Amount Posted (NUMERIC 15,2).
+    /// </summary>
+    public decimal FTTSPD { get; set; }
+
+    /// <summary>
+    /// Total Credit Amount Posted (NUMERIC 15,2).
+    /// </summary>
+    public decimal FTTSPC { get; set; }
+
+    /// <summary>
+    /// FCYE Debit Balancing Entry (NUMERIC 15,2).
+    /// </summary>
+    public decimal FTTSBD { get; set; }
+
+    /// <summary>
+    /// LCYE Debit Balancing Entry (NUMERIC 15,2).
+    /// </summary>
+    public decimal FTTSLD { get; set; }
+
+    /// <summary>
+    /// FCYE Credit Balancing Entry (NUMERIC 15,2).
+    /// </summary>
+    public decimal FTTSBC { get; set; }
+
+    /// <summary>
+    /// LCYE Credit Balancing Entry (NUMERIC 15,2).
+    /// </summary>
+    public decimal FTTSLC { get; set; }
+}
