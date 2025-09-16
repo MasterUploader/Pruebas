@@ -1,98 +1,64 @@
-namespace Adquirencia.Models.Db2;
 
-/// <summary>
-/// Representa la tabla BNKPRD01.POP801 (Batch Header).
-/// Contiene información de control de lotes: perfil, fecha, totales y estados.
-/// </summary>
-public class POP801
-{
-    /// <summary>
-    /// Bank Number (NUMERIC 3).
-    /// </summary>
-    public int FTTSBK { get; set; }
+Conviertela a Clase
 
-    /// <summary>
-    /// Transaction Server Profile (CHAR 13).
-    /// </summary>
-    public string FTTSKY { get; set; } = string.Empty;
+Estructura de la tabla BCAH96DTA/ADQ02COM
+Campo              Archivo            Tipo               Longitud  Escal
+A02FILE            ADQ02COM           CHARACTER                17       
+A02SECU            ADQ02COM           NUMERIC                   7       
+A02TIPR            ADQ02COM           CHARACTER                 2       
+A02FEDA            ADQ02COM           CHARACTER                 8       
+A02FIID            ADQ02COM           CHARACTER                 4       
+A02ENPR            ADQ02COM           NUMERIC                   5       
+A02COME            ADQ02COM           NUMERIC                  15       
+A02CORT            ADQ02COM           CHARACTER                 1       
+A02FIL1            ADQ02COM           CHARACTER                16       
+A02NACO            ADQ02COM           CHARACTER                30       
+A02CATC            ADQ02COM           NUMERIC                   4       
+A02DIRC            ADQ02COM           CHARACTER                40       
+A02POBC            ADQ02COM           CHARACTER                13       
+A02CODP            ADQ02COM           CHARACTER                10       
+A02PAIO            ADQ02COM           CHARACTER                 3       
+A02DFCI            ADQ02COM           CHARACTER                 1       
+A02DVCI            ADQ02COM           NUMERIC                   4     2 
+A02CFCI            ADQ02COM           CHARACTER                 1       
+A02CVCI            ADQ02COM           NUMERIC                   4     2 
+A02DFTD            ADQ02COM           CHARACTER                 1       
+A02DVTD            ADQ02COM           NUMERIC                   4     2 
+A02CFTD            ADQ02COM           CHARACTER                 1       
+A02CVTD            ADQ02COM           NUMERIC                   4     2 
+A02FAIV            ADQ02COM           NUMERIC                   4     2 
+A02GICO            ADQ02COM           NUMERIC                   4       
+A02CTDE            ADQ02COM           CHARACTER                20       
+A02RUCC            ADQ02COM           CHARACTER                22        
+A02FIL2            ADQ02COM           CHARACTER               124         
 
-    /// <summary>
-    /// Processing Date - Effective (DECIMAL 7, formato CYYMMDD).
-    /// </summary>
-    public int FTTSDT { get; set; }
-
-    /// <summary>
-    /// Batch Number (001-999) (NUMERIC 3).
-    /// </summary>
-    public int FTSBT { get; set; }
-
-    /// <summary>
-    /// Originated By (CHAR 10).
-    /// </summary>
-    public string FTTSOR { get; set; } = string.Empty;
-
-    /// <summary>
-    /// File Status (NUMERIC 2).
-    /// </summary>
-    public int FTTSST { get; set; }
-
-    /// <summary>
-    /// Total Debit Items Count (NUMERIC 5).
-    /// </summary>
-    public int FTTSDI { get; set; }
-
-    /// <summary>
-    /// Total Credit Items Count (NUMERIC 5).
-    /// </summary>
-    public int FTTSCI { get; set; }
-
-    /// <summary>
-    /// Total Debit Amount - LCYE (NUMERIC 15,2).
-    /// </summary>
-    public decimal FTTSID { get; set; }
-
-    /// <summary>
-    /// Total Credit Amount - LCYE (NUMERIC 15,2).
-    /// </summary>
-    public decimal FTTSIC { get; set; }
-
-    /// <summary>
-    /// Total Debit Items Posted (NUMERIC 5).
-    /// </summary>
-    public int FTTSDP { get; set; }
-
-    /// <summary>
-    /// Total Credit Items Posted (NUMERIC 5).
-    /// </summary>
-    public int FTTSCP { get; set; }
-
-    /// <summary>
-    /// Total Debit Amount Posted (NUMERIC 15,2).
-    /// </summary>
-    public decimal FTTSPD { get; set; }
-
-    /// <summary>
-    /// Total Credit Amount Posted (NUMERIC 15,2).
-    /// </summary>
-    public decimal FTTSPC { get; set; }
-
-    /// <summary>
-    /// FCYE Debit Balancing Entry (NUMERIC 15,2).
-    /// </summary>
-    public decimal FTTSBD { get; set; }
-
-    /// <summary>
-    /// LCYE Debit Balancing Entry (NUMERIC 15,2).
-    /// </summary>
-    public decimal FTTSLD { get; set; }
-
-    /// <summary>
-    /// FCYE Credit Balancing Entry (NUMERIC 15,2).
-    /// </summary>
-    public decimal FTTSBC { get; set; }
-
-    /// <summary>
-    /// LCYE Credit Balancing Entry (NUMERIC 15,2).
-    /// </summary>
-    public decimal FTTSLC { get; set; }
-}
+Descripcion
+Campo              Archivo            Texto                            
+A02FILE            ADQ02COM           ARCHIVO               
+A02SECU            ADQ02COM           NO. SECUENCIA         
+A02TIPR            ADQ02COM           TIPO DE REGISTRO      
+A02FEDA            ADQ02COM           FECHA DATOS           
+A02FIID            ADQ02COM           FIID ENTIDAD          
+A02ENPR            ADQ02COM           No ENTI. OTORGA PROSA 
+A02COME            ADQ02COM           CLAVE DEL COMERCIO    
+A02CORT            ADQ02COM           IND. MUTICORTE        
+A02FIL1            ADQ02COM           ESPACIOS 1            
+A02NACO            ADQ02COM           NOMBRE COMERCIO       
+A02CATC            ADQ02COM           FAMILIA DEL COMERCIO  
+A02DIRC            ADQ02COM           DIRECCION DEL COMERCIO
+A02POBC            ADQ02COM           POBLACION DEL COMERCIO
+A02CODP            ADQ02COM           CODIGO POSTAL                    
+A02PAIO            ADQ02COM           PAIS ORIGEN TX                   
+A02DFCI            ADQ02COM           DB FACTOR CUOTA INTERCAMBIO      
+A02DVCI            ADQ02COM           DB VALOR CUOTA INTERCAMBIO       
+A02CFCI            ADQ02COM           CR FACTOR CUOTA INTERCAMBIO      
+A02CVCI            ADQ02COM           CR VALOR CUOTA INTERCAMBIO       
+A02DFTD            ADQ02COM           DB FACTOR TASA DESCUENTO         
+A02DVTD            ADQ02COM           DB VALOR TASA DESCUENTO          
+A02CFTD            ADQ02COM           CR FACTOR TASA DESCUENTO         
+A02CVTD            ADQ02COM           CR VALOR TASA DESCUENTO          
+A02FAIV            ADQ02COM           FACTOR DE IVA                    
+A02GICO            ADQ02COM           GIRO DEL COMERCIO                
+A02CTDE            ADQ02COM           CUENTA DEPOSITO                  
+A02RUCC            ADQ02COM           RUC CONTRIBUYENTE  
+A02FIL2            ADQ02COM           ESPACIOS 2         
