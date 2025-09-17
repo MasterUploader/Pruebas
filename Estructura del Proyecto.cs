@@ -1,3 +1,532 @@
+Este es el código que tengo actualmente y que he construido con tu apoyo:
+using Connections.Abstractions;
+using Microsoft.IdentityModel.Tokens;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.AS400.BCAH96DTA;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.AS400.BNKPRD01;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Transacciones.GuardarTransacciones;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Utils;
+using QueryBuilder.Builders;
+using QueryBuilder.Enums;
+
+namespace MS_BAN_56_ProcesamientoTransaccionesPOS.Services.Transacciones;
+
+/// <summary>
+/// Clase de servicio para el procesamiento de transacciones POS.
+/// </summary>
+/// <param name="_connection">Inyección de clase IDatabaseConnection.</param>
+/// <param name="_contextAccessor">Inyección de clase IHttpContextAccessor.</param>
+public class TransaccionesServices(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : ITransaccionesServices
+{
+    private string perfilTranserver = string.Empty; // Este valor debería ser dinámico o configurado según el contexto real.
+
+    /// <summary>
+    /// Represents the response data for saving transactions.
+    /// </summary>
+    /// <remarks>This field is intended to store an instance of <see cref="RespuestaGuardarTransaccionesDto"/>
+    /// that contains the result of a transaction-saving operation. It is protected and can be accessed  or modified by
+    /// derived classes.</remarks>
+    protected RespuestaGuardarTransaccionesDto _respuestaGuardarTransaccionesDto = new();
+
+    /// <ineheritdoc/>
+    public async Task<RespuestaGuardarTransaccionesDto> GuardarTransaccionesAsync(GuardarTransaccionesDto guardarTransaccionesDto)
+    {
+        await Task.Yield(); // Simula asincronía para cumplir con la firma async.
+        //Procesos Previos
+
+        //LLamada a método FecReal, reemplaza llamado a CLLE fecha Real (FECTIM) ICBSUSER/FECTIM
+        //  var (error, fecsys, horasys) = FecReal()
+
+        //Llamada a método VerFecha, reemplaza llamado a CLLE VerFecha (DSCDT) BNKPRD01/TAP001
+        var (found, yyyyMMdd) = VerFecha();
+        if (!found) return BuildError("400", "No se pudo obtener la fecha del sistema.");
+
+        _connection.Open(); //Abrimos la conexión a la base de datos
+
+        //============================Validaciones Previas============================//
+
+        // Normalización de importes: tolera "." o "," y espacios
+        var deb = Utilities.ParseMonto(guardarTransaccionesDto.MontoDebitado);
+        var cre = Utilities.ParseMonto(guardarTransaccionesDto.MontoAcreditado);
+
+        //Obtenemos perfil transerver de la configuración global
+        perfilTranserver = GlobalConnection.GetPerfilTranserver.PerfilTranserver;
+
+        //Validamos, si no hay perfil transerver, retornamos error porque el proceso no puede continuar.
+        if (perfilTranserver.IsNullOrEmpty()) return BuildError("400", "No se ha configurado el perfil transerver.");
+
+        //Validamos que al menos uno de los montos sea mayor a 0, no se puede postear ambos en 0.
+        if (deb <= 0m && cre <= 0m) return BuildError("400", "No hay importes a postear (ambos montos son 0).");
+
+        //Validamos si existe el comercio en la tabla BCAH96DTA/IADQCOM
+        var (existeComercio, codigoError, mensajeComercio) = BuscarComercio(guardarTransaccionesDto.NumeroCuenta, int.Parse(guardarTransaccionesDto.CodigoComercio));
+        if (!existeComercio) return BuildError(codigoError, mensajeComercio);
+
+        //Validación de Terminal
+        var (existeTerminal, codigoErrorTerminal, mensajeTerminal) = BuscarTerminal(guardarTransaccionesDto.Terminal, int.Parse(guardarTransaccionesDto.CodigoComercio));
+        if (!existeTerminal) return BuildError(codigoErrorTerminal, mensajeTerminal);
+
+        //============================Fin Validaciones Previas============================//
+
+        //============================Inicia Proceso Principal============================//
+
+        // 1. Obtenemos el Perfil Transerver del cliente.
+        var respuestaPerfil = VerPerfil(perfilTranserver);
+
+        // Si no existe el perfil, retornar error y no continuar con el proceso.
+        if (!respuestaPerfil.existePerfil) return BuildError(respuestaPerfil.codigoError, respuestaPerfil.descripcionError);
+
+        // 2. Obtenemos el último lote de la tabla POP801 para el perfil transerver.
+        //    Si no existe, se asume 0.
+        //    Esto reemplaza la lógica de VerUltLote en RPGLE.
+        var (ultimoLote, descripcionUltimoLote) = VerUltLote(perfilTranserver);
+
+        // 3. Llamamos al método NuevoLote con el valor obtenido.
+        //    Esto reemplaza la lógica de NuevoLote en RPGLE.
+        var (numeroLote, existeLote) = NuevoLote(perfilTranserver, "usuario", ultimoLote, ultimoLote);
+        if (!existeLote) return BuildError("400", "No se pudo crear un nuevo lote. " + descripcionUltimoLote);
+
+        //Validar 
+        int secuencia = 0;
+
+        //Validación de naturaleza contable
+        switch (guardarTransaccionesDto.NaturalezaContable)
+        {
+            case "C":
+                //Proceso de crédito
+                secuencia += 1;
+                InsertPop802(
+                    perfil: perfilTranserver,
+                    lote: numeroLote,
+                    seq: secuencia,
+                    fechaYyyyMmDd: Convert.ToInt32(yyyyMMdd),
+                    cuenta: guardarTransaccionesDto.NumeroCuenta,      // TSTACT: cuenta objetivo (cliente/comercio)
+                    centroCosto: 0,                // TSWSCC: si requieres C.C., cámbialo aquí
+                    codTrn: "0783",                // 0783 = Crédito (convención del core)
+                    monto: cre,
+                    al1: guardarTransaccionesDto.NombreComercio,       // leyenda 1
+                    al2: $"{guardarTransaccionesDto.CodigoComercio}-{guardarTransaccionesDto.Terminal}", // leyenda 2
+                    al3: $"&{EtiquetaConcepto(guardarTransaccionesDto.NaturalezaContable)}&{guardarTransaccionesDto.IdTransaccionUnico}&Cr Tot." // leyenda 3
+                );
+                break;
+            case "D":
+                //Proceso de débito
+                secuencia += 1;
+                InsertPop802(
+                    perfil: perfilTranserver,
+                    lote: numeroLote,
+                    seq: secuencia,
+                    fechaYyyyMmDd: Convert.ToInt32(yyyyMMdd),
+                    cuenta: guardarTransaccionesDto.NumeroCuenta,
+                    centroCosto: 0,
+                    codTrn: "0784",                // 0784 = Débito (convención del core)
+                    monto: deb,
+                    al1: guardarTransaccionesDto.NombreComercio,
+                    al2: $"{guardarTransaccionesDto.CodigoComercio}-{guardarTransaccionesDto.Terminal}",
+                    al3: $"&{EtiquetaConcepto(guardarTransaccionesDto.NaturalezaContable)}&{guardarTransaccionesDto.IdTransaccionUnico}&Db Tot."
+                );
+                break;
+            default:
+                return BuildError("00001", "Naturaleza contable inválida.");
+        }
+
+        return BuildError(code: "200", message: "Transacción procesada correctamente.");
+    }
+
+    // ============================ Utilidades ============================
+
+    /// <summary>
+    /// Equivalente a: 
+    /// <c>CALL FECTIM PARM(FAAAAMMDD HORA)</c>.
+    /// </summary>
+    /// <returns>
+    /// (respuesta: true/false, fecsys: "yyyyMMdd" (8), horasys: "HHmmss" (7))
+    /// </returns>
+    public (bool respuesta, string fecsys, string horasys) FecReal()
+    {
+        // Variables de salida: simulan los PARM de CLLE.
+        string fecsys = string.Empty;   // &FAAAAMMDD (8)
+        string horasys = string.Empty;  // &HORA      (7)
+
+        try
+        {
+            // ================== SQL generado ==================
+            // SELECT
+            //   CURRENT_DATE AS FECHA,
+            //   CURRENT_TIME AS HORA
+            // FROM SYSIBM.SYSDUMMY1
+            // ==================================================
+            var query = QueryBuilder.Core.QueryBuilder
+                .From("SYSDUMMY1", "SYSIBM")
+                .Select(
+                    "CURRENT_DATE AS FECHA",
+                    "CURRENT_TIME AS HORA"
+                )
+                .FetchNext(1)
+                .Build();
+
+            using var cmd = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+            cmd.CommandText = query.Sql;
+
+            using var rd = cmd.ExecuteReader();
+            if (!rd.Read())
+                return (false, fecsys, horasys);
+
+            // Lectura directa por índice para máximo rendimiento
+            fecsys = rd.GetString(0).Replace("-", "");                 // "yyyyMMdd" (8)
+            horasys = rd.GetString(1).PadRight(7).Replace(".", "");     // "HHmmss" -> ajustado a LEN(7)
+
+            return (true, fecsys, horasys);
+        }
+        catch
+        {
+            // Si hay error, mantenemos contrato similar al PGM (bandera false)
+            return (false, fecsys, horasys);
+        }
+    }
+
+    /// <summary>
+    /// Lee DSCDT desde BNKPRD01.TAP001 (DSBK=001) y retorna:
+    /// - el valor bruto DSCDT (CYYMMDD)
+    /// - la fecha formateada YYYYMMDD
+    /// </summary>
+    /// <returns>seObtuvoFecha, dscdtCyyMmDd, yyyyMMdd</returns>
+    private (bool seObtuvoFecha,string yyyyMMdd) VerFecha()
+    {
+        // Valores de salida predeterminados para conservar contrato estable.
+        var dscdt = 0;            // valor crudo CYYMMDD
+        var yyyyMMdd = string.Empty;
+
+        try
+        {
+            // SELECT DSCDT FROM BNKPRD01.TAP001 WHERE DSBK = 1 FETCH FIRST 1 ROW ONLY
+            // - Se usa DTO para habilitar lambdas tipadas y evitar cadenas mágicas.
+            var query = QueryBuilder.Core.QueryBuilder
+                .From("TAP001", "BNKPRD01")
+                .Select("DSCDT")             // solo la columna necesaria
+                .Where<Tap001>(x => x.DSBK == 1)          // DSBK = 001 en RPGLE
+                .FetchNext(1)                              // equivalente a CHAIN + %FOUND
+                .Build();
+
+            using var cmd = _connection.GetDbCommand(_contextAccessor.HttpContext!);
+            cmd.CommandText = query.Sql;
+
+            using var rd = cmd.ExecuteReader();
+            if (!rd.Read())
+                return (false, yyyyMMdd);
+
+            // Lectura directa: índice 0 porque solo seleccionamos DSCDT.
+            dscdt = rd.GetInt32(0);
+
+            // Conversión de CYYMMDD → YYYYMMDD para uso homogéneo en .NET/SQL.
+            yyyyMMdd = ConvertCyyMmDdToYyyyMmDd(dscdt);
+
+            return (true, yyyyMMdd);
+        }
+        catch
+        {             // En caso de error, retornamos valores predeterminados.
+            return (false, yyyyMMdd);
+        }
+    }
+
+    /// <summary>
+    /// Convierte un entero en formato IBM i CYYMMDD (p. ej. 1240912) a "YYYYMMDD".
+    /// </summary>
+    /// <remarks>
+    /// - C: siglo relativo a 1900 (0=>1900, 1=>2000, etc.).  
+    /// - YY: año dentro del siglo.  
+    /// - MM: mes, DD: día.
+    /// </remarks>
+    private static string ConvertCyyMmDdToYyyyMmDd(int cyymmdd)
+    {
+        // Separación de C, YY, MM, DD usando división/módulo para evitar parseos de string.
+        var c = cyymmdd / 1000000;                 // dígito del siglo
+        var yy = (cyymmdd / 10000) % 100;            // dos dígitos de año
+        var mm = (cyymmdd / 100) % 100;            // mes
+        var dd = cyymmdd % 100;            // día
+
+        // Año absoluto: 1900 + (C * 100) + YY. Para C=1 => 2000+YY.
+        var yyyy = 1900 + (c * 100) + yy;
+
+        // Composición sin separadores para uso en sistemas que requieren 8 caracteres.
+        return $"{yyyy:0000}{mm:00}{dd:00}";
+    }
+
+
+    /// <summary>
+    /// Método de validación de existencia de comercio en tabla BCAH96DTA/IADQCOM.
+    /// </summary>
+    /// <param name="cuentaRecibida">Número de cuenta recibido en la petición.</param>
+    /// <param name="codigoComercioRecibido">Código de Comercio recibido en la petición.</param>
+    /// <returns>Retorna un tupla
+    /// /// (existeComercio: true/false, codigoError: "000001" , mensajeComercio: "Descripcioón del error")
+    /// </returns>
+    private (bool existeComercio, string codigoError, string mensajeComercio) BuscarComercio(string cuentaRecibida, int codigoComercioRecibido)
+    {
+        try
+        {
+            // Construimos consulta SQL con QueryBuilder para verificar existencia de perfil
+            var buscarComercio = QueryBuilder.Core.QueryBuilder
+                .From("IADQCOM", "BCAH96DTA")
+                .Select("*")  // Solo necesitamos validar existencia
+                .Where<AdqCom>(x => x.ADQCOME == codigoComercioRecibido)
+                .Where<AdqCom>(x => x.ADQCTDE == cuentaRecibida) // Filtro dinámico por perfil
+                .FetchNext(1)                // Solo necesitamos un registro
+                .OrderBy("ADQCOME", QueryBuilder.Enums.SortDirection.Asc)
+                .Build();
+
+            using var command = _connection.GetDbCommand(buscarComercio, _contextAccessor.HttpContext!);
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                return (true, "00001", "Existe Comercio."); // Coemrcio existe
+            }
+            return (false, "00002", "No existe Comercio."); // Comercio no existe
+        }
+        catch (Exception ex)
+        {
+            // Manejo de errores en la consulta
+            return (false, "0003", ex.Message); // Indica error al consultar comercio
+        }
+    }
+
+    /// <summary>
+    /// Método de validación de existencia de terminal en tabla BCAH96DTA/ADQ03TER.
+    /// </summary>
+    /// <param name="terminalRecibida">Número de terminal Recibida</param>
+    /// <param name="codigoComercioRecibido">Código Comercio Recibido.</param>
+    /// <returns></returns>
+    private (bool existeTerminal, string codigoError, string mensajeTerminal) BuscarTerminal(string terminalRecibida, int codigoComercioRecibido)
+    {
+        try
+        {
+            // Construimos consulta SQL con QueryBuilder para verificar existencia de perfil
+            var buscarComercio = QueryBuilder.Core.QueryBuilder
+                .From("ADQ03TER", "BCAH96DTA")
+                .Select("*")  // Solo necesitamos validar existencia
+                .Where<Adq03Ter>(x => x.A03COME == codigoComercioRecibido)
+                .Where<Adq03Ter>(x => x.A03TERM == terminalRecibida)
+                .OrderBy(("A03TERM", SortDirection.Asc), ("A03TERM", SortDirection.Asc))
+                .Build();
+
+            using var command = _connection.GetDbCommand(buscarComercio, _contextAccessor.HttpContext!);
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                return (true, "00001", "Existe terminal."); // Terminal existe
+            }
+            return (false, "00002", "No existe terminal."); // Terminal no existe
+        }
+        catch (Exception ex)
+        {
+            // Manejo de errores en la consulta
+            return (false, "0003", ex.Message); // Indica error al consultar comercio
+        }
+    }
+
+
+
+    /// <summary>
+    /// Verifica si existe un perfil en la tabla CFP801 y ejecuta la lógica correspondiente.
+    /// </summary>
+    /// <param name="perfil">Clave de perfil (CFTSKY en RPGLE).</param>
+    /// <returns>Tupla (bool, string,  string), true o false y descripción si existe o no el perfil</returns>
+    private (bool existePerfil, string codigoError, string descripcionError) VerPerfil(string perfil)
+    {
+        try
+        {
+            // Construimos consulta SQL con QueryBuilder para verificar existencia de perfil
+            var verPerfilSql = QueryBuilder.Core.QueryBuilder
+                .From("CFP801", "BCAH96DTA")
+                .Select("CFTSBK", "CFTSKY")  // Solo necesitamos validar existencia
+                .Where<Cfp801>(x => x.CFTSBK == 001)       // Condición fija
+                .Where<Cfp801>(x => x.CFTSKY == perfil) // Filtro dinámico por perfil
+                .FetchNext(1)                // Solo necesitamos un registro
+                .Build();
+
+            using var command = _connection.GetDbCommand(verPerfilSql, _contextAccessor.HttpContext!);
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                return (true, "00001", "Existe Perfil Transerver."); // Perfil existe
+            }
+            return (false, "00002", "No existe Perfil Transerver."); // Perfil no existe
+        }
+        catch (Exception ex)
+        {
+            // Manejo de errores en la consulta
+            return (false, "0003", "Error general: " + ex.Message); // Indica error al consultar perfil
+        }
+    }
+
+    /// <summary>
+    /// Obtiene el último valor de FTSBT para un perfil dado (equivalente al VerUltlote en RPGLE).
+    /// </summary>
+    /// <param name="perfil">Clave de perfil que corresponde a FTTSKY.</param>
+    /// <returns>El último valor de FTSBT encontrado o 0 si no existe.</returns>
+    private (int ultimoLote, string descripcionUltimoLote) VerUltLote(string perfil)
+    {
+        // Variable resultado (equivalente a wFTSBT en RPGLE)
+        int ultimoFTSBT = 0;
+
+        try
+        {
+
+            // Construimos el query con QueryBuilder
+            var ultimoLoteQuery = QueryBuilder.Core.QueryBuilder
+                .From("POP801", "BCAH96DTA")   // Tabla POP801 en librería AS400
+                .Select("FTSBT")               // Campo que queremos traer
+                .WhereRaw("FTTSBK = 001")         // Condición fija de RPGLE
+                .Where<Pop801>(x => x.FTTSKY == perfil) // Filtro dinámico por PERFIL
+                .OrderBy("FTSBT DESC")         // Simula leer hasta el último FTSBT
+                .FetchNext(1)                  // Solo el último
+                .Build();
+
+            using var command = _connection.GetDbCommand(ultimoLoteQuery, _contextAccessor.HttpContext!);
+
+            using var reader = command.ExecuteReader();
+            if (reader.Read())
+            {
+                ultimoFTSBT = reader.GetInt32(0);
+            }
+            return (ultimoFTSBT, ultimoFTSBT > 0 ? "Se encontro Último." : "No se encontro último lote.");
+        }
+        catch (Exception ex)
+        {
+            return (0, ex.Message); // Retorna 0 en caso de error
+        }
+    }
+
+    /// <summary>
+    /// Inserta un nuevo lote en <c>BNKPRD01.POP801</c>.
+    /// </summary>
+    /// <param name="perfil">Valor para FTTSKY.</param>
+    /// <param name="usuario">Valor para FTTSOR.</param>
+    /// <param name="dsdt">Fecha operativa (CYYMMDD) para FTTSDT.</param>
+    /// <param name="ultimoFtsbt">Último FTSBT existente (para calcular el siguiente).</param>
+    /// <returns>El número de lote generado (FTSBT) y si se persistió correctamente.</returns>
+    private (int numeroLote, bool existeLote) NuevoLote(string perfil, string usuario, int dsdt, int ultimoFtsbt)
+    {
+        // ► En RPG: wFTSBT = wFTSBT + 1; FTTSBK = 001; FTTSKY = PERFIL; FTSBT = wFTSBT; FTSST = 02; FTTSOR = Usuario; FTTSDT = DSDT; write Pop8011
+
+        var siguienteFtsbt = ultimoFtsbt + 1; // número de lote que se insertará
+
+        try
+        {
+            // IntoColumns define el orden de columnas; Row especifica los valores respetando ese orden.
+            var insertNuevoLote = new InsertQueryBuilder("POP801", "BNKPRD01")
+                .IntoColumns("FTTSBK", "FTTSKY", "FTTSBT", "FTTSST", "FTTSOR", "FTTSDT")
+                .Row([1, perfil, siguienteFtsbt, 2, usuario, dsdt])
+                .Build();
+
+            using var cmd = _connection.GetDbCommand(insertNuevoLote, _contextAccessor.HttpContext!);
+
+            var affected = cmd.ExecuteNonQuery(); // write Pop8011
+
+            return (siguienteFtsbt, affected > 0);
+        }
+        catch
+        {
+            return (0, false); // En caso de error, retornamos 0 y false.}
+        }
+    }
+
+    /// <summary>
+    /// Inserta una fila en POP802 (detalle de posteo) con campos esenciales.
+    /// </summary>
+    private void InsertPop802(
+        string perfil,
+        int lote,
+        int seq,
+        int fechaYyyyMmDd,
+        string cuenta,
+        int centroCosto,
+        string codTrn,
+        decimal monto,
+        string al1,
+        string al2,
+        string al3)
+    {
+        // Nota funcional: POP802 requiere varias columnas obligatorias del core.
+        // Aquí posteamos lo esencial (override, fecha, cuenta, tcode, monto y leyendas).
+        var pop802Sql = new InsertQueryBuilder("POP802", "BNKPRD01")
+            .IntoColumns(
+                "TSBK",    // Bank
+                "TSTSKY",  // Perfil
+                "TSBTCH",  // Lote
+                "TSWSEQ",  // Secuencia
+                "TSTOVR",  // Override
+                "TSTTDT",  // Fecha efectiva (YYYYMMDD)
+                "TSTACT",  // Cuenta
+                "TSWSCC",  // Centro de costo
+                "TSWTCD",  // Código de transacción
+                "TSTCC",   // Monto
+                "TSTAL1",  // Leyenda 1
+                "TSTAL2",  // Leyenda 2
+                "TSTAL3"   // Leyenda 3
+            )
+            .Row([
+                1,
+                perfil,
+                lote,
+                seq,
+                "S",
+                fechaYyyyMmDd,
+                cuenta,
+                centroCosto,
+                codTrn,
+                monto,
+                Trunc(al1, 30),
+                Trunc(al2, 30),
+                Trunc(al3, 30)
+            ])
+            .Build();
+
+        using var cmd = _connection.GetDbCommand(pop802Sql, _contextAccessor.HttpContext!);
+
+        var aff = cmd.ExecuteNonQuery();
+
+        if (aff <= 0) throw new InvalidOperationException("No se pudo insertar el detalle POP802.");
+    }
+
+    /// <summary>
+    /// Método auxiliar para truncar cadenas a una longitud máxima.
+    /// </summary>
+    /// <param name="s"></param>
+    /// <param name="max"></param>
+    /// <returns></returns>
+    private static string Trunc(string? s, int max)
+    {
+        if (string.IsNullOrEmpty(s))
+            return string.Empty;
+        if (s.Length <= max)
+            return s;
+        return s[..max];
+    }
+
+    /// <summary>Convierte "C"/"D" a etiqueta corta funcional.</summary>
+    private static string EtiquetaConcepto(string nat) => (nat ?? "C").Equals("D", StringComparison.InvariantCultureIgnoreCase) ? "DB" : "CR";
+
+    /// <summary>
+    /// Crea un DTO de respuesta de error con metadatos consistentes.
+    /// </summary>
+    private static RespuestaGuardarTransaccionesDto BuildError(string code, string message)
+        => new()
+        {
+            CodigoError = code,
+            DescripcionError = message
+        };
+}
+
+
+
+
+
+
+Y este es el código que generaste, en que difieren ambos.
+    
 using Connections.Abstractions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.IdentityModel.Tokens;
@@ -379,3 +908,4 @@ public class Pop801
 } 
 
 // Nota: La interfaz ITransaccionesServices ya existe en tu proyecto y expone GuardarTransaccionesAsync. 14
+
