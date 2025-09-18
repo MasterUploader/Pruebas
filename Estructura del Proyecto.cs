@@ -1,584 +1,173 @@
-Así quedo el código
+¡pinta muy bien! Te faltó cerrar lo que quedó en ObtenerRegla… y agregar las piezas del desglose + reglas. Te dejo todo lo que falta para que compile y funcione con tu SelectQueryBuilder/InsertQueryBuilder/UpdateQueryBuilder (RestUtilities.QueryBuilder). Mantengo tu estilo: constructor primario, new() y listas [], más XML docs y comentarios funcionales.
 
-using Connections.Abstractions;
-using Microsoft.IdentityModel.Tokens;
-using MS_BAN_56_ProcesamientoTransaccionesPOS.Models;
-using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.AS400.BCAH96DTA;
-using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.AS400.BNKPRD01;
-using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Transacciones.GuardarTransacciones;
-using MS_BAN_56_ProcesamientoTransaccionesPOS.Utils;
-using QueryBuilder.Builders;
-using QueryBuilder.Enums;
-using System.Globalization;
 
-namespace MS_BAN_56_ProcesamientoTransaccionesPOS.Services.Transacciones;
+---
+
+1) Modelos de reglas (colócalos fuera de la clase, en el mismo archivo o en Models)
 
 /// <summary>
-/// Clase de servicio para el procesamiento de transacciones POS.
+/// Regla de cargo (porcentaje o monto fijo) dirigida a una cuenta GL.
 /// </summary>
-/// <param name="_connection">Inyección de clase IDatabaseConnection.</param>
-/// <param name="_contextAccessor">Inyección de clase IHttpContextAccessor.</param>
-public class TransaccionesServices(IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : ITransaccionesServices
+/// <remarks>
+/// Se aplica sobre el total enviado en la petición; si hay % y monto fijo, se suman.
+/// </remarks>
+public sealed class ReglaCargo()
 {
-    /// <summary>
-    /// Represents the response data for saving transactions.
-    /// </summary>
-    /// <remarks>This field is intended to store an instance of <see cref="RespuestaGuardarTransaccionesDto"/>
-    /// that contains the result of a transaction-saving operation. It is protected and can be accessed  or modified by
-    /// derived classes.</remarks>
-    protected RespuestaGuardarTransaccionesDto _respuestaGuardarTransaccionesDto = new();
+    public string Codigo { get; set; } = string.Empty;   // Ej. "INT", "COM", "IVA"
+    public string CuentaGl { get; set; } = string.Empty; // Cuenta contable destino (GL)
+    public decimal Porcentaje { get; set; }              // 0..1 (3% => 0.03)
+    public decimal MontoFijo { get; set; }               // importe fijo
+}
 
-    /// <ineheritdoc/>
-    public async Task<RespuestaGuardarTransaccionesDto> GuardarTransaccionesAsync(GuardarTransaccionesDto guardarTransaccionesDto)
+/// <summary>
+/// Resultado de un cargo calculado (monto final y metadatos).
+/// </summary>
+public sealed class CargoCalculado()
+{
+    public string Codigo { get; set; } = string.Empty;
+    public string CuentaGl { get; set; } = string.Empty;
+    public decimal Monto { get; set; }
+}
+
+
+---
+
+2) Métodos que faltan dentro de TransaccionesServices
+
+2.1 Completar ObtenerReglasDesdeIadqctl(...)
+
+/// <summary>
+/// Lee reglas base para un perfil/comercio desde IADQCTL (cuentas y porcentajes).
+/// </summary>
+/// <remarks>
+/// Convierte % base 100 → factor (0..1). Ajusta nombres de columnas si tu PF difiere.
+/// </remarks>
+private List<ReglaCargo> ObtenerReglasDesdeIadqctl(string perfil, int comercio)
+{
+    var reglas = new List<ReglaCargo>();
+
+    var q = QueryBuilder.Core.QueryBuilder
+        .From("IADQCTL", "BCAH96DTA")
+        .Select(
+            "ADQCNT1 AS CTA_INT",
+            "ADQCNT2 AS CTA_COM",
+            "ADQCNT3 AS CTA_IVA",
+            "ADQMDVC AS PCT_INT",
+            "ADQMDVT AS PCT_COM",
+            "ADQMFAI AS PCT_IVA",
+            "ADQMTO1 AS MF_INT",
+            "ADQMTO2 AS MF_COM"
+        )
+        // Puedes filtrar por PERFIL o por COMERCIO; aquí se intenta PERFIL y si no hay fila, se podría hacer fallback a comercio.
+        .WhereRaw("(ADQPERF = :p OR ADQCOME = :c)")
+        .WithParameters(new { p = perfil, c = comercio })
+        .FetchNext(1)
+        .Build();
+
+    using var cmd = _connection.GetDbCommand(q, _contextAccessor.HttpContext!);
+    using var rd = cmd.ExecuteReader();
+    if (!rd.Read()) return reglas;
+
+    static decimal Pct(object? o) => o is DBNull or null ? 0m : Convert.ToDecimal(o, CultureInfo.InvariantCulture) / 100m;
+    static decimal Mf(object? o)  => o is DBNull or null ? 0m : Convert.ToDecimal(o, CultureInfo.InvariantCulture);
+    static string Gl(object? o)   => o is DBNull or null ? ""  : Convert.ToString(o)!.Trim();
+
+    var rInt = new ReglaCargo { Codigo = "INT", CuentaGl = Gl(rd["CTA_INT"]), Porcentaje = Pct(rd["PCT_INT"]), MontoFijo = Mf(rd["MF_INT"]) };
+    var rCom = new ReglaCargo { Codigo = "COM", CuentaGl = Gl(rd["CTA_COM"]), Porcentaje = Pct(rd["PCT_COM"]), MontoFijo = Mf(rd["MF_COM"]) };
+    var rIva = new ReglaCargo { Codigo = "IVA", CuentaGl = Gl(rd["CTA_IVA"]), Porcentaje = Pct(rd["PCT_IVA"]), MontoFijo = 0m };
+
+    if (!rInt.CuentaGl.IsNullOrEmpty() && (rInt.Porcentaje > 0m || rInt.MontoFijo > 0m)) reglas.Add(rInt);
+    if (!rCom.CuentaGl.IsNullOrEmpty() && (rCom.Porcentaje > 0m || rCom.MontoFijo > 0m)) reglas.Add(rCom);
+    if (!rIva.CuentaGl.IsNullOrEmpty() &&  rIva.Porcentaje > 0m) reglas.Add(rIva);
+
+    return reglas;
+}
+
+2.2 MergeConEcommerce(...) (si no usas e-commerce, deja esTerminalVirtual:false y no altera nada)
+
+/// <summary>
+/// Funde reglas e-commerce (ADQECTL) con las base si la terminal es virtual.
+/// </summary>
+private List<ReglaCargo> MergeConEcommerce(List<ReglaCargo> baseRules, int comercio, bool esTerminalVirtual)
+{
+    if (!esTerminalVirtual) return baseRules;
+
+    var reglas = baseRules.ToDictionary(r => r.Codigo, r => r);
+
+    var q = QueryBuilder.Core.QueryBuilder
+        .From("ADQECTL", "BCAH96DTA")
+        .Select(
+            "ADQECNT1 AS CTA_INT_EC",
+            "ADQECNT5 AS CTA_COM_EC",
+            "ADQECTR1 AS PCT_INT_EC",
+            "ADQECTR5 AS PCT_COM_EC"
+        )
+        .WhereRaw("A02COME = :c")
+        .WithParameters(new { c = comercio })
+        .FetchNext(1)
+        .Build();
+
+    using var cmd = _connection.GetDbCommand(q, _contextAccessor.HttpContext!);
+    using var rd = cmd.ExecuteReader();
+    if (!rd.Read()) return baseRules;
+
+    static string Gl(object? o)   => o is DBNull or null ? ""  : Convert.ToString(o)!.Trim();
+    static decimal Pct(object? o) => o is DBNull or null ? 0m : Convert.ToDecimal(o, CultureInfo.InvariantCulture) / 100m;
+
+    var ctaInt = Gl(rd["CTA_INT_EC"]);
+    var ctaCom = Gl(rd["CTA_COM_EC"]);
+    var pctInt = Pct(rd["PCT_INT_EC"]);
+    var pctCom = Pct(rd["PCT_COM_EC"]);
+
+    if (!ctaInt.IsNullOrEmpty() || pctInt > 0m)
     {
-        await Task.Yield(); // Simula asincronía para cumplir con la firma async.
-        //Procesos Previos
-
-        _connection.Open(); //Abrimos la conexión a la base de datos
-
-        //LLamada a método FecReal, reemplaza llamado a CLLE fecha Real (FECTIM) ICBSUSER/FECTIM
-        //  var (error, fecsys, horasys) = FecReal()
-
-        //Llamada a método VerFecha, reemplaza llamado a CLLE VerFecha (DSCDT) BNKPRD01/TAP001
-        var (found, yyyyMMdd) = VerFecha();
-        if (!found) return BuildError("400", "No se pudo obtener la fecha del sistema.");
-
-        //============================Validaciones Previas============================//
-
-        // Normalización de importes: tolera "." o "," y espacios
-        var deb = Utilities.ParseMonto(guardarTransaccionesDto.MontoDebitado);
-        var cre = Utilities.ParseMonto(guardarTransaccionesDto.MontoAcreditado);
-
-        //Validamos que al menos uno de los montos sea mayor a 0, no se puede postear ambos en 0.
-        if (deb <= 0m && cre <= 0m) return BuildError("400", "No hay importes a postear (ambos montos son 0).");
-
-        //Obtenemos perfil transerver de la configuración global
-        string perfilTranserver = GlobalConnection.Current.PerfilTranserver;
-
-        //Validamos, si no hay perfil transerver, retornamos error porque el proceso no puede continuar.
-        if (perfilTranserver.IsNullOrEmpty()) return BuildError("400", "No se ha configurado el perfil transerver.");
-
-        //Validamos si existe el comercio en la tabla BCAH96DTA/IADQCOM
-        var (existeComercio, codigoError, mensajeComercio) = BuscarComercio(guardarTransaccionesDto.NumeroCuenta, int.Parse(guardarTransaccionesDto.CodigoComercio));
-        if (!existeComercio) return BuildError(codigoError, mensajeComercio);
-
-        //Validación de Terminal
-        var (existeTerminal, codigoErrorTerminal, mensajeTerminal) = BuscarTerminal(guardarTransaccionesDto.Terminal, int.Parse(guardarTransaccionesDto.CodigoComercio));
-        if (!existeTerminal) return BuildError(codigoErrorTerminal, mensajeTerminal);
-
-        //============================Fin Validaciones Previas============================//
-
-        //============================Inicia Proceso Principal============================//
-
-        // 1. Obtenemos el Perfil Transerver del cliente.
-        var respuestaPerfil = VerPerfil(perfilTranserver);
-
-        // Si no existe el perfil, retornar error y no continuar con el proceso.
-        if (!respuestaPerfil.existePerfil) return BuildError(respuestaPerfil.codigoError, respuestaPerfil.descripcionError);
-
-        //    Esto reemplaza la lógica de NuevoLote en RPGLE.
-        // (A) Reservar número de lote (reemplaza tu llamada a NuevoLote(...))
-        var (numeroLote, reservado) = ReservarNumeroLote(perfilTranserver, Convert.ToInt32(yyyyMMdd), "usuario");
-        if (!reservado) return BuildError("400", "No fue posible reservar un número de lote (POP801).");
-
-        // (B) Preparar reglas y postear desglose
-        var nat = guardarTransaccionesDto.NaturalezaContable;             // "C" o "D"
-        var montoBruto = nat == "C" ? cre : deb;
-
-        // Si tienes una validación real de terminal virtual, úsala; aquí dejo false por defecto
-        var reglas = ObtenerReglasCargos(perfilTranserver, int.Parse(guardarTransaccionesDto.CodigoComercio), esTerminalVirtual: false);
-
-        // Si quieres continuar numeración de secuencia que ya traías:
-        var secuencia = 0;
-
-        var posteoDesglose = PostearDesglose(
-            perfil: perfilTranserver,
-            numeroLote: numeroLote,
-            fechaYyyyMmDd: Convert.ToInt32(yyyyMMdd),
-            naturalezaPrincipal: nat,
-            cuentaComercio: guardarTransaccionesDto.NumeroCuenta,
-            totalBruto: montoBruto,
-            reglas: reglas,
-            codComercio: guardarTransaccionesDto.CodigoComercio,
-            terminal: guardarTransaccionesDto.Terminal,
-            nombreComercio: guardarTransaccionesDto.NombreComercio,
-            idUnico: guardarTransaccionesDto.IdTransaccionUnico,
-            secuenciaInicial: secuencia
-        );
-
-        if(!posteoDesglose) return BuildError("400", "No fue posible postear el detalle de la transacción (POP802).");
-
-        return BuildError(code: "200", message: "Transacción procesada correctamente.");
+        if (!reglas.TryGetValue("INT", out var r)) r = reglas["INT"] = new() { Codigo = "INT" };
+        if (!ctaInt.IsNullOrEmpty()) r.CuentaGl = ctaInt;
+        r.Porcentaje += pctInt;
+    }
+    if (!ctaCom.IsNullOrEmpty() || pctCom > 0m)
+    {
+        if (!reglas.TryGetValue("COM", out var r)) r = reglas["COM"] = new() { Codigo = "COM" };
+        if (!ctaCom.IsNullOrEmpty()) r.CuentaGl = ctaCom;
+        r.Porcentaje += pctCom;
     }
 
-    // ============================ Utilidades ============================
+    return reglas.Values
+        .Where(r => !r.CuentaGl.IsNullOrEmpty() && (r.Porcentaje > 0m || r.MontoFijo > 0m))
+        .ToList();
+}
 
-    /// <summary>
-    /// Equivalente a: 
-    /// <c>CALL FECTIM PARM(FAAAAMMDD HORA)</c>.
-    /// </summary>
-    /// <returns>
-    /// (respuesta: true/false, fecsys: "yyyyMMdd" (8), horasys: "HHmmss" (7))
-    /// </returns>
-    public (bool respuesta, string fecsys, string horasys) FecReal()
+2.3 PostearDesglose(...) (retorna bool como lo estás usando)
+
+/// <summary>
+/// Aplica reglas y postea: 1 línea principal (neto) + N líneas de cargos (naturaleza opuesta).
+/// También actualiza totales de POP801.
+/// </summary>
+/// <returns>true si todas las inserciones se realizaron; false si alguna falla.</returns>
+private bool PostearDesglose(
+    string perfil,
+    int numeroLote,
+    int fechaYyyyMmDd,
+    string naturalezaPrincipal,    // "C" (crédito) o "D" (débito)
+    string cuentaComercio,         // cuenta del comercio
+    decimal totalBruto,            // total recibido en el API
+    List<ReglaCargo> reglas,       // reglas de cargos
+    string codComercio,
+    string terminal,
+    string nombreComercio,
+    string idUnico,
+    int secuenciaInicial = 0)
+{
+    var cargos = CalcularCargos(totalBruto, reglas);
+    var totalCargos = cargos.Sum(x => x.Monto);
+    var neto = Decimal.Round(totalBruto - totalCargos, 2, MidpointRounding.AwayFromZero);
+
+    var seq = secuenciaInicial;
+
+    try
     {
-        // Variables de salida: simulan los PARM de CLLE.
-        string fecsys = string.Empty;   // &FAAAAMMDD (8)
-        string horasys = string.Empty;  // &HORA      (7)
-
-        try
-        {
-            // ================== SQL generado ==================
-            // SELECT
-            //   CURRENT_DATE AS FECHA,
-            //   CURRENT_TIME AS HORA
-            // FROM SYSIBM.SYSDUMMY1
-            // ==================================================
-            var query = new SelectQueryBuilder("SYSDUMMY1", "SYSIBM")
-                .Select(
-                    "CURRENT_DATE AS FECHA",
-                    "CURRENT_TIME AS HORA"
-                )
-                .FetchNext(1)
-                .Build();
-
-            using var cmd = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-            cmd.CommandText = query.Sql;
-
-            using var rd = cmd.ExecuteReader();
-            if (!rd.Read())
-                return (false, fecsys, horasys);
-
-            // Lectura directa por índice para máximo rendimiento
-            fecsys = rd.GetString(0).Replace("-", "");                 // "yyyyMMdd" (8)
-            horasys = rd.GetString(1).PadRight(7).Replace(".", "");     // "HHmmss" -> ajustado a LEN(7)
-
-            return (true, fecsys, horasys);
-        }
-        catch
-        {
-            // Si hay error, mantenemos contrato similar al PGM (bandera false)
-            return (false, fecsys, horasys);
-        }
-    }
-
-    /// <summary>
-    /// Lee DSCDT desde BNKPRD01.TAP001 (DSBK=001) y retorna:
-    /// - el valor bruto DSCDT (CYYMMDD)
-    /// - la fecha formateada YYYYMMDD
-    /// </summary>
-    /// <returns>seObtuvoFecha, dscdtCyyMmDd, yyyyMMdd</returns>
-    private (bool seObtuvoFecha, string yyyyMMdd) VerFecha()
-    {
-        // Valores de salida predeterminados para conservar contrato estable.
-        var dscdt = 0;            // valor crudo CYYMMDD
-        var yyyyMMdd = string.Empty;
-
-        try
-        {
-            // SELECT DSCDT FROM BNKPRD01.TAP001 WHERE DSBK = 1 FETCH FIRST 1 ROW ONLY
-            // - Se usa DTO para habilitar lambdas tipadas y evitar cadenas mágicas.
-            var query = new SelectQueryBuilder("TAP001", "BNKPRD01")
-                .Select("DSCDT")             // solo la columna necesaria
-                .Where<Tap001>(x => x.DSBK == 1)          // DSBK = 001 en RPGLE
-                .FetchNext(1)                              // equivalente a CHAIN + %FOUND
-                .Build();
-
-            using var cmd = _connection.GetDbCommand(query, _contextAccessor.HttpContext!);
-
-            using var rd = cmd.ExecuteReader();
-            if (rd.Read())
-            {
-                // Devuelve el primer SCUSER encontrado
-                var ordinal = rd.GetOrdinal("DSCDT");
-                if (!rd.IsDBNull(ordinal))
-                    dscdt = (int)rd.GetDecimal(ordinal);
-
-                string fechaStr = ((long)dscdt).ToString("D8"); // Asegura 8 dígitos
-                string dd = fechaStr[..2];
-                string mm = fechaStr.Substring(2, 2);
-                string yy = fechaStr.Substring(4, 4);
-
-                yyyyMMdd = yy + mm + dd; // Formato YYYYMMDD
-
-                return (true, yyyyMMdd);
-            }
-            return (false, yyyyMMdd); // No se encontró registro
-        }
-        catch
-        {             // En caso de error, retornamos valores predeterminados.
-            return (false, yyyyMMdd);
-        }
-    }
-
-    /// <summary>
-    /// Método de validación de existencia de comercio en tabla BCAH96DTA/IADQCOM.
-    /// </summary>
-    /// <param name="cuentaRecibida">Número de cuenta recibido en la petición.</param>
-    /// <param name="codigoComercioRecibido">Código de Comercio recibido en la petición.</param>
-    /// <returns>Retorna un tupla
-    /// /// (existeComercio: true/false, codigoError: "000001" , mensajeComercio: "Descripcioón del error")
-    /// </returns>
-    private (bool existeComercio, string codigoError, string mensajeComercio) BuscarComercio(string cuentaRecibida, int codigoComercioRecibido)
-    {
-        try
-        {
-            // Construimos consulta SQL con QueryBuilder para verificar existencia de perfil
-            var buscarComercio = QueryBuilder.Core.QueryBuilder
-                .From("IADQCOM", "BCAH96DTA")
-                .Select("*")  // Solo necesitamos validar existencia
-                .Where<AdqCom>(x => x.ADQCOME == codigoComercioRecibido)
-                .Where<AdqCom>(x => x.ADQCTDE == cuentaRecibida) // Filtro dinámico por perfil
-                .FetchNext(1)                // Solo necesitamos un registro
-                .OrderBy("ADQCOME", QueryBuilder.Enums.SortDirection.Asc)
-                .Build();
-
-            using var command = _connection.GetDbCommand(buscarComercio, _contextAccessor.HttpContext!);
-
-            using var reader = command.ExecuteReader();
-            if (reader.Read())
-            {
-                return (true, "00001", "Existe Comercio."); // Coemrcio existe
-            }
-            return (false, "00002", "No existe Comercio."); // Comercio no existe
-        }
-        catch (Exception ex)
-        {
-            // Manejo de errores en la consulta
-            return (false, "0003", ex.Message); // Indica error al consultar comercio
-        }
-    }
-
-    /// <summary>
-    /// Método de validación de existencia de terminal en tabla BCAH96DTA/ADQ03TER.
-    /// </summary>
-    /// <param name="terminalRecibida">Número de terminal Recibida</param>
-    /// <param name="codigoComercioRecibido">Código Comercio Recibido.</param>
-    /// <returns></returns>
-    private (bool existeTerminal, string codigoError, string mensajeTerminal) BuscarTerminal(string terminalRecibida, int codigoComercioRecibido)
-    {
-        try
-        {
-            // Construimos consulta SQL con QueryBuilder para verificar existencia de perfil
-            var buscarComercio = QueryBuilder.Core.QueryBuilder
-                .From("ADQ03TER", "BCAH96DTA")
-                .Select("*")  // Solo necesitamos validar existencia
-                .Where<Adq03Ter>(x => x.A03COME == codigoComercioRecibido)
-                .Where<Adq03Ter>(x => x.A03TERM == terminalRecibida)
-                .OrderBy(("A03TERM", SortDirection.Asc), ("A03TERM", SortDirection.Asc))
-                .Build();
-
-            using var command = _connection.GetDbCommand(buscarComercio, _contextAccessor.HttpContext!);
-
-            using var reader = command.ExecuteReader();
-            if (reader.Read())
-            {
-                return (true, "00001", "Existe terminal."); // Terminal existe
-            }
-            return (false, "00002", "No existe terminal."); // Terminal no existe
-        }
-        catch (Exception ex)
-        {
-            // Manejo de errores en la consulta
-            return (false, "0003", ex.Message); // Indica error al consultar comercio
-        }
-    }
-
-    /// <summary>
-    /// Verifica si existe un perfil en la tabla CFP801 y ejecuta la lógica correspondiente.
-    /// </summary>
-    /// <param name="perfil">Clave de perfil (CFTSKY en RPGLE).</param>
-    /// <returns>Tupla (bool, string,  string), true o false y descripción si existe o no el perfil</returns>
-    private (bool existePerfil, string codigoError, string descripcionError) VerPerfil(string perfil)
-    {
-        try
-        {
-            // Construimos consulta SQL con QueryBuilder para verificar existencia de perfil
-            var verPerfilSql = QueryBuilder.Core.QueryBuilder
-                .From("CFP801", "BCAH96DTA")
-                .Select("CFTSBK", "CFTSKY")  // Solo necesitamos validar existencia
-                .Where<Cfp801>(x => x.CFTSBK == 001)       // Condición fija
-                .Where<Cfp801>(x => x.CFTSKY == perfil) // Filtro dinámico por perfil
-                .FetchNext(1)                // Solo necesitamos un registro
-                .Build();
-
-            using var command = _connection.GetDbCommand(verPerfilSql, _contextAccessor.HttpContext!);
-
-            using var reader = command.ExecuteReader();
-            if (reader.Read())
-            {
-                return (true, "00001", "Existe Perfil Transerver."); // Perfil existe
-            }
-            return (false, "00002", "No existe Perfil Transerver."); // Perfil no existe
-        }
-        catch (Exception ex)
-        {
-            // Manejo de errores en la consulta
-            return (false, "0003", "Error general: " + ex.Message); // Indica error al consultar perfil
-        }
-    }
-
-    /// <summary>
-    /// Inserta una fila en POP802 (detalle de posteo) con campos esenciales.
-    /// </summary>
-    private void InsertPop802(
-        string perfil,
-        int lote,
-        int seq,
-        int fechaYyyyMmDd,
-        string cuenta,
-        int centroCosto,
-        string codTrn,
-        decimal monto,
-        string al1,
-        string al2,
-        string al3)
-    {
-        // Nota funcional: POP802 requiere varias columnas obligatorias del core.
-        // Aquí posteamos lo esencial (override, fecha, cuenta, tcode, monto y leyendas).
-        var pop802Sql = new InsertQueryBuilder("POP802", "BNKPRD01")
-            .IntoColumns(
-                "TSBK",    // Bank
-                "TSTSKY",  // Perfil
-                "TSBTCH",  // Lote
-                "TSWSEQ",  // Secuencia
-                "TSTOVR",  // Override
-                "TSTTDT",  // Fecha efectiva (YYYYMMDD)
-                "TSTACT",  // Cuenta
-                "TSWSCC",  // Centro de costo
-                "TSWTCD",  // Código de transacción
-                "TSTCC",   // Monto
-                "TSTAL1",  // Leyenda 1
-                "TSTAL2",  // Leyenda 2
-                "TSTAL3"   // Leyenda 3
-            )
-            .Row([
-                1,
-                perfil,
-                lote,
-                seq,
-                "S",
-                fechaYyyyMmDd,
-                cuenta,
-                centroCosto,
-                codTrn,
-                monto,
-                Trunc(al1, 30),
-                Trunc(al2, 30),
-                Trunc(al3, 30)
-            ])
-            .Build();
-
-        using var cmd = _connection.GetDbCommand(pop802Sql, _contextAccessor.HttpContext!);
-
-        var aff = cmd.ExecuteNonQuery();
-
-        if (aff <= 0) throw new InvalidOperationException("No se pudo insertar el detalle POP802.");
-    }
-
-    /// <summary>
-    /// Método auxiliar para truncar cadenas a una longitud máxima.
-    /// </summary>
-    /// <param name="s"></param>
-    /// <param name="max"></param>
-    /// <returns></returns>
-    private static string Trunc(string? s, int max)
-    {
-        if (string.IsNullOrEmpty(s))
-            return string.Empty;
-        if (s.Length <= max)
-            return s;
-        return s[..max];
-    }
-
-    /// <summary>
-    /// Obtiene el siguiente FTSBT para un perfil de forma segura y lo reserva insertando POP801 base.
-    /// </summary>
-    /// <remarks>
-    /// - Usa el propio INSERT como lock optimista; si colisiona, reintenta.
-    /// - Si llega a 999, vuelve a 1 (ajústalo si tu negocio requiere otra política).
-    /// </remarks>
-    private (int ftsbt, bool ok) ReservarNumeroLote(string perfil, int dsdt, string usuario)
-    {
-        for (var intento = 0; intento < 5; intento++)
-        {
-            // 1) MAX(FTSBT) para ese perfil/banco
-            var sel = QueryBuilder.Core.QueryBuilder
-                .From("POP801", "BNKPRD01")
-                .Select("COALESCE(MAX(FTSBT), 0) AS MAXFTSBT")
-                .Where<Pop801>(x => x.FTTSBK == 1)
-                .Where<Pop801>(x => x.FTTSKY == perfil)
-                .Build();
-
-            int max;
-            using (var selCmd = _connection.GetDbCommand(sel, _contextAccessor.HttpContext!))
-            {
-                var obj = selCmd.ExecuteScalar();
-                max = obj is null || obj is DBNull ? 0 : Convert.ToInt32(obj, CultureInfo.InvariantCulture);
-            }
-
-            // 2) Proponer siguiente (wrap 999→1)
-            var next = max >= 999 ? 1 : max + 1;
-
-            // 3) Intentar reservar insertando el encabezado base
-            var ins = new InsertQueryBuilder("POP801", "BNKPRD01")
-                .IntoColumns("FTTSBK", "FTTSKY", "FTTSBT", "FTTSST", "FTTSOR", "FTTSDT",
-                             "FTTSDI", "FTTSCI", "FTTSID", "FTTSIC", "FTTSDP", "FTTSCP",
-                             "FTTSPD", "FTTSPC", "FTTSBD", "FTTSLD", "FTTSBC", "FTTSLC")
-                .Row([
-                    1, perfil, next, 2, usuario, dsdt,
-                0, 0, 0m, 0m, 0, 0,
-                0m, 0m, 0m, 0m, 0m, 0m
-                ])
-                .Build();
-
-            try
-            {
-                using var insCmd = _connection.GetDbCommand(ins, _contextAccessor.HttpContext!);
-                var aff = insCmd.ExecuteNonQuery();
-                if (aff > 0) return (next, true); // reservado con éxito
-            }
-            catch
-            {
-                // Colisión de clave (otro hilo tomó el número): reintentar
-            }
-        }
-
-        return (0, false);
-    }
-
-
-    /// <summary>
-    /// Orquestador: trae reglas base (IADQCTL) y fusiona con e-commerce (ADQECTL) si aplica.
-    /// </summary>
-    private List<ReglaCargo> ObtenerReglasCargos(string perfil, int comercio, bool esTerminalVirtual = false)
-    {
-        var baseRules = ObtenerReglasDesdeIadqctl(perfil, comercio);
-        return MergeConEcommerce(baseRules, comercio, esTerminalVirtual);
-    }
-
-    /// <summary>
-    /// Lee reglas base para un perfil/comercio desde IADQCTL (cuentas y porcentajes).
-    /// </summary>
-    /// <remarks>
-    /// Ajusta nombres de columnas a tu PF real. Convierto % base 100 → factor (0..1).
-    /// </remarks>
-    private List<ReglaCargo> ObtenerReglasDesdeIadqctl(string perfil, int comercio)
-    {
-        var reglas = new List<ReglaCargo>();
-
-        var q = QueryBuilder.Core.QueryBuilder
-            .From("IADQCTL", "BCAH96DTA")
-            .Select(
-                "ADQCNT1 AS CTA_INT",
-                "ADQCNT2 AS CTA_COM",
-                "ADQCNT3 AS CTA_IVA",
-                "ADQMDVC AS PCT_INT",
-                "ADQMDVT AS PCT_COM",
-                "ADQMFAI AS PCT_IVA",
-                "ADQMTO1 AS MF_INT",
-                "ADQMTO2 AS MF_COM",
-                "ADQMTO3 AS MF_OTR"
-            )
-            .WhereRaw($"ADQPERF = {perfil} OR ADQCOME = {comercio}")
-            .FetchNext(1)
-            .Build();
-
-        using var cmd = _connection.GetDbCommand(q, _contextAccessor.HttpContext!);
-        using var rd = cmd.ExecuteReader();
-        if (!rd.Read()) return reglas;
-
-        static decimal pct(object? o) => o is DBNull or null ? 0m : Convert.ToDecimal(o) / 100m;
-        static decimal mf(object? o) => o is DBNull or null ? 0m : Convert.ToDecimal(o);
-        static string gl(object? o) => o is DBNull or null ? "" : Convert.ToString(o)!.Trim();
-
-        var rInt = new ReglaCargo { Codigo = "INT", CuentaGl = gl(rd["CTA_INT"]), Porcentaje = pct(rd["PCT_INT"]), MontoFijo = mf(rd["MF_INT"]) };
-        var rCom = new ReglaCargo { Codigo = "COM", CuentaGl = gl(rd["CTA_COM"]), Porcentaje = pct(rd["PCT_COM"]), MontoFijo = mf(rd["MF_COM"]) };
-        var rIva = new ReglaCargo { Codigo = "IVA", CuentaGl = gl(rd["CTA_IVA"]), Porcentaje = pct(rd["PCT_IVA"]), MontoFijo = 0m };
-
-        if (!rInt.CuentaGl.IsNullOrEmpty() && (rInt.Porcentaje > 0m || rInt.MontoFijo > 0m)) reglas.Add(rInt);
-        if (!rCom.CuentaGl.IsNullOrEmpty() && (rCom.Porcentaje > 0m || rCom.MontoFijo > 0m)) reglas.Add(rCom);
-        if (!rIva.CuentaGl.IsNullOrEmpty() && rIva.Porcentaje > 0m) reglas.Add(rIva);
-
-        return reglas;
-    }
-
-    /// <summary>
-    /// Funde reglas e-commerce (ADQECTL) con las base si la terminal es virtual.
-    /// </summary>
-    private List<ReglaCargo> MergeConEcommerce(List<ReglaCargo> baseRules, int comercio, bool esTerminalVirtual)
-    {
-        if (!esTerminalVirtual) return baseRules;
-
-        var reglas = baseRules.ToDictionary(r => r.Codigo, r => r);
-
-        var q = QueryBuilder.Core.QueryBuilder
-            .From("ADQECTL", "BCAH96DTA")
-            .Select(
-                "ADQECNT1 AS CTA_INT_EC",
-                "ADQECNT5 AS CTA_COM_EC",
-                "ADQECTR1 AS PCT_INT_EC",
-                "ADQECTR5 AS PCT_COM_EC"
-            )
-            .WhereRaw($"A02COME = {comercio}")
-            .FetchNext(1)
-            .Build();
-
-        using var cmd = _connection.GetDbCommand(q, _contextAccessor.HttpContext!);
-        using var rd = cmd.ExecuteReader();
-        if (!rd.Read()) return baseRules;
-
-        static string gl(object? o) => o is DBNull or null ? "" : Convert.ToString(o)!.Trim();
-        static decimal pct(object? o) => o is DBNull or null ? 0m : Convert.ToDecimal(o) / 100m;
-
-        var ctaInt = gl(rd["CTA_INT_EC"]);
-        var ctaCom = gl(rd["CTA_COM_EC"]);
-        var pctInt = pct(rd["PCT_INT_EC"]);
-        var pctCom = pct(rd["PCT_COM_EC"]);
-
-        if (!ctaInt.IsNullOrEmpty() || pctInt > 0m)
-        {
-            if (!reglas.TryGetValue("INT", out var r))
-                r = reglas["INT"] = new() { Codigo = "INT" };
-            if (!ctaInt.IsNullOrEmpty()) r.CuentaGl = ctaInt;
-            r.Porcentaje += pctInt;
-        }
-        if (!ctaCom.IsNullOrEmpty() || pctCom > 0m)
-        {
-            if (!reglas.TryGetValue("COM", out var r))
-                r = reglas["COM"] = new() { Codigo = "COM" };
-            if (!ctaCom.IsNullOrEmpty()) r.CuentaGl = ctaCom;
-            r.Porcentaje += pctCom;
-        }
-
-        return [.. reglas.Values.Where(r => !r.CuentaGl.IsNullOrEmpty() && (r.Porcentaje > 0m || r.MontoFijo > 0m))];
-    }
-
-    /// <summary>
-    /// Aplica reglas y postea: 1 línea principal (neto) + N líneas de cargos (opuestas).
-    /// También actualiza totales del POP801.
-    /// </summary>
-    private bool PostearDesglose(
-        string perfil,
-        int numeroLote,
-        int fechaYyyyMmDd,
-        string naturalezaPrincipal,
-        string cuentaComercio,
-        decimal totalBruto,
-        List<ReglaCargo> reglas,
-        string codComercio,
-        string terminal,
-        string nombreComercio,
-        string idUnico,
-        int secuenciaInicial = 0)
-    {
-        var cargos = CalcularCargos(totalBruto, reglas);
-        var totalCargos = cargos.Sum(x => x.Monto);
-        var neto = Decimal.Round(totalBruto - totalCargos, 2, MidpointRounding.AwayFromZero);
-
-        var seq = secuenciaInicial + 1;
-
-        // Línea principal (misma naturaleza del request)
+        // 1) Línea principal (misma naturaleza que la petición)
+        seq += 1;
         InsertPop802(
             perfil: perfil,
             lote: numeroLote,
@@ -594,7 +183,7 @@ public class TransaccionesServices(IDatabaseConnection _connection, IHttpContext
         );
         ActualizarTotalesPop801(perfil, numeroLote, naturalezaPrincipal, neto);
 
-        // Cargos (naturaleza opuesta)
+        // 2) Cargos (naturaleza opuesta a la principal)
         var natCargo = naturalezaPrincipal == "C" ? "D" : "C";
         foreach (var c in cargos.Where(x => x.Monto > 0m))
         {
@@ -617,81 +206,88 @@ public class TransaccionesServices(IDatabaseConnection _connection, IHttpContext
             ActualizarTotalesPop801(perfil, numeroLote, natCargo, c.Monto);
         }
 
-        return seq >0;
+        return true;
     }
-
-    /// <summary>
-    /// Calcula la lista de cargos aplicando porcentaje y/o monto fijo sobre el total.
-    /// </summary>
-    private static List<CargoCalculado> CalcularCargos(decimal totalBruto, List<ReglaCargo> reglas)
+    catch
     {
-        var res = new List<CargoCalculado>();
-        foreach (var r in reglas)
-        {
-            var mp = r.Porcentaje > 0m ? Decimal.Round(totalBruto * r.Porcentaje, 2, MidpointRounding.AwayFromZero) : 0m;
-            var mf = r.MontoFijo > 0m ? r.MontoFijo : 0m;
-            var monto = mp + mf;
-            if (monto <= 0m) continue;
-
-            res.Add(new()
-            {
-                Codigo = r.Codigo,
-                CuentaGl = r.CuentaGl,
-                Monto = monto
-            });
-        }
-        return res;
+        return false;
     }
+}
 
-    /// <summary>
-    /// Incrementa conteos e importes del encabezado del lote (POP801) según naturaleza.
-    /// </summary>
-    private void ActualizarTotalesPop801(string perfil, int lote, string naturaleza, decimal monto)
+2.4 CalcularCargos(...)
+
+/// <summary>
+/// Calcula montos de cargos aplicando porcentaje y/o monto fijo sobre el total.
+/// </summary>
+private static List<CargoCalculado> CalcularCargos(decimal totalBruto, List<ReglaCargo> reglas)
+{
+    var res = new List<CargoCalculado>();
+    foreach (var r in reglas)
     {
-        // Forzamos el punto decimal (evita coma por cultura local)
-        var m = monto.ToString(CultureInfo.InvariantCulture);
+        var mp = r.Porcentaje > 0m ? Decimal.Round(totalBruto * r.Porcentaje, 2, MidpointRounding.AwayFromZero) : 0m;
+        var mf = r.MontoFijo > 0m ? r.MontoFijo : 0m;
+        var monto = mp + mf;
+        if (monto <= 0m) continue;
 
-        UpdateQueryBuilder updBuilder;
-
-        if (naturaleza == "C")
+        res.Add(new()
         {
-            // Crédito: FTTSCI y FTTSIC +=  monto
-            updBuilder = new UpdateQueryBuilder("POP801", "BNKPRD01")
-                .SetRaw("FTTSCI", "FTTSCI + 1")
-                .SetRaw("FTTSIC", $"FTTSIC + {m}")
-                .Where<Pop801>(x => x.FTTSBK == 1)
-                .Where<Pop801>(x => x.FTTSKY == perfil)
-                .Where<Pop801>(x => x.FTSBT == lote);
-        }
-        else
-        {
-            // Débito: FTTSDI y FTTSID += monto
-            updBuilder = new UpdateQueryBuilder("POP801", "BNKPRD01")
-                .SetRaw("FTTSDI", "FTTSDI + 1")
-                .SetRaw("FTTSID", $"FTTSID + {m}")
-                .Where<Pop801>(x => x.FTTSBK == 1)
-                .Where<Pop801>(x => x.FTTSKY == perfil)
-                .Where<Pop801>(x => x.FTSBT == lote);
-        }
+            Codigo = r.Codigo,
+            CuentaGl = r.CuentaGl,
+            Monto = monto
+        });
+    }
+    return res;
+}
 
-        var upd = updBuilder.Build();
+2.5 ActualizarTotalesPop801(...) (ya lo tienes, dejo la versión final por si acaso)
 
-        using var cmd = _connection.GetDbCommand(upd, _contextAccessor.HttpContext!);
-        _ = cmd.ExecuteNonQuery();
+/// <summary>
+/// Incrementa conteos e importes del encabezado del lote (POP801) según naturaleza.
+/// </summary>
+private void ActualizarTotalesPop801(string perfil, int lote, string naturaleza, decimal monto)
+{
+    var m = monto.ToString(CultureInfo.InvariantCulture);
+
+    UpdateQueryBuilder updBuilder;
+
+    if (naturaleza == "C")
+    {
+        updBuilder = new UpdateQueryBuilder("POP801", "BNKPRD01")
+            .SetRaw("FTTSCI", "FTTSCI + 1")
+            .SetRaw("FTTSIC", $"FTTSIC + {m}")
+            .Where<Pop801>(x => x.FTTSBK == 1)
+            .Where<Pop801>(x => x.FTTSKY == perfil)
+            .Where<Pop801>(x => x.FTSBT == lote);
+    }
+    else
+    {
+        updBuilder = new UpdateQueryBuilder("POP801", "BNKPRD01")
+            .SetRaw("FTTSDI", "FTTSDI + 1")
+            .SetRaw("FTTSID", $"FTTSID + {m}")
+            .Where<Pop801>(x => x.FTTSBK == 1)
+            .Where<Pop801>(x => x.FTTSKY == perfil)
+            .Where<Pop801>(x => x.FTSBT == lote);
     }
 
-    /// <summary>Convierte "C"/"D" a etiqueta corta funcional.</summary>
-    private static string EtiquetaConcepto(string nat) => (nat ?? "C").Equals("D", StringComparison.InvariantCultureIgnoreCase) ? "DB" : "CR";
+    var upd = updBuilder.Build();
 
-    /// <summary>
-    /// Crea un DTO de respuesta de error con metadatos consistentes.
-    /// </summary>
-    private static RespuestaGuardarTransaccionesDto BuildError(string code, string message)
-        => new()
-        {
-            CodigoError = code,
-            DescripcionError = message
-        };
+    using var cmd = _connection.GetDbCommand(upd, _contextAccessor.HttpContext!);
+    _ = cmd.ExecuteNonQuery();
 }
 
 
+---
+
+Nota rápida sobre VerFecha()
+
+Si TAP001.DSCDT ya viene como YYYYMMDD (9,0), no necesitas reordenar dd/mm/yy. Tu versión actual convierte a string y arma yyyyMMdd como yy + mm + dd. Si ves fechas raras, considera simplificar a:
+
+// si DSCDT es 20250918 (YYYYMMDD)
+yyyyMMdd = ((long)dscdt).ToString("D8");
+
+
+---
+
+Con esto queda completo: reserva de lote, desglose (línea principal + cargos), y actualización de totales POP801; todo usando RestUtilities.QueryBuilder y tu IDatabaseConnection.
+
+    
