@@ -1,183 +1,251 @@
-Convierteleo a clase para dto
+/// <summary>
+/// Lee reglas base (sólo cuentas GL y metadatos) desde IADQCTL/ADQCTL.
+/// </summary>
+/// <param name="control">Valor de ADQCONT (ej. 'TS').</param>
+/// <param name="numero">Valor de ADQNUM (identificador).</param>
+/// <remarks>
+/// ADQCTL no posee porcentajes ni montos fijos; esos deben venir de otras PF.
+/// </remarks>
+private List<ReglaCargo> ObtenerReglasDesdeIadqctl(string control, decimal numero)
+{
+    var reglas = new List<ReglaCargo>();
 
-Estructura de la tabla BCAH96DTA/ADQCTL  y tambien del indice BCAH96DTA/IADQCTL
-Campo              Archivo            Tipo               Longitud  Escal
-ADQCONT            ADQCTL             CHARACTER                 2       
-ADQNUM             ADQCTL             DECIMAL                  10       
-ADQCNT1            ADQCTL             DECIMAL                  12       
-ADQCNT2            ADQCTL             DECIMAL                  12       
-ADQCNT3            ADQCTL             DECIMAL                  12       
-ADQCNT4            ADQCTL             DECIMAL                  12       
-ADQCNT5            ADQCTL             DECIMAL                  12       
-ADQCNT6            ADQCTL             DECIMAL                  12       
-ADQCNT7            ADQCTL             DECIMAL                  12       
-ADQCNT8            ADQCTL             DECIMAL                  12       
-ADQCNT9            ADQCTL             DECIMAL                  12       
-ADQCCO1            ADQCTL             DECIMAL                   3       
-ADQCCO2            ADQCTL             DECIMAL                   3       
-ADQCCO3            ADQCTL             DECIMAL                   3        
-ADQCCO4            ADQCTL             DECIMAL                   3        
-ADQCCO5            ADQCTL             DECIMAL                   3        
-ADQCCO6            ADQCTL             DECIMAL                   3        
-ADQCCO7            ADQCTL             DECIMAL                   3        
-ADQCCO8            ADQCTL             DECIMAL                   3        
-ADQCCO9            ADQCTL             DECIMAL                   3        
-ADQCNT10           ADQCTL             DECIMAL                  12        
-ADQCNT11           ADQCTL             DECIMAL                  12        
-ADQCNT12           ADQCTL             DECIMAL                  12        
-ADQCNT13           ADQCTL             DECIMAL                  12        
-ADQCNT14           ADQCTL             DECIMAL                  12        
-ADQCNT15           ADQCTL             DECIMAL                  12        
-ADQCC10            ADQCTL             DECIMAL                   3     
-ADQCC11            ADQCTL             DECIMAL                   3     
-ADQCC12            ADQCTL             DECIMAL                   3     
-ADQCC13            ADQCTL             DECIMAL                   3     
-ADQCC14            ADQCTL             DECIMAL                   3     
-ADQCC15            ADQCTL             DECIMAL                   3     
-ADQCTR1            ADQCTL             CHARACTER                 4     
-ADQCTR2            ADQCTL             CHARACTER                 4     
-ADQCTR3            ADQCTL             CHARACTER                 4     
-ADQCTR4            ADQCTL             CHARACTER                 4     
-ADQCTR5            ADQCTL             CHARACTER                 4     
-ADQCTR6            ADQCTL             CHARACTER                 4     
-ADQCTR7            ADQCTL             CHARACTER                 4     
-ADQCTR8            ADQCTL             CHARACTER                 4       
-ADQCTR9            ADQCTL             CHARACTER                 4       
-ADQCTR10           ADQCTL             CHARACTER                 4       
-ADQCTR11           ADQCTL             CHARACTER                 4       
-ADQCTR12           ADQCTL             CHARACTER                 4       
-ADQCTR13           ADQCTL             CHARACTER                 4       
-ADQCTR14           ADQCTL             CHARACTER                 4       
-ADQCTR15           ADQCTL             CHARACTER                 4       
-ADQDB1             ADQCTL             CHARACTER                 1       
-ADQDB2             ADQCTL             CHARACTER                 1       
-ADQDB3             ADQCTL             CHARACTER                 1       
-ADQDB4             ADQCTL             CHARACTER                 1       
-ADQDB5             ADQCTL             CHARACTER                 1       
-ADQDB6             ADQCTL             CHARACTER                 1       
-ADQDB7             ADQCTL             CHARACTER                 1       
-ADQDB8             ADQCTL             CHARACTER                 1       
-ADQDB9             ADQCTL             CHARACTER                 1       
-ADQDB10            ADQCTL             CHARACTER                 1       
-ADQDB11            ADQCTL             CHARACTER                 1       
-ADQDB12            ADQCTL             CHARACTER                 1       
-ADQDB13            ADQCTL             CHARACTER                 1       
-ADQDB14            ADQCTL             CHARACTER                 1       
-ADQDB15            ADQCTL             CHARACTER                 1             
+    var q = QueryBuilder.Core.QueryBuilder
+        .From("IADQCTL", "BCAH96DTA")
+        .Select(
+            // cuentas GL típicas para intereses/comisión/IVA; ajusta si usas otras posiciones
+            "ADQCNT1 AS CTA_INT",
+            "ADQCNT2 AS CTA_COM",
+            "ADQCNT3 AS CTA_IVA",
+            // opcional: códigos de trn y naturalezas por si los quieres mapear
+            "ADQCTR1 AS TCD_INT",
+            "ADQCTR2 AS TCD_COM",
+            "ADQCTR3 AS TCD_IVA",
+            "ADQDB1  AS NAT_INT",
+            "ADQDB2  AS NAT_COM",
+            "ADQDB3  AS NAT_IVA"
+        )
+        .WhereRaw("ADQCONT = :ctrl AND ADQNUM = :num")
+        .WithParameters(new { ctrl = control, num = numero })
+        .FetchNext(1)
+        .Build();
 
-Descripcion
-Campo              Archivo            Texto  
-ADQCONT            ADQCTL             CONTROL       
-ADQNUM             ADQCTL             SECUENCIA     
-ADQCNT1            ADQCTL             CONTABLE 1    
-ADQCNT2            ADQCTL             CONTABLE 2    
-ADQCNT3            ADQCTL             CONTABLE 3    
-ADQCNT4            ADQCTL             CONTABLE 4    
-ADQCNT5            ADQCTL             CONTABLE 5    
-ADQCNT6            ADQCTL             CONTABLE 6    
-ADQCNT7            ADQCTL             CONTABLE 7    
-ADQCNT8            ADQCTL             CONTABLE 8    
-ADQCNT9            ADQCTL             CONTABLE 9    
-ADQCCO1            ADQCTL             COSTO 1       
-ADQCCO2            ADQCTL             COSTO 2       
-ADQCCO3            ADQCTL             COSTO 3       
-ADQCCO4            ADQCTL             COSTO 4       
-ADQCCO5            ADQCTL             COSTO 5       
-ADQCCO6            ADQCTL             COSTO 6       
-ADQCCO7            ADQCTL             COSTO 7       
-ADQCCO8            ADQCTL             COSTO 8       
-ADQCCO9            ADQCTL             COSTO 9       
-ADQCNT10           ADQCTL             CONTABLE 10   
-ADQCNT11           ADQCTL             CONTABLE 11   
-ADQCNT12           ADQCTL             CONTABLE 12   
-ADQCNT13           ADQCTL             CONTABLE 13   
-ADQCNT14           ADQCTL             CONTABLE 14   
-ADQCNT15           ADQCTL             CONTABLE 15   
-ADQCC10            ADQCTL             COSTO 10    
-ADQCC11            ADQCTL             COSTO 11    
-ADQCC12            ADQCTL             COSTO 12    
-ADQCC13            ADQCTL             COSTO 13    
-ADQCC14            ADQCTL             COSTO 14    
-ADQCC15            ADQCTL             COSTO 15    
-ADQCTR1            ADQCTL             COD TRN 1   
-ADQCTR2            ADQCTL             COD TRN 2   
-ADQCTR3            ADQCTL             COD TRN 3   
-ADQCTR4            ADQCTL             COD TRN 4   
-ADQCTR5            ADQCTL             COD TRN 5   
-ADQCTR6            ADQCTL             COD TRN 6   
-ADQCTR7            ADQCTL             COD TRN 7   
-ADQCTR8            ADQCTL             COD TRN 8    
-ADQCTR9            ADQCTL             COD TRN 9    
-ADQCTR10           ADQCTL             COD TRN 10   
-ADQCTR11           ADQCTL             COD TRN 11   
-ADQCTR12           ADQCTL             COD TRN 12   
-ADQCTR13           ADQCTL             COD TRN 13   
-ADQCTR14           ADQCTL             COD TRN 14   
-ADQCTR15           ADQCTL             COD TRN 15   
-ADQDB1             ADQCTL             CR-DB 1      
-ADQDB2             ADQCTL             CR-DB 2      
-ADQDB3             ADQCTL             CR-DB 3      
-ADQDB4             ADQCTL             CR-DB 4      
-ADQDB5             ADQCTL             CR-DB 5      
-ADQDB6             ADQCTL             CR-DB 6        
-ADQDB7             ADQCTL             CR-DB 7        
-ADQDB8             ADQCTL             CR-DB 8        
-ADQDB9             ADQCTL             CR-DB 9        
-ADQDB10            ADQCTL             CR-DB 10       
-ADQDB11            ADQCTL             CR-DB 11       
-ADQDB12            ADQCTL             CR-DB 12       
-ADQDB13            ADQCTL             CR-DB 13       
-ADQDB14            ADQCTL             CR-DB 14       
-ADQDB15            ADQCTL             CR-DB 15        
+    using var cmd = _connection.GetDbCommand(q, _contextAccessor.HttpContext!);
+    using var rd = cmd.ExecuteReader();
+    if (!rd.Read()) return reglas;
+
+    static string Gl(object o) => (o is DBNull) ? "" : Convert.ToString(o)!.Trim();
+
+    // Como ADQCTL no guarda % ni montos fijos, ambos quedan en 0 (se complementan con otras reglas)
+    var rInt = new ReglaCargo { Codigo = "INT", CuentaGl = Gl(rd["CTA_INT"]), Porcentaje = 0m, MontoFijo = 0m };
+    var rCom = new ReglaCargo { Codigo = "COM", CuentaGl = Gl(rd["CTA_COM"]), Porcentaje = 0m, MontoFijo = 0m };
+    var rIva = new ReglaCargo { Codigo = "IVA", CuentaGl = Gl(rd["CTA_IVA"]), Porcentaje = 0m, MontoFijo = 0m };
+
+    if (!rInt.CuentaGl.IsNullOrEmpty()) reglas.Add(rInt);
+    if (!rCom.CuentaGl.IsNullOrEmpty()) reglas.Add(rCom);
+    if (!rIva.CuentaGl.IsNullOrEmpty()) reglas.Add(rIva);
+
+    return reglas;
+}
 
 
-Valida el método
+namespace MS_BAN_56_ProcesamientoTransaccionesPOS.Models.AS400.BCAH96DTA;
 
-    /// <summary>
-    /// Lee reglas base para un perfil/comercio desde IADQCTL (cuentas y porcentajes).
-    /// </summary>
-    /// <remarks>
-    /// Ajusta nombres de columnas a tu PF real. Convierto % base 100 → factor (0..1).
-    /// </remarks>
-    private List<ReglaCargo> ObtenerReglasDesdeIadqctl(string perfil, int comercio)
-    {
-        var reglas = new List<ReglaCargo>();
+/// <summary>
+/// DTO que representa la estructura de la tabla <c>BCAH96DTA/ADQCTL</c>.
+/// Contiene configuración contable, centros de costo, códigos de transacción
+/// y banderas de naturaleza (CR/DB) asociadas a perfiles y comercios.
+/// </summary>
+public class AdqctlDto
+{
+    /// <summary>CONTROL.</summary>
+    public string ADQCONT { get; set; } = string.Empty;
 
-        var q = QueryBuilder.Core.QueryBuilder
-            .From("IADQCTL", "BCAH96DTA")
-            .Select(
-                "ADQCNT1 AS CTA_INT",
-                "ADQCNT2 AS CTA_COM",
-                "ADQCNT3 AS CTA_IVA",
-                "ADQMDVC AS PCT_INT",
-                "ADQMDVT AS PCT_COM",
-                "ADQMFAI AS PCT_IVA",
-                "ADQMTO1 AS MF_INT",
-                "ADQMTO2 AS MF_COM",
-                "ADQMTO3 AS MF_OTR"
-            )
-            .WhereRaw($"ADQPERF = {perfil} OR ADQCOME = {comercio}")
-            .FetchNext(1)
-            .Build();
+    /// <summary>SECUENCIA.</summary>
+    public decimal ADQNUM { get; set; }
 
-        using var cmd = _connection.GetDbCommand(q, _contextAccessor.HttpContext!);
-        using var rd = cmd.ExecuteReader();
-        if (!rd.Read()) return reglas;
+    /// <summary>CONTABLE 1.</summary>
+    public decimal ADQCNT1 { get; set; }
 
-        static decimal pct(object? o) => o is DBNull or null ? 0m : Convert.ToDecimal(o) / 100m;
-        static decimal mf(object? o) => o is DBNull or null ? 0m : Convert.ToDecimal(o);
-        static string gl(object? o) => o is DBNull or null ? "" : Convert.ToString(o)!.Trim();
+    /// <summary>CONTABLE 2.</summary>
+    public decimal ADQCNT2 { get; set; }
 
-        var rInt = new ReglaCargo { Codigo = "INT", CuentaGl = gl(rd["CTA_INT"]), Porcentaje = pct(rd["PCT_INT"]), MontoFijo = mf(rd["MF_INT"]) };
-        var rCom = new ReglaCargo { Codigo = "COM", CuentaGl = gl(rd["CTA_COM"]), Porcentaje = pct(rd["PCT_COM"]), MontoFijo = mf(rd["MF_COM"]) };
-        var rIva = new ReglaCargo { Codigo = "IVA", CuentaGl = gl(rd["CTA_IVA"]), Porcentaje = pct(rd["PCT_IVA"]), MontoFijo = 0m };
+    /// <summary>CONTABLE 3.</summary>
+    public decimal ADQCNT3 { get; set; }
 
-        if (!rInt.CuentaGl.IsNullOrEmpty() && (rInt.Porcentaje > 0m || rInt.MontoFijo > 0m)) reglas.Add(rInt);
-        if (!rCom.CuentaGl.IsNullOrEmpty() && (rCom.Porcentaje > 0m || rCom.MontoFijo > 0m)) reglas.Add(rCom);
-        if (!rIva.CuentaGl.IsNullOrEmpty() && rIva.Porcentaje > 0m) reglas.Add(rIva);
+    /// <summary>CONTABLE 4.</summary>
+    public decimal ADQCNT4 { get; set; }
 
-        return reglas;
-    }
+    /// <summary>CONTABLE 5.</summary>
+    public decimal ADQCNT5 { get; set; }
 
+    /// <summary>CONTABLE 6.</summary>
+    public decimal ADQCNT6 { get; set; }
 
-Por que me dice que el campo ADQMTO3 no existe.
+    /// <summary>CONTABLE 7.</summary>
+    public decimal ADQCNT7 { get; set; }
+
+    /// <summary>CONTABLE 8.</summary>
+    public decimal ADQCNT8 { get; set; }
+
+    /// <summary>CONTABLE 9.</summary>
+    public decimal ADQCNT9 { get; set; }
+
+    /// <summary>COSTO 1.</summary>
+    public decimal ADQCCO1 { get; set; }
+
+    /// <summary>COSTO 2.</summary>
+    public decimal ADQCCO2 { get; set; }
+
+    /// <summary>COSTO 3.</summary>
+    public decimal ADQCCO3 { get; set; }
+
+    /// <summary>COSTO 4.</summary>
+    public decimal ADQCCO4 { get; set; }
+
+    /// <summary>COSTO 5.</summary>
+    public decimal ADQCCO5 { get; set; }
+
+    /// <summary>COSTO 6.</summary>
+    public decimal ADQCCO6 { get; set; }
+
+    /// <summary>COSTO 7.</summary>
+    public decimal ADQCCO7 { get; set; }
+
+    /// <summary>COSTO 8.</summary>
+    public decimal ADQCCO8 { get; set; }
+
+    /// <summary>COSTO 9.</summary>
+    public decimal ADQCCO9 { get; set; }
+
+    /// <summary>CONTABLE 10.</summary>
+    public decimal ADQCNT10 { get; set; }
+
+    /// <summary>CONTABLE 11.</summary>
+    public decimal ADQCNT11 { get; set; }
+
+    /// <summary>CONTABLE 12.</summary>
+    public decimal ADQCNT12 { get; set; }
+
+    /// <summary>CONTABLE 13.</summary>
+    public decimal ADQCNT13 { get; set; }
+
+    /// <summary>CONTABLE 14.</summary>
+    public decimal ADQCNT14 { get; set; }
+
+    /// <summary>CONTABLE 15.</summary>
+    public decimal ADQCNT15 { get; set; }
+
+    /// <summary>COSTO 10.</summary>
+    public decimal ADQCC10 { get; set; }
+
+    /// <summary>COSTO 11.</summary>
+    public decimal ADQCC11 { get; set; }
+
+    /// <summary>COSTO 12.</summary>
+    public decimal ADQCC12 { get; set; }
+
+    /// <summary>COSTO 13.</summary>
+    public decimal ADQCC13 { get; set; }
+
+    /// <summary>COSTO 14.</summary>
+    public decimal ADQCC14 { get; set; }
+
+    /// <summary>COSTO 15.</summary>
+    public decimal ADQCC15 { get; set; }
+
+    /// <summary>COD TRN 1.</summary>
+    public string ADQCTR1 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 2.</summary>
+    public string ADQCTR2 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 3.</summary>
+    public string ADQCTR3 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 4.</summary>
+    public string ADQCTR4 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 5.</summary>
+    public string ADQCTR5 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 6.</summary>
+    public string ADQCTR6 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 7.</summary>
+    public string ADQCTR7 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 8.</summary>
+    public string ADQCTR8 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 9.</summary>
+    public string ADQCTR9 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 10.</summary>
+    public string ADQCTR10 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 11.</summary>
+    public string ADQCTR11 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 12.</summary>
+    public string ADQCTR12 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 13.</summary>
+    public string ADQCTR13 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 14.</summary>
+    public string ADQCTR14 { get; set; } = string.Empty;
+
+    /// <summary>COD TRN 15.</summary>
+    public string ADQCTR15 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 1.</summary>
+    public string ADQDB1 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 2.</summary>
+    public string ADQDB2 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 3.</summary>
+    public string ADQDB3 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 4.</summary>
+    public string ADQDB4 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 5.</summary>
+    public string ADQDB5 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 6.</summary>
+    public string ADQDB6 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 7.</summary>
+    public string ADQDB7 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 8.</summary>
+    public string ADQDB8 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 9.</summary>
+    public string ADQDB9 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 10.</summary>
+    public string ADQDB10 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 11.</summary>
+    public string ADQDB11 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 12.</summary>
+    public string ADQDB12 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 13.</summary>
+    public string ADQDB13 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 14.</summary>
+    public string ADQDB14 { get; set; } = string.Empty;
+
+    /// <summary>CR-DB 15.</summary>
+    public string ADQDB15 { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// DTO alias para el índice lógico <c>IADQCTL</c>, mismo layout que ADQCTL.
+/// </summary>
+public class IadqctlDto : AdqctlDto { }
