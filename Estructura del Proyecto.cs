@@ -1,245 +1,218 @@
-// ============================ Modelos de cargos ============================
-
 /// <summary>
-/// Regla de cargo a aplicar sobre el total (porcentaje o monto fijo) y su cuenta GL.
+/// Regla de cargo (porcentaje o monto fijo) dirigida a una cuenta GL.
 /// </summary>
-/// <remarks>
-/// - Si <see cref="Porcentaje"/> &gt; 0, se calcula (Total * Porcentaje).  
-/// - Si <see cref="MontoFijo"/> &gt; 0, se usa ese monto.  
-/// - La naturaleza del cargo es la **opuesta** a la línea principal (para compensar).  
-/// </remarks>
 public sealed class ReglaCargo()
 {
-    /// <summary>Código legible del cargo (ej. "INT", "COM", "IVA").</summary>
-    public string Codigo { get; set; } = string.Empty;
-
-    /// <summary>Cuenta contable (GL) destino del cargo.</summary>
-    public string CuentaGl { get; set; } = string.Empty;
-
-    /// <summary>Porcentaje (0..1). Ej. 0.03 = 3%.</summary>
-    public decimal Porcentaje { get; set; }
-
-    /// <summary>Monto fijo del cargo (si aplica).</summary>
-    public decimal MontoFijo { get; set; }
-}
-
-/// <summary>
-/// Resultado de un cargo calculado (monto final y metadatos).
-/// </summary>
-public sealed class CargoCalculado()
-{
-    public string Codigo { get; set; } = string.Empty;
-    public string CuentaGl { get; set; } = string.Empty;
-    public decimal Monto { get; set; }
+    public string Codigo { get; set; } = string.Empty;   // Ej. "INT", "COM", "IVA"
+    public string CuentaGl { get; set; } = string.Empty; // Cuenta contable destino
+    public decimal Porcentaje { get; set; }              // 0..1 (3% => 0.03)
+    public decimal MontoFijo { get; set; }               // Si aplica monto fijo
 }
 
 
-
-// ============================ Integración en GuardarTransaccionesAsync ============================
-// Reemplaza el switch actual por esta llamada (después de crear el lote 'numeroLote'):
-
-// Naturaleza 'C' o 'D' (una sola por request):
-var nat = guardarTransaccionesDto.NaturalezaContable;
-
-// Reglas de cargos: aquí las obtienes (perfil/comercio/parametría). Dejo stub para que las levantes de DB.
-var reglas = ObtenerReglasCargos(perfilTranserver, int.Parse(guardarTransaccionesDto.CodigoComercio));
-
-// Monto bruto según naturaleza:
-var montoBruto = nat == "C" ? cre : deb;
-
-// Posteamos desglose (línea principal + cargos)
-secuencia = PostearDesglose(
-    perfil: perfilTranserver,
-    numeroLote: numeroLote,
-    fechaYyyyMmDd: Convert.ToInt32(yyyyMMdd),
-    naturalezaPrincipal: nat,                   // "C" o "D"
-    cuentaComercio: guardarTransaccionesDto.NumeroCuenta,
-    totalBruto: montoBruto,
-    reglas: reglas,
-    codComercio: guardarTransaccionesDto.CodigoComercio,
-    terminal: guardarTransaccionesDto.Terminal,
-    nombreComercio: guardarTransaccionesDto.NombreComercio,
-    idUnico: guardarTransaccionesDto.IdTransaccionUnico,
-    secuenciaInicial: secuencia
-);
-
-// (Opcional) Si quieres responder OK aquí, deja el return:
-return BuildError(code: "200", message: "Transacción procesada correctamente.");
-
-
-// ============================ Núcleo del desglose ============================
-
 /// <summary>
-/// Postea una línea principal (neto) y N líneas de cargos en POP802.
-/// Actualiza totales de POP801 por cada línea insertada.
-/// </summary>
-/// <returns>Secuencia final utilizada.</returns>
-private int PostearDesglose(
-    string perfil,
-    int numeroLote,
-    int fechaYyyyMmDd,
-    string naturalezaPrincipal,      // "C" o "D"
-    string cuentaComercio,
-    decimal totalBruto,
-    List<ReglaCargo> reglas,
-    string codComercio,
-    string terminal,
-    string nombreComercio,
-    string idUnico,
-    int secuenciaInicial = 0)
-{
-    // 1) Calcular cargos
-    var cargos = CalcularCargos(totalBruto, reglas);
-    var totalCargos = cargos.Sum(x => x.Monto);
-
-    // 2) Determinar neto (lo que finalmente se acredita/debita al comercio)
-    var neto = Decimal.Round(totalBruto - totalCargos, 2, MidpointRounding.AwayFromZero);
-
-    // 3) Insertar línea principal (misma naturaleza que el request)
-    var seq = secuenciaInicial + 1;
-    InsertPop802(
-        perfil: perfil,
-        lote: numeroLote,
-        seq: seq,
-        fechaYyyyMmDd: fechaYyyyMmDd,
-        cuenta: cuentaComercio,
-        centroCosto: 0,
-        codTrn: naturalezaPrincipal == "C" ? "0783" : "0784",
-        monto: neto,
-        al1: Trunc(nombreComercio, 30),
-        al2: Trunc($"{codComercio}-{terminal}", 30),
-        al3: Trunc($"&{EtiquetaConcepto(naturalezaPrincipal)}&{idUnico}&{(naturalezaPrincipal=="C"?"Cr Neto":"Db Neto")}", 30)
-    );
-    // Actualizar totales POP801 para la principal
-    ActualizarTotalesPop801(perfil, numeroLote, naturalezaPrincipal, neto);
-
-    // 4) Insertar cargos (naturaleza opuesta a la principal, a sus cuentas GL)
-    var natCargo = naturalezaPrincipal == "C" ? "D" : "C";
-    foreach (var c in cargos.Where(c => c.Monto > 0m))
-    {
-        seq += 1;
-
-        InsertPop802(
-            perfil: perfil,
-            lote: numeroLote,
-            seq: seq,
-            fechaYyyyMmDd: fechaYyyyMmDd,
-            cuenta: c.CuentaGl,                // << cuenta GL del cargo
-            centroCosto: 0,
-            codTrn: natCargo == "C" ? "0783" : "0784",
-            monto: c.Monto,
-            al1: Trunc(nombreComercio, 30),
-            al2: Trunc($"{codComercio}-{terminal}", 30),
-            al3: Trunc($"&{c.Codigo}&{idUnico}&Cargo", 30)
-        );
-
-        ActualizarTotalesPop801(perfil, numeroLote, natCargo, c.Monto);
-    }
-
-    return seq;
-}
-
-// ============================ Cálculo de cargos ============================
-
-/// <summary>
-/// Aplica cada regla (porcentaje y/o monto fijo) sobre el total bruto.
-/// </summary>
-private static List<CargoCalculado> CalcularCargos(decimal totalBruto, List<ReglaCargo> reglas)
-{
-    var res = new List<CargoCalculado>();
-    foreach (var r in reglas)
-    {
-        // Monto por porcentaje
-        var mp = r.Porcentaje > 0m ? Decimal.Round(totalBruto * r.Porcentaje, 2, MidpointRounding.AwayFromZero) : 0m;
-        // Monto fijo
-        var mf = r.MontoFijo > 0m ? r.MontoFijo : 0m;
-
-        var monto = mp + mf;
-        if (monto <= 0m) continue;
-
-        res.Add(new()
-        {
-            Codigo = r.Codigo,
-            CuentaGl = r.CuentaGl,
-            Monto = monto
-        });
-    }
-    return res;
-}
-
-
-// ============================ Totales POP801 ============================
-
-/// <summary>
-/// Incrementa conteos e importes del encabezado del lote (POP801) según naturaleza.
-/// </summary>
-private void ActualizarTotalesPop801(string perfil, int lote, string naturaleza, decimal monto)
-{
-    // Si C → FTTSCI++ y FTTSIC += monto; Si D → FTTSDI++ y FTTSID += monto.
-    var sets = naturaleza == "C"
-        ? "FTTSCI = FTTSCI + 1, FTTSIC = FTTSIC + :m"
-        : "FTTSDI = FTTSDI + 1, FTTSID = FTTSID + :m";
-
-    var upd = QueryBuilder.Core.QueryBuilder
-        .Update("POP801", "BNKPRD01")
-        .SetRaw(sets, new { m = monto })
-        .Where<Pop801>(x => x.FTTSBK == 1)
-        .Where<Pop801>(x => x.FTTSKY == perfil)
-        .Where<Pop801>(x => x.FTSBT == lote)
-        .Build();
-
-    using var cmd = _connection.GetDbCommand(upd, _contextAccessor.HttpContext!);
-    _ = cmd.ExecuteNonQuery();
-}
-
-
-
-// ============================ Totales POP801 ============================
-
-/// <summary>
-/// Incrementa conteos e importes del encabezado del lote (POP801) según naturaleza.
-/// </summary>
-private void ActualizarTotalesPop801(string perfil, int lote, string naturaleza, decimal monto)
-{
-    // Si C → FTTSCI++ y FTTSIC += monto; Si D → FTTSDI++ y FTTSID += monto.
-    var sets = naturaleza == "C"
-        ? "FTTSCI = FTTSCI + 1, FTTSIC = FTTSIC + :m"
-        : "FTTSDI = FTTSDI + 1, FTTSID = FTTSID + :m";
-
-    var upd = QueryBuilder.Core.QueryBuilder
-        .Update("POP801", "BNKPRD01")
-        .SetRaw(sets, new { m = monto })
-        .Where<Pop801>(x => x.FTTSBK == 1)
-        .Where<Pop801>(x => x.FTTSKY == perfil)
-        .Where<Pop801>(x => x.FTSBT == lote)
-        .Build();
-
-    using var cmd = _connection.GetDbCommand(upd, _contextAccessor.HttpContext!);
-    _ = cmd.ExecuteNonQuery();
-}
-
-
-// ============================ Parametría de cargos (stub) ============================
-
-/// <summary>
-/// Obtiene reglas de cargos a aplicar para un perfil/comercio.
+/// Lee reglas “base” (no-ecommerce) para un perfil/comercio desde IADQCTL.
 /// </summary>
 /// <remarks>
-/// - Aquí debes mapear con tus tablas de parametría (ej. IADQCTL/ADQECTL/CFP801 custom).  
-/// - Devuelvo ejemplo: 2 cargos (3% de interés y comisión fija 1.50) a cuentas GL ilustrativas.
+/// - Devuelve lista de <see cref="ReglaCargo"/> con porcentaje y/o monto fijo.
+/// - Ajusta nombres de columnas según tu PF (ej.: ADQCTR*, ADQCNT*, tasas y flags).
+/// - Regla: usa porcentajes si &gt; 0; si MontoFijo &gt; 0 se suma al porcentaje.
 /// </remarks>
-private static List<ReglaCargo> ObtenerReglasCargos(string perfil, int comercio)
+private List<ReglaCargo> ObtenerReglasDesdeIadqctl(string perfil, int comercio)
 {
-    // TODO: reemplazar por SELECTs reales con QueryBuilder (según tu modelo de parametría).
-    return
-    [
-        new() { Codigo = "INT", CuentaGl = "1102003001", Porcentaje = 0.03m, MontoFijo = 0m },  // 3% interés
-        new() { Codigo = "COM", CuentaGl = "4101001001", Porcentaje = 0m,     MontoFijo = 1.50m } // 1.50 comisión fija
-    ];
+    var reglas = new List<ReglaCargo>();
+
+    // === Ejemplo de lectura de IADQCTL (parametría general) ===
+    var q = QueryBuilder.Core.QueryBuilder
+        .From("IADQCTL", "BCAH96DTA")
+        .Select(
+            // Cuentas GL de cargos
+            "ADQCNT1 AS CTA_INT",     // cuenta de interés
+            "ADQCNT2 AS CTA_COM",     // cuenta de comisión
+            "ADQCNT3 AS CTA_IVA",     // cuenta de IVA
+            // Porcentajes (0..100 o 0..1 según layout)
+            "ADQMDVC AS PCT_INT",     // % interés (ej.)
+            "ADQMDVT AS PCT_COM",     // % comisión (ej.)
+            "ADQMFAI AS PCT_IVA",     // % IVA (ej.)
+            // Montos fijos
+            "ADQMTO1 AS MF_INT",
+            "ADQMTO2 AS MF_COM",
+            "ADQMTO3 AS MF_OTR"
+        )
+        // Claves de ejemplo: por perfil o por comercio (ajústalo a tu modelo real)
+        .WhereRaw("ADQPERF = :p OR ADQCOME = :c") // si tu PF tiene columna de perfil
+        .WithParameters(new { p = perfil, c = comercio })
+        .FetchNext(1)
+        .Build();
+
+    using var cmd = _connection.GetDbCommand(q, _contextAccessor.HttpContext!);
+    using var rd = cmd.ExecuteReader();
+    if (!rd.Read()) return reglas;
+
+    // Normalizador % (si tu tabla guarda 3.00 ≈ 3%, convierte a 0.03)
+    static decimal pct(object? o)
+        => o is DBNull or null ? 0m : Convert.ToDecimal(o) / 100m;
+
+    // Monto fijo directo
+    static decimal mf(object? o)
+        => o is DBNull or null ? 0m : Convert.ToDecimal(o);
+
+    // Cuenta GL (string)
+    static string gl(object? o)
+        => o is DBNull or null ? "" : Convert.ToString(o)!.Trim();
+
+    var ctaInt = gl(rd["CTA_INT"]);
+    var ctaCom = gl(rd["CTA_COM"]);
+    var ctaIva = gl(rd["CTA_IVA"]);
+
+    var rInt = new ReglaCargo { Codigo = "INT", CuentaGl = ctaInt, Porcentaje = pct(rd["PCT_INT"]), MontoFijo = mf(rd["MF_INT"]) };
+    var rCom = new ReglaCargo { Codigo = "COM", CuentaGl = ctaCom, Porcentaje = pct(rd["PCT_COM"]), MontoFijo = mf(rd["MF_COM"]) };
+    var rIva = new ReglaCargo { Codigo = "IVA", CuentaGl = ctaIva, Porcentaje = pct(rd["PCT_IVA"]), MontoFijo = 0m };
+
+    if (!rInt.CuentaGl.IsNullOrEmpty() && (rInt.Porcentaje > 0m || rInt.MontoFijo > 0m)) reglas.Add(rInt);
+    if (!rCom.CuentaGl.IsNullOrEmpty() && (rCom.Porcentaje > 0m || rCom.MontoFijo > 0m)) reglas.Add(rCom);
+    if (!rIva.CuentaGl.IsNullOrEmpty() &&  rIva.Porcentaje > 0m) reglas.Add(rIva);
+
+    return reglas;
+}
+
+
+/// <summary>
+/// Lee reglas de e-commerce (terminal virtual) en ADQECTL y las fusiona (override/suma) con las “base”.
+/// </summary>
+/// <remarks>
+/// - Si hay cuenta/porcentaje específico en e-commerce, prioriza esa cuenta (override) y suma porcentajes/montos cuando aplique.
+/// - Si no es e-commerce, retorna la lista base sin cambios.
+/// </remarks>
+private List<ReglaCargo> MergeConEcommerce(List<ReglaCargo> baseRules, int comercio, bool esTerminalVirtual)
+{
+    if (!esTerminalVirtual) return baseRules;
+
+    var reglas = baseRules.ToDictionary(r => r.Codigo, r => r);
+
+    // === Ejemplo de lectura de ADQECTL ===
+    var q = QueryBuilder.Core.QueryBuilder
+        .From("ADQECTL", "BCAH96DTA")
+        .Select(
+            "ADQECNT1 AS CTA_INT_EC",
+            "ADQECNT5 AS CTA_COM_EC",
+            "ADQECTR1 AS PCT_INT_EC",
+            "ADQECTR5 AS PCT_COM_EC"
+        )
+        .WhereRaw("A02COME = :c") // clave comercio (ajusta si tu PF difiere)
+        .WithParameters(new { c = comercio })
+        .FetchNext(1)
+        .Build();
+
+    using var cmd = _connection.GetDbCommand(q, _contextAccessor.HttpContext!);
+    using var rd = cmd.ExecuteReader();
+    if (!rd.Read()) return baseRules;
+
+    static string gl(object? o) => o is DBNull or null ? "" : Convert.ToString(o)!.Trim();
+    static decimal pct(object? o) => o is DBNull or null ? 0m : Convert.ToDecimal(o) / 100m;
+
+    var ctaInt = gl(rd["CTA_INT_EC"]);
+    var ctaCom = gl(rd["CTA_COM_EC"]);
+    var pctInt = pct(rd["PCT_INT_EC"]);
+    var pctCom = pct(rd["PCT_COM_EC"]);
+
+    // INT
+    if (!ctaInt.IsNullOrEmpty() || pctInt > 0m)
+    {
+        if (!reglas.TryGetValue("INT", out var r))
+            r = reglas["INT"] = new() { Codigo = "INT" };
+
+        if (!ctaInt.IsNullOrEmpty()) r.CuentaGl = ctaInt; // override cuenta GL
+        r.Porcentaje += pctInt;                           // sumatoria de % para INT EC
+    }
+
+    // COM
+    if (!ctaCom.IsNullOrEmpty() || pctCom > 0m)
+    {
+        if (!reglas.TryGetValue("COM", out var r))
+            r = reglas["COM"] = new() { Codigo = "COM" };
+
+        if (!ctaCom.IsNullOrEmpty()) r.CuentaGl = ctaCom;
+        r.Porcentaje += pctCom;
+    }
+
+    return reglas.Values
+        .Where(r => !r.CuentaGl.IsNullOrEmpty() && (r.Porcentaje > 0m || r.MontoFijo > 0m))
+        .ToList();
 }
 
 
 
+
+
+/// <summary>
+/// Orquestador: trae reglas base (IADQCTL) y las fusiona con reglas e-commerce (ADQECTL) si aplica.
+/// </summary>
+private List<ReglaCargo> ObtenerReglasCargos(string perfil, int comercio, bool esTerminalVirtual = false)
+{
+    var baseRules = ObtenerReglasDesdeIadqctl(perfil, comercio);
+    return MergeConEcommerce(baseRules, comercio, esTerminalVirtual);
+}
+
+
+var reglas = ObtenerReglasCargos(perfilTranserver, int.Parse(guardarTransaccionesDto.CodigoComercio), esTerminalVirtual: true /* o valida */);
+
+
+
+/// <summary>
+/// Obtiene el siguiente FTSBT para un perfil (1..999) de forma segura y lo reserva con INSERT.
+/// </summary>
+/// <remarks>
+/// - Previene colisiones bajo concurrencia usando el propio INSERT como “cerrojo”.  
+/// - Si llega a 999, vuelve a 1 (ajusta si tu negocio requiere otra política).
+/// </remarks>
+private (int ftsbt, bool ok) ReservarNumeroLote(string perfil, int dsdt, string usuario)
+{
+    for (var intento = 0; intento < 5; intento++)
+    {
+        // 1) Leer MAX(FTSBT) existente
+        var sel = QueryBuilder.Core.QueryBuilder
+            .From("POP801", "BNKPRD01")
+            .Select("COALESCE(MAX(FTSBT), 0) AS MAXFTSBT")
+            .Where<Pop801>(x => x.FTTSBK == 1)
+            .Where<Pop801>(x => x.FTTSKY == perfil)
+            .Build();
+
+        var max = _connection.ExecuteScalar<int?>(sel) ?? 0;
+
+        // 2) Proponer siguiente (wrap 999→1)
+        var next = max >= 999 ? 1 : max + 1;
+
+        // 3) Intentar reservar insertando encabezado mínimo
+        var ins = new InsertQueryBuilder("POP801", "BNKPRD01")
+            .IntoColumns("FTTSBK","FTTSKY","FTTSBT","FTTSST","FTTSOR","FTTSDT",
+                         "FTTSDI","FTTSCI","FTTSID","FTTSIC","FTTSDP","FTTSCP",
+                         "FTTSPD","FTTSPC","FTTSBD","FTTSLD","FTTSBC","FTTSLC")
+            .Row([
+                1, perfil, next, 2, usuario, dsdt,
+                0, 0, 0m, 0m, 0, 0,
+                0m, 0m, 0m, 0m, 0m, 0m
+            ])
+            .Build();
+
+        try
+        {
+            using var cmd = _connection.GetDbCommand(ins, _contextAccessor.HttpContext!);
+            var aff = cmd.ExecuteNonQuery();
+            if (aff > 0) return (next, true); // reservado y creado
+        }
+        catch
+        {
+            // Colisión (FTSBT ya lo tomó otro thread). Reintentamos.
+        }
+    }
+    return (0, false);
+}
+
+
+var (numeroLote, reservado) = ReservarNumeroLote(perfilTranserver, Convert.ToInt32(yyyyMMdd), "usuario");
+if (!reservado) return BuildError("400", "No fue posible reservar un número de lote.");
+// a partir de aquí, usa 'numeroLote' en tus inserts POP802 + ActualizarTotalesPop801(...)
 
 
 
