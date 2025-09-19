@@ -1,7 +1,7 @@
 Entregame ambas clle con todos los campos y con comentarios de cada campo.
 
 /* ================================================================ */
-/* CLLE: CLAPACD764                                                 */
+/* CLLE: POSRE800                                                 */
 /* Descripción: Wrapper para invocar programa RPG APACD764           */
 /* Objetivo: Permitir que C# llame un CL y este ejecute el RPG con   */
 /*           los parámetros requeridos.                              */
@@ -48,7 +48,7 @@ ENDPGM
 
 
 /* ================================================================ */
-/* CLLE: CLAPACD767                                                 */
+/* CLLE: POSRE700                                                 */
 /* Descripción: Wrapper para invocar programa RPG APACD767           */
 /* Objetivo: Permitir que C# llame un CL y este ejecute el RPG con   */
 /*           los parámetros requeridos.                              */
@@ -92,4 +92,5 @@ CALL PGM(APACD767) PARM(&PMTIPO01 &PMCTAA01 &PMVALR01 &PMDECR01 +
                         &DES003 &DES004 &TASATM &CODER &DESERR)
 
 ENDPGM
+
 
