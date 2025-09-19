@@ -1,3 +1,5 @@
+Entregame ambas clle con todos los campos y con comentarios de cada campo.
+
 /* ================================================================ */
 /* CLLE: CLAPACD764                                                 */
 /* Descripción: Wrapper para invocar programa RPG APACD764           */
@@ -90,3 +92,4 @@ CALL PGM(APACD767) PARM(&PMTIPO01 &PMCTAA01 &PMVALR01 &PMDECR01 +
                         &DES003 &DES004 &TASATM &CODER &DESERR)
 
 ENDPGM
+
