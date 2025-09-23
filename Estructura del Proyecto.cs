@@ -1,8 +1,16 @@
-Tengo esta consulta SELECT * FROM IADQFUXU WHERE ADQPECO = 'TLORTEGA2';
-Devuelve la lista de permisos a objetos para un usuario.
-Esta tabla tiene 2 campos:
-ADQPECO y ADQFUCO
+INSERT INTO IADQFUXU (ADQPECO, ADQFUCO)
+SELECT 'TBBANEGA1', s.ADQFUCO
+FROM IADQFUXU AS s
+LEFT JOIN IADQFUXU AS t
+  ON t.ADQPECO = 'TBBANEGA1'
+ AND t.ADQFUCO = s.ADQFUCO
+WHERE s.ADQPECO = 'TLORTEGA2'
+  AND t.ADQFUCO IS NULL;
 
-ADQPECO  es el usuario y ADQFUCO el permiso.
 
-Necesito que mi usuario TBBANEGA1, tengo los mismos permisos, así que necesito hacer un select y un insert
+-- Conteo antes/después para validar cantidades
+SELECT 'TLORTEGA2' AS USUARIO, COUNT(*) AS PERMISOS
+FROM IADQFUXU WHERE ADQPECO = 'TLORTEGA2'
+UNION ALL
+SELECT 'TBBANEGA1', COUNT(*)
+FROM IADQFUXU WHERE ADQPECO = 'TBBANEGA1';
