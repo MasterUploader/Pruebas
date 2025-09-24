@@ -1,56 +1,54 @@
-using System.Data;
-using System.Data.Common;
-using System.Globalization;
-
-private bool CargarLibrerias(out string? error)
+/// <summary>
+/// Parámetros ya resueltos para construir las 2 líneas (cliente y GL)
+/// que consumirá el programa RPG <c>Int_lotes</c>.
+/// </summary>
+public sealed class IntLotesParamsDto
 {
-    error = null;
+    /// <summary>Perfil Transerver usado (CFTSKY).</summary>
+    public string Perfil { get; init; } = "";
 
-    // Ajusta el orden según tu necesidad
-    string[] libs = { "QTEMP", "ICBS", "BCAH96", "BCAH96DTA", "BNKPRD01", "QGPL", "GX", "COVENPGMV4" };
+    /// <summary>Cuenta del cliente/comercio (TSTACT de la línea cliente).</summary>
+    public string CuentaCliente { get; init; } = "";
 
-    // Comando CL en un solo statement
-    var clCmd = $"CHGLIBL LIBL({string.Join(' ', libs)})";
+    /// <summary>Cuenta GL interna de contrapartida (TSTACT de la línea GL).</summary>
+    public string? CuentaGL { get; init; }
 
-    // Longitud para QCMDEXC: 15,5 (e.g. 23.00000)
-    static decimal CmdLen(string s) =>
-        decimal.Parse($"{s.Length}.00000", CultureInfo.InvariantCulture);
+    /// <summary>Centro de costo para la línea GL (TSWSCC).</summary>
+    public int CentroCostoGL { get; init; }
 
-    try
-    {
-        // 1) Ejecuta CHGLIBL
-        using (var cmd = _connection.GetDbCommand(_contextAccessor.HttpContext!))
-        {
-            cmd.CommandText = "CALL QSYS2.QCMDEXC(?, ?)";
-            var p1 = cmd.CreateParameter(); p1.DbType = DbType.String;  p1.Value = clCmd;                  cmd.Parameters.Add(p1);
-            var p2 = cmd.CreateParameter(); p2.DbType = DbType.Decimal; p2.Precision = 15; p2.Scale = 5;  p2.Value = CmdLen(clCmd); cmd.Parameters.Add(p2);
-            cmd.ExecuteNonQuery();
-        }
+    /// <summary>T-code de la línea del cliente (ej. 0783 crédito / 0784 débito).</summary>
+    public string TcodeCliente { get; init; } = "";
 
-        // 2) Verificación opcional: que todas las librerías estén en el LIBL
-        using (var v = _connection.GetDbCommand(_contextAccessor.HttpContext!))
-        {
-            v.CommandText = "SELECT UPPER(SYSTEM_SCHEMA_NAME) FROM QSYS2.LIBRARY_LIST_INFO";
-            using var r = v.ExecuteReader();
+    /// <summary>T-code de la línea GL (opuesto al del cliente).</summary>
+    public string TcodeGL { get; init; } = "";
 
-            var actuales = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            while (r.Read()) actuales.Add(r.GetString(0));
+    /// <summary>Naturaleza de la línea del cliente: 'C' o 'D'.</summary>
+    public char NaturalezaCliente { get; init; }
 
-            foreach (var lib in libs)
-            {
-                if (!actuales.Contains(lib))
-                {
-                    error = $"Falta en LIBL: {lib}";
-                    return false;
-                }
-            }
-        }
+    /// <summary>Naturaleza de la línea GL: 'C' o 'D' (opuesta a la del cliente).</summary>
+    public char NaturalezaGL { get; init; }
 
-        return true;
-    }
-    catch (DbException ex)
-    {
-        error = ex.Message;
-        return false;
-    }
+    /// <summary>Descripción/leyenda 1 (AL1): normalmente nombre del comercio.</summary>
+    public string Des001 { get; init; } = "";
+
+    /// <summary>Descripción/leyenda 2 (AL2): “{Comercio}-{Terminal}”.</summary>
+    public string Des002 { get; init; } = "";
+
+    /// <summary>Descripción/leyenda 3 (AL3): “&lt;CR/DB&gt;&lt;IdUnico&gt;&lt;TipoCta&gt; / GL…”.</summary>
+    public string Des003 { get; init; } = "";
+
+    /// <summary>Descripción/leyenda 4 (AL4): libre/opcional (deja en blanco si no aplica).</summary>
+    public string Des004 { get; init; } = "";
+
+    /// <summary>Código de moneda (ISO num, si aplica para tu RPG; úsalo si Int_lotes lo pide).</summary>
+    public int Moneda { get; init; }
+
+    /// <summary>Tasa/Tipo de cambio a usar por Int_lotes si corresponde.</summary>
+    public decimal TasaTm { get; init; }
+
+    /// <summary>Indica si el perfil está en auto-balance (CFP801.CFTSGE=1).</summary>
+    public bool EsAutoBalance { get; init; }
+
+    /// <summary>Indica de dónde salió la GL: "CFP801", "ADQECTL", "ADQCTL" o "N/A".</summary>
+    public string FuenteGL { get; init; } = "N/A";
 }
