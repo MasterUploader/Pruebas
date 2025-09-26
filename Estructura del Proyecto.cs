@@ -1,15 +1,17 @@
-using System.Text.Json;
+using System.Text.Json.Serialization;
+using JsonConverters;
 
-// JSON entrante (10 chars en "Codigo")
-var json = """
+public class MiRespuestaDto
 {
-  "Codigo": "ABCDEFGHIJ",
-  "Descripcion": "  Texto con espacios  "
+    /// <summary>
+    /// Se trunca a máx. 8 caracteres al deserializar JSON.
+    /// </summary>
+    [JsonConverter(typeof(MaxLengthStringJsonConverter), 8 /* maxLength */, true /* trim */, false /* graphemes */)]
+    public string Codigo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Otro ejemplo con tamaño distinto (máx. 12) y sin Trim previo.
+    /// </summary>
+    [JsonConverter(typeof(MaxLengthStringJsonConverter), 12, false)]
+    public string Descripcion { get; set; } = string.Empty;
 }
-""";
-
-var dto = JsonSerializer.Deserialize<MiRespuestaDto>(json);
-
-// Resultado:
-// dto.Codigo == "ABCDEFGH"   // truncado a 8
-// dto.Descripcion == "Texto con" // 12 máx; sin Trim => mantiene espacios al inicio/fin si los hubiera
