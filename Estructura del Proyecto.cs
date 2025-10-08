@@ -1,92 +1,13 @@
-// Normaliza cuentas numéricas para usarlas en los returns
-decimal glAsDec = 0m;
-_ = !string.IsNullOrWhiteSpace(glCuenta) && decimal.TryParse(glCuenta, out glAsDec);
+Antes de los cambios de las descripciones y con pisteos exitosos para D y C, esto es lo que mandaba en INT_LOTES por ejemplo sin errores:
 
-decimal cteAsDec = 0m;
-_ = decimal.TryParse(numeroCuenta, out cteAsDec);
-
-
-// --- Caso naturalezaCliente == "C": Débito GL / Crédito Cliente ---
-return new IntLotesParamsDto
-{
-    Perfil = perfil,
-    Moneda = monedaIsoNum,
-    TasaTm = 0m,
-
-    // Mov1 = Débito GL
-    TipoMov1   = tipoGL,
-    CuentaMov1 = glAsDec,            // ← ya es 0 si no pudo parsearse
-    DeCr1      = "D",
-    CentroCosto1 = glCC,
-    MontoMov1  = monto,
-    MonedaMov1 = monedaIsoNum,
-
-    // Mov2 = Crédito Cliente
-    TipoMov2   = tipoCliente,
-    CuentaMov2 = cteAsDec,           // ← ya es 0 si no pudo parsearse
-    DeCr2      = "C",
-    CentroCosto2 = 0m,
-    MontoMov2  = monto,
-    MonedaMov2 = monedaIsoNum,
-
-    // Descripciones…
-    DesDB1 = desBase1,
-    DesDB2 = desBase2,
-    DesDB3 = Trunc($"{desBase3}-{glCuenta}", 40),
-
-    DesCR1 = desBase1,
-    DesCR2 = desBase2,
-    DesCR3 = desBase3,
-
-    NaturalezaCliente = naturalezaCliente,
-    NaturalezaGL = 'D',
-    TcodeCliente = "0783",
-    TcodeGL = "0784",
-    EsAutoBalance = auto.enabled,
-    FuenteGL = fuente,
-    CuentaClienteOriginal = numeroCuenta,
-    CuentaGLResuelta = glCuenta ?? string.Empty
-};
+Esta Naturaleza C
+CALL BCAH96.INT_LOTES(40, 293990015, 224.60000610351562, 'D', 198, 0, 1, 1240015443, 224.60000610351562, 'C', 0, 0, 0, 0, 0, '', 0, 0, 0, 0, 0, '', 0, 0, 'ADQ_INTERFAZ', 0, 'Banco Davivienda', '4000009-P0055638', 'CR-PRWS-P0055638-251007-00-AHO-293990015', 'Banco Davivienda', '4000009-P0055638', 'CR-PRWS-P0055638-251007-00-AHO', 0, '', '          ')
+Esta Naturaleza D
+    CALL BCAH96.INT_LOTES(1, 1011940165, 10, 'D', 0, 0, 40, 293990015, 10, 'C', 198, 0, 0, 0, 0, '', 0, 0, 0, 0, 0, '', 0, 0, 'ADQ_INTERFAZ', 0, 'Ferreteria el Ahorro', '4000006-P0055469', 'DB-ABCD-1234-AHO', 'Ferreteria el Ahorro', '4000006-P0055469', 'DB-ABCD-1234-AHO-293990015', 0, '', '          ')}
 
 
-// --- Caso naturalezaCliente == "D": Débito Cliente / Crédito GL ---
-return new IntLotesParamsDto
-{
-    Perfil = perfil,
-    Moneda = monedaIsoNum,
-    TasaTm = 0m,
+    Y esto es lo que mando ahora y me devuelve errores:
 
-    // Mov1 = Débito Cliente
-    TipoMov1   = tipoCliente,
-    CuentaMov1 = cteAsDec,     // ← ya seguro
-    DeCr1      = "D",
-    CentroCosto1 = 0m,
-    MontoMov1  = monto,
-    MonedaMov1 = monedaIsoNum,
+CALL BCAH96.INT_LOTES(40, 0, 224.60000610351562, 'D', 198, 0, 1, 1240015443, 224.60000610351562, 'C', 0, 0, 0, 0, 0, '', 0, 0, 0, 0, 0, '', 0, 0, 'ADQ_INTERFAZ', 0, 'Banco Davivienda', '4000009-P0055638', 'CR-PRWS-P0055638-250805-00-AHO-293990015', 'Banco Davivienda', '4000009-P0055638', 'CR-PRWS-P0055638-250805-00-AHO', 1, 'TRANSACCION UNO/DOS SIN VALORES NO SE GENERO LOTE', '          ')
 
-    // Mov2 = Crédito GL
-    TipoMov2   = tipoGL,
-    CuentaMov2 = glAsDec,      // ← ya seguro
-    DeCr2      = "C",
-    CentroCosto2 = glCC,
-    MontoMov2  = monto,
-    MonedaMov2 = monedaIsoNum,
-
-    // Descripciones…
-    DesDB1 = desBase1,
-    DesDB2 = desBase2,
-    DesDB3 = desBase3,
-
-    DesCR1 = desBase1,
-    DesCR2 = desBase2,
-    DesCR3 = Trunc($"{desBase3}-{glCuenta}", 40),
-
-    NaturalezaCliente = naturalezaCliente,
-    NaturalezaGL = 'C',
-    TcodeCliente = "0784",
-    TcodeGL = "0783",
-    EsAutoBalance = auto.enabled,
-    FuenteGL = fuente,
-    CuentaClienteOriginal = numeroCuenta,
-    CuentaGLResuelta = glCuenta ?? string.Empty
-};
+    Por lo que veo no esta retrayendo correctamente la información en este caso para el campo CuentaMov1, es posible que no este interpretando correctamente cuando sea C o D y colocando cuando corresponde la información.
