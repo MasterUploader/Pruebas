@@ -18,4 +18,37 @@ string descCr2 = Trunc($"{codigoComercio}        -{fechaFormateada}", 40);
 string descDb3 = Trunc($"&{concepto}&ADQNUM    Db Net.Liq1  ||", 40);
 string descCr3 = Trunc($"&{concepto}&ADQNUM    Cr Net.Liq2  ||", 40);
 
-El unico valor que no tengo es el ADQNUM, el cual viene de la tabla bcah96dta.ADQCTL 
+El unico valor que no tengo es el ADQNUM, el cual viene de la tabla bcah96dta.ADQCTL;
+
+Acá lo podrias obtener si es false, pero no si true:
+
+// Si es auto-balance, usamos sus GL/CC según naturaleza del cliente
+if (enabled)
+{
+    // Si es auto-balance, usamos sus GL/CC según naturaleza del cliente
+    if (naturalezaCliente.Equals("C", StringComparison.OrdinalIgnoreCase))
+    {   // Cliente CR → interno DB
+        glCuenta = glDebito; glCC = ccDebito;
+    }
+    else
+    {   // Cliente DB → interno CR
+        glCuenta = glCredito; glCC = ccCredito;
+    }
+    fuente = "CFP801";
+}
+else
+{
+    var tcodeGL = naturalezaCliente == "C" ? "0784" : "0783";
+    if (esEcommerce && TryGetGLFromAdqEctl(codigoComercio, tcodeGL, out var glEc, out var ccEc))
+    {
+        glCuenta = glEc; glCC = ccEc; fuente = "ADQECTL";
+    }
+    else if (TryGetGLFromAdqCtl("GL", 1, tcodeGL, out var glG, out var ccG))
+    {
+        glCuenta = glG; glCC = ccG; fuente = "ADQCTL";
+    }
+}
+
+
+valida el codigo RPG, indicame si es un valor que recibe como parametro de entrada o consulta la tabla, si la consulta hay que ver como lo hacemos, porque sigo sin entender ese if else.
+
