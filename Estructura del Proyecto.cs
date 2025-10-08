@@ -1,33 +1,21 @@
-// ------------ DESCRIPCIONES (idénticas al RPG) ------------
-string des1 = Trunc(nombreComercio, 40);                         // AL1
-string des2 = Trunc($"{codigoComercio}-{terminal}", 40);         // AL2
+La descripcion debe de ser así:
+// Descripciones base (40 chars; INT_LOTES espera 40 en DESxx)
 
-string tipCta = infoCta.EsAhorro ? "AHO" : infoCta.EsCheques ? "CHE" : "CTE";
-string base3  = $"{EtiquetaConcepto(naturalezaCliente)}-{idUnico}-{tipCta}";   // AL3 base
-string al3GL  = Trunc($"{base3}-{glDec}", 40);                                  // AL3 con cuenta GL
-string al3Sin = Trunc(base3, 40);                                               // AL3 sin cuenta
+string concepto = "VTA";
 
-// … y en el return, SOLO cambia estas asignaciones:
+// Obtener la fecha actual
+DateTime fechaActual = DateTime.Now;
 
-if (naturalezaCliente == "C")
-{
-    // Cliente a CR → GL a DB
-    return new IntLotesParamsDto
-    {
-        // … (todo lo que ya tenías)
-        DesDB1 = des1, DesDB2 = des2, DesDB3 = al3GL,   // lado debitado = GL, lleva -CuentaGL
-        DesCR1 = des1, DesCR2 = des2, DesCR3 = al3Sin,  // lado acreditado = Cliente, SIN cuenta
-        // … (resto igual)
-    };
-}
-else
-{
-    // Cliente a DB → GL a CR
-    return new IntLotesParamsDto
-    {
-        // … (todo lo que ya tenías)
-        DesDB1 = des1, DesDB2 = des2, DesDB3 = al3Sin,  // lado debitado = Cliente, SIN cuenta
-        DesCR1 = des1, DesCR2 = des2, DesCR3 = al3GL,   // lado acreditado = GL, lleva -CuentaGL
-        // … (resto igual)
-    };
-}
+// Formatear la fecha como YYYYMMDD
+string fechaFormateada = fechaActual.ToString("yyyyMMdd");
+
+string desDb1 = Trunc("Total Neto Db liquidacion come", 40);
+string desCr1 = Trunc("Total Neto Cr liquidacion come", 40);
+
+string descDb2 = Trunc($"{codigoComercio}        -{fechaFormateada}-{tipoCliente}-{numeroCuenta}", 40);
+string descCr2 = Trunc($"{codigoComercio}        -{fechaFormateada}", 40);
+
+string descDb3 = Trunc($"&{concepto}&ADQNUM    Db Net.Liq1  ||", 40);
+string descCr3 = Trunc($"&{concepto}&ADQNUM    Cr Net.Liq2  ||", 40);
+
+El unico valor que no tengo es el ADQNUM, el cual viene de la tabla bcah96dta.ADQCTL 
