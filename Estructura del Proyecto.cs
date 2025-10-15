@@ -1,156 +1,232 @@
-Convierte esta clase para que utilice RestUtilities.QueryBuilder:
-
 using Connections.Abstractions;
 using Microsoft.AspNetCore.Mvc;
 using MS_BAN_38_UTH_RECAUDACION_PAGOS.Models.Dtos.CompaniesDtos;
 using MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.IServiceReference;
 using MS_BAN_38_UTH_RECAUDACION_PAGOS.Utils;
 using Newtonsoft.Json;
-using System.Data.OleDb;
+using QueryBuilder.Builders;
+using QueryBuilder.Enums;
 using System.Net;
 
 namespace MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Companies.Companies_Services;
 
 /// <summary>
-/// Clase de Servicio CompaniesServices
+/// Servicio de Companies que consume el endpoint externo y persiste
+/// el resultado en AS/400 (DB2 for i) usando <c>RestUtilities.QueryBuilder</c>.
 /// </summary>
-/// <param name="_httpClientFactory">Instancia de IHttpClientFactory.</param>
-/// <param name="_connection">Instancia de IDatabaseConnection</param>
-/// <param name="_contextAccessor">Instancia de IHttpContextAccesor</param>
-public class CompaniesServices(IHttpClientFactory _httpClientFactory, IDatabaseConnection _connection, IHttpContextAccessor _contextAccessor) : ICompaniesServices
+/// <param name="_httpClientFactory">Factory de HttpClient con el perfil "GINIH".</param>
+/// <param name="_connection">Conexión a base de datos (AS/400).</param>
+/// <param name="_contextAccessor">Accessor del contexto HTTP (para logging/decorators de la conexión).</param>
+public class CompaniesServices(
+    IHttpClientFactory _httpClientFactory,
+    IDatabaseConnection _connection,
+    IHttpContextAccessor _contextAccessor
+) : ICompaniesServices
 {
-
     /// <summary>
-    /// Método DoProcessAsync para Companies.
+    /// Ejecuta el proceso completo: consume el WS y mapea/persiste la respuesta.
     /// </summary>
-    /// <param name="getCompaniesDto">Objeto DTO.</param>
-    /// <returns>Objeto GetCompaniesResponseDto.</returns>
+    /// <param name="getCompaniesDto">Parámetros de la consulta (limit, nextToken y campos obligatorios).</param>
+    /// <returns>Respuesta del servicio externo y estado del proceso.</returns>
     public async Task<GetCompaniesResponseDto> DoProcessAsync(GetCompaniesDto getCompaniesDto)
     {
-        GetCompaniesResponseDto response = await ConsumoWebServiceConsultaCompañiasPorCobrar(getCompaniesDto);
-
+        var response = await ConsumoWebServiceConsultaCompañiasPorCobrar(getCompaniesDto);
         return MapResponse(getCompaniesDto, response);
     }
 
-    [HttpGet]
+    /// <summary>
+    /// Llama el endpoint externo <c>/companies</c> usando el JWT renovado
+    /// y devuelve el DTO deserializado.
+    /// </summary>
     private async Task<GetCompaniesResponseDto> ConsumoWebServiceConsultaCompañiasPorCobrar(GetCompaniesDto getCompaniesDto)
     {
-        GetCompaniesResponseDto _getCompaniesResponseDto = new();
-        RefreshToken _refreshToken = new(_connection, _contextAccessor);
-        URLsExt _url = new();
+        GetCompaniesResponseDto resp = new();
+        RefreshToken refreshTokenSvc = new(_connection, _contextAccessor);
+        URLsExt urlHelper = new();
 
-        //Obtenemos las variables globales
-        string _baseUrl = GlobalConnection.Current.Host;
+        string baseUrl = GlobalConnection.Current.Host ?? string.Empty;
 
-        var refresResponse = await _refreshToken.DoRefreshToken();
+        var refreshResponse = await refreshTokenSvc.DoRefreshToken();
+        string jwt = refreshResponse.Data.JWT;
+        string limit = getCompaniesDto.Limit ?? string.Empty;
+        string nextToken = getCompaniesDto.NextToken ?? string.Empty;
 
-        string _JWTToken = refresResponse.Data.JWT;
-        string _limit = getCompaniesDto.Limit;
-        string _nextToken = getCompaniesDto.NextToken;
+        var endpoint = $"{baseUrl}/companies?limit={limit}&NextToken={nextToken}";
 
-        var baseAddressExtra = _baseUrl + "/companies?limit=" + _limit + "&NextToken=" + _nextToken;
-
-        if (refresResponse.Status.Equals("success"))
+        if (!refreshResponse.Status.Equals("success", StringComparison.OrdinalIgnoreCase))
         {
-            try
-            {
-                using var client = _httpClientFactory.CreateClient("GINIH");
-
-                if (!string.IsNullOrEmpty(_baseUrl) && Uri.IsWellFormedUriString(_baseUrl, UriKind.RelativeOrAbsolute))
-                {
-                    client.BaseAddress = new Uri(_url.QuerySchemeEmptyFilter(baseAddressExtra));
-                }
-                client.DefaultRequestHeaders.Add("Authorization", _JWTToken);
-
-                using HttpResponseMessage response = await client.GetAsync(client.BaseAddress);
-                var json_Respuesta = await response.Content.ReadAsStringAsync();
-                var deserialized = JsonConvert.DeserializeObject<GetCompaniesResponseDto>(json_Respuesta);
-
-                if (deserialized?.Data.Count != 0 && deserialized != null && (response.StatusCode.ToString().Equals("OK") || response.StatusCode.ToString().Equals("success")))
-                {
-                    _getCompaniesResponseDto = deserialized;
-                    _getCompaniesResponseDto.Status = response.StatusCode.ToString();
-                    _getCompaniesResponseDto.Error = "0";
-                    _getCompaniesResponseDto.Mensaje = "Proceso ejecutado Satisfactoriamente";
-                    return _getCompaniesResponseDto;
-                }
-                _getCompaniesResponseDto = deserialized ?? new GetCompaniesResponseDto();
-                _getCompaniesResponseDto.Status = response.StatusCode.ToString();
-                _getCompaniesResponseDto.Message = "La consulta no devolvio valores";
-                _getCompaniesResponseDto.Error = "1";
-                _getCompaniesResponseDto.Mensaje = "Proceso ejecutado InSatisfactoriamente";
-                return _getCompaniesResponseDto;
-            }
-            catch (Exception ex)
-            {
-                _getCompaniesResponseDto.Status = HttpStatusCode.NotFound.ToString();
-                _getCompaniesResponseDto.Message = ex.Message;
-                _getCompaniesResponseDto.Error = "1";
-                _getCompaniesResponseDto.Mensaje = "Proceso ejecutado InSatisfactoriamente";
-                return _getCompaniesResponseDto;
-            }
+            resp.Status = HttpStatusCode.BadRequest.ToString();
+            resp.Message = "¡¡El JWT no se validó Correctamente!!";
+            resp.Error = "1";
+            resp.Mensaje = "Proceso ejecutado Insatisfactoriamente";
+            return resp;
         }
-        _getCompaniesResponseDto.Status = HttpStatusCode.BadRequest.ToString();
-        _getCompaniesResponseDto.Message = "¡¡El JWT no se valido Correctamente!!";
-        _getCompaniesResponseDto.Error = "1";
-        _getCompaniesResponseDto.Mensaje = "Proceso ejecutado InSatisfactoriamente";
-        return _getCompaniesResponseDto;
-    }
-
-    private GetCompaniesResponseDto MapResponse(GetCompaniesDto getCompaniesDto, GetCompaniesResponseDto getCompaniesResponseDto)
-    {
-        _connection.Open();
 
         try
         {
-            if ((getCompaniesResponseDto.Status == "success" || getCompaniesResponseDto.Status == "OK") && _connection.IsConnected)
+            using var client = _httpClientFactory.CreateClient("GINIH");
+
+            if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.IsWellFormedUriString(baseUrl, UriKind.RelativeOrAbsolute))
             {
+                client.BaseAddress = new Uri(urlHelper.QuerySchemeEmptyFilter(endpoint));
+            }
 
-                int correlativo = 0;
-                GetCompaniesResponseDto[] arrayCompanies = [getCompaniesResponseDto];
-                string jsonString = JsonConvert.SerializeObject(arrayCompanies);
-                var listGetCompaniesResponse = JsonConvert.DeserializeObject<List<GetCompaniesResponseDto>>(jsonString)!;
-                FieldsQuery param = new();
+            client.DefaultRequestHeaders.Remove("Authorization");
+            client.DefaultRequestHeaders.Add("Authorization", jwt);
 
-                foreach (GetCompaniesResponseDto list2 in listGetCompaniesResponse)
+            using var httpResponse = await client.GetAsync(client.BaseAddress);
+            var payload = await httpResponse.Content.ReadAsStringAsync();
+            var deserialized = JsonConvert.DeserializeObject<GetCompaniesResponseDto>(payload);
+
+            // Éxito
+            if (deserialized is not null &&
+                deserialized.Data is not null &&
+                deserialized.Data.Count > 0 &&
+                (httpResponse.StatusCode == HttpStatusCode.OK ||
+                 string.Equals(httpResponse.StatusCode.ToString(), "success", StringComparison.OrdinalIgnoreCase)))
+            {
+                deserialized.Status = httpResponse.StatusCode.ToString();
+                deserialized.Error = "0";
+                deserialized.Mensaje = "Proceso ejecutado Satisfactoriamente";
+                return deserialized;
+            }
+
+            // Sin datos o status != OK
+            resp = deserialized ?? new GetCompaniesResponseDto();
+            resp.Status = httpResponse.StatusCode.ToString();
+            resp.Message = deserialized?.Message ?? "La consulta no devolvió valores";
+            resp.Error = "1";
+            resp.Mensaje = "Proceso ejecutado Insatisfactoriamente";
+            return resp;
+        }
+        catch (Exception ex)
+        {
+            resp.Status = HttpStatusCode.NotFound.ToString();
+            resp.Message = ex.Message;
+            resp.Error = "1";
+            resp.Mensaje = "Proceso ejecutado Insatisfactoriamente";
+            return resp;
+        }
+    }
+
+    /// <summary>
+    /// Persiste la respuesta del WS en la tabla <c>BCAH96DTA.UTH01CCC</c> usando
+    /// <c>InsertQueryBuilder</c> con VALUES parametrizados (placeholders <c>?</c>).
+    /// </summary>
+    /// <remarks>
+    /// Mantiene la semántica de la versión previa: inserta una fila por cada ítem de <c>Data</c>,
+    /// con <c>CCC01CORR</c> incremental desde 0 y el resto de columnas mapeadas desde el DTO.
+    /// </remarks>
+    private GetCompaniesResponseDto MapResponse(GetCompaniesDto getCompaniesDto, GetCompaniesResponseDto getCompaniesResponseDto)
+    {
+        // Si la llamada no fue exitosa, no insertamos nada y devolvemos tal cual.
+        if (!string.Equals(getCompaniesResponseDto.Status, "success", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(getCompaniesResponseDto.Status, "OK", StringComparison.OrdinalIgnoreCase))
+        {
+            return getCompaniesResponseDto;
+        }
+
+        _connection.Open();
+        try
+        {
+            if (!_connection.IsConnected || getCompaniesResponseDto.Data is null || getCompaniesResponseDto.Data.Count == 0)
+                return getCompaniesResponseDto;
+
+            // Para facilitar el mapeo, se “normaliza” a una lista (tu código original serializaba a JSON y re-deserializaba)
+            var listEnvelope = new List<GetCompaniesResponseDto> { getCompaniesResponseDto };
+
+            // Builder INSERT parametrizado (DB2 i → placeholders ? + lista QueryResult.Parameters)
+            // Columnas en el mismo orden que el INSERT original
+            var builder = new InsertQueryBuilder("UTH01CCC", "BCAH96DTA", SqlDialect.Db2i)
+                .WithComment("INSERT companies snapshot from GINIH /companies")
+                .IntoColumns(
+                    "CCC00GUID", // Guid solicitud
+                    "CCC01CORR", // correlativo incremental
+                    "CCC02FECH", // fecha proceso
+                    "CCC03HORA", // hora proceso
+                    "CCC04CAJE", // cajero
+                    "CCC05BANC", // banco
+                    "CCC06SUCU", // sucursal
+                    "CCC07TERM", // terminal
+                    "CCC08LIMI", // limit
+                    "CCC09NTOK", // nextToken
+                    "CCC10STAT", // status
+                    "CCC11MESS", // message
+                    "CCC12DTID", // data.id
+                    "CCC12DTNA", // data.name
+                    "CCC13DTPO", // data.payableOptions (csv o "Nulo")
+                    "CCC13TIST", // timestamp
+                    "CCC14MDTI", // metadata.items
+                    "CCC15MDHM", // metadata.hasMore
+                    "CCC16MDNT", // metadata.nextToken
+                    "CCC17COVA", // code.value
+                    "CCC18CONA", // code.name
+                    "CCC19ERRO", // error (del response)
+                    "CCC20MENS"  // mensaje (del response)
+                );
+
+            // Utilidad local para evitar nulls
+            static string S(object? v, string @default = "") => v?.ToString() ?? @default;
+
+            int correlativo = 0;
+            foreach (var envelope in listEnvelope)
+            {
+                // Campos comunes del “sobre” (cabecera de respuesta)
+                var status = S(envelope.Status);
+                var message = S(envelope.Message);
+                var timestamp = envelope.Timestamp.ToString();
+                var mdItems = S(envelope.Metadata?.Items);
+                var mdHasMore = S(envelope.Metadata?.HasMore?.ToString() ?? "NO");
+                var mdNextToken = S(envelope.Metadata?.NextToken);
+                var codeValue = S(envelope.Code?.Value?.ToString() ?? "124");
+                var codeName = S(envelope.Code?.Name);
+                var error = S(envelope.Error);
+                var mensaje = S(envelope.Mensaje, "Proceso ejecutado Satisfactoriamente");
+
+                foreach (var item in envelope.Data)
                 {
-                    foreach (var list3 in list2.Data)
-                    {
-                        string sqlQuery = "INSERT INTO BCAH96DTA.UTH01CCC (CCC00GUID, CCC01CORR, CCC02FECH, CCC03HORA, CCC04CAJE, CCC05BANC, CCC06SUCU, CCC07TERM, CCC08LIMI, CCC09NTOK, CCC10STAT, CCC11MESS, CCC12DTID, CCC12DTNA, CCC13DTPO, CCC13TIST, CCC14MDTI, CCC15MDHM, CCC16MDNT, CCC17COVA, CCC18CONA, CCC19ERRO, CCC20MENS) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-                        using var command = _connection.GetDbCommand(_contextAccessor.HttpContext!);
-                        command.CommandText = sqlQuery;
+                    // Campos por ítem
+                    var id = S(item.Id);
+                    var name = S(item.Name);
+                    var payableOptions = item.PayableOptions is null || item.PayableOptions.Count == 0
+                        ? "Nulo"
+                        : string.Join(",", item.PayableOptions);
 
-                        command.CommandType = System.Data.CommandType.Text;
-                        param.AddOleDbParameter(command,"CCC00GUID", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Guid);
-                        param.AddOleDbParameter(command,"CCC01CORR", OleDbType.Char, correlativo.ToString());
-                        param.AddOleDbParameter(command,"CCC02FECH", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Fecha);
-                        param.AddOleDbParameter(command,"CCC03HORA", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Hora);
-                        param.AddOleDbParameter(command,"CCC04CAJE", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Cajero);
-                        param.AddOleDbParameter(command,"CCC05BANC", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Banco);
-                        param.AddOleDbParameter(command,"CCC06SUCU", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Sucursal);
-                        param.AddOleDbParameter(command,"CCC07TERM", OleDbType.Char, getCompaniesDto.CamposObligatoriosModel.Terminal);
-                        param.AddOleDbParameter(command,"CCC08LIMI", OleDbType.Char, getCompaniesDto.Limit);
-                        param.AddOleDbParameter(command,"CCC09NTOK", OleDbType.Char, getCompaniesDto.NextToken);
-                        param.AddOleDbParameter(command,"CCC10STAT", OleDbType.Char, list2.Status);
-                        param.AddOleDbParameter(command,"CCC11MESS", OleDbType.Char, list2.Message);
-                        param.AddOleDbParameter(command,"CCC12DTID", OleDbType.Char, list3.Id);
-                        param.AddOleDbParameter(command,"CCC12DTNA", OleDbType.Char, list3.Name);
-                        param.AddOleDbParameter(command,"CCC13DTPO", OleDbType.Char, (list3.PayableOptions == null) ? "Nulo" : string.Join(",", list3.PayableOptions));
-                        param.AddOleDbParameter(command,"CCC13TIST", OleDbType.Char, list2.Timestamp.ToString());
-                        param.AddOleDbParameter(command,"CCC14MDTI", OleDbType.Char, list2.Metadata.Items);
-                        param.AddOleDbParameter(command,"CCC15MDHM", OleDbType.Char, (list2.Metadata.HasMore.ToString() ?? "NO"));
-                        param.AddOleDbParameter(command,"CCC16MDNT", OleDbType.Char, (list2.Metadata.NextToken ?? ""));
-                        param.AddOleDbParameter(command,"CCC17COVA", OleDbType.Char, (list2.Code.Value.ToString() ?? "124"));
-                        param.AddOleDbParameter(command,"CCC18CONA", OleDbType.Char, (list2.Code.Name ?? ""));
-                        param.AddOleDbParameter(command,"CCC19ERRO", OleDbType.Char, getCompaniesResponseDto.Error);
-                        param.AddOleDbParameter(command,"CCC20MENS", OleDbType.Char, (getCompaniesResponseDto.Mensaje ?? "Proceso ejecutado Satisfactoriamente"));
+                    builder.Row(
+                        S(getCompaniesDto.CamposObligatoriosModel.Guid),
+                        correlativo.ToString(), // mantenerlo como texto (tal como hacía OleDbType.Char)
+                        S(getCompaniesDto.CamposObligatoriosModel.Fecha),
+                        S(getCompaniesDto.CamposObligatoriosModel.Hora),
+                        S(getCompaniesDto.CamposObligatoriosModel.Cajero),
+                        S(getCompaniesDto.CamposObligatoriosModel.Banco),
+                        S(getCompaniesDto.CamposObligatoriosModel.Sucursal),
+                        S(getCompaniesDto.CamposObligatoriosModel.Terminal),
+                        S(getCompaniesDto.Limit),
+                        S(getCompaniesDto.NextToken),
+                        status,
+                        message,
+                        id,
+                        name,
+                        payableOptions,
+                        timestamp,
+                        mdItems,
+                        mdHasMore,
+                        mdNextToken,
+                        codeValue,
+                        codeName,
+                        error,
+                        mensaje
+                    );
 
-                        command.ExecuteNonQuery();
-
-                        correlativo++;
-                    }
+                    correlativo++;
                 }
             }
+
+            // Construir y ejecutar en un solo INSERT multi-VALUES
+            var insert = builder.Build();
+            using var cmd = _connection.GetDbCommand(insert, _contextAccessor.HttpContext!);
+            _ = cmd.ExecuteNonQuery();
+
             return getCompaniesResponseDto;
         }
         catch (Exception ex)
@@ -158,9 +234,11 @@ public class CompaniesServices(IHttpClientFactory _httpClientFactory, IDatabaseC
             getCompaniesResponseDto.Mensaje = ex.Message;
             getCompaniesResponseDto.Error = "106";
             getCompaniesResponseDto.Status = "InternalServerError";
-
-
             return getCompaniesResponseDto;
+        }
+        finally
+        {
+            _connection.Close();
         }
     }
 }
