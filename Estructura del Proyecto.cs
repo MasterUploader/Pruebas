@@ -355,7 +355,8 @@ public class Token
         }
     }
 }
-
+}
 
 Porque se guarda primero el SQL y luego el http en el log, si primero se ejecuto el http antes que el log.
-}
+
+
