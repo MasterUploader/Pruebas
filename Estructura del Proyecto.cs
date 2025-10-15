@@ -387,4 +387,107 @@ public class PaymentsServices(
         //
         //         using var cmd = _connection.GetDbCommand(insert, _contextAccessor.HttpContext!);
         //         _ = cmd.ExecuteNonQuery();
-        //
+        //     }
+        // }
+        // catch (Exception ex)
+        // {
+        //     // Si decides activar esta persistencia, maneja el error acorde stencia, maneja el error acorde 
+
+        {
+        //     // Si decides activar esta persistencia, maneja el error acorde a tu estrategia de logging.
+        // }
+        // finally
+        // {
+        //     _connection.Close();
+        // }
+
+        return resp;
+    }
+
+    #region Helpers GINIH (integrados)
+
+    /// <summary>
+    /// Convierte un valor arbitrario al entero que espera GINIH.
+    /// Soporta: null, string, int, long, decimal, double, bool.
+    /// </summary>
+    private static int ConvertirAEnteroGinih(object? valor, int defaultValue = 0)
+    {
+        switch (valor)
+        {
+            case null:
+                return defaultValue;
+
+            case int i:
+                return i;
+
+            case long l:
+                if (l > int.MaxValue) return int.MaxValue;
+                if (l < int.MinValue) return int.MinValue;
+                return (int)l;
+
+            case decimal dec:
+            {
+                if (dec > int.MaxValue) return int.MaxValue;
+                if (dec < int.MinValue) return int.MinValue;
+                return (int)Math.Round(dec, 0, MidpointRounding.AwayFromZero);
+            }
+
+            case double dbl:
+            {
+                if (dbl > int.MaxValue) return int.MaxValue;
+                if (dbl < int.MinValue) return int.MinValue;
+                return (int)Math.Round(dbl, 0, MidpointRounding.AwayFromZero);
+            }
+
+            case bool b:
+                return b ? 1 : 0;
+
+            case string s:
+            {
+                if (string.IsNullOrWhiteSpace(s)) return defaultValue;
+
+                var cleanedChars = s.Where(c => char.IsDigit(c) || c == '-' || c == ',' || c == '.').ToArray();
+                var cleaned = new string(cleanedChars);
+
+                if (int.TryParse(cleaned, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i2))
+                    return i2;
+
+                var normalized = cleaned.Replace(',', '.');
+                if (decimal.TryParse(normalized, NumberStyles.Any, CultureInfo.InvariantCulture, out var dec2))
+                {
+                    if (dec2 > int.MaxValue) return int.MaxValue;
+                    if (dec2 < int.MinValue) return int.MinValue;
+                    return (int)Math.Round(dec2, 0, MidpointRounding.AwayFromZero);
+                }
+
+                return defaultValue;
+            }
+
+            default:
+                try
+                {
+                    var conv = Convert.ToDecimal(valor, CultureInfo.InvariantCulture);
+                    if (conv > int.MaxValue) return int.MaxValue;
+                    if (conv < int.MinValue) return int.MinValue;
+                    return (int)Math.Round(conv, 0, MidpointRounding.AwayFromZero);
+                }
+                catch
+                {
+                    return defaultValue;
+                }
+        }
+    }
+
+    /// <summary>
+    /// Variante que retorna string (útil si el API o la tabla exigen cadena numérica),
+    /// con padding opcional a la izquierda.
+    /// </summary>
+    private static string ConvertirAEnteroGinihStr(object? valor, int padLeft = 0, int defaultValue = 0)
+    {
+        var n = ConvertirAEnteroGinih(valor, defaultValue);
+        var s = n.ToString(CultureInfo.InvariantCulture);
+        return padLeft > 0 ? s.PadLeft(padLeft, '0') : s;
+    }
+
+    #endregion
+}
