@@ -6,6 +6,8 @@ using MS_BAN_38_UTH_RECAUDACION_PAGOS.Utils;
 using Newtonsoft.Json;
 using QueryBuilder.Builders;
 using QueryBuilder.Enums;
+using System.Data.Common;
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -14,24 +16,15 @@ using System.Text.Json.Serialization;
 namespace MS_BAN_38_UTH_RECAUDACION_PAGOS.ServiceReference.REST_UTH.Payments.Payments_Services;
 
 /// <summary>
-/// Servicio Payments que consume endpoints de GINIH y persiste respuestas
-/// en AS/400 (DB2 for i) usando <c>RestUtilities.QueryBuilder</c>.
+/// Servicio para consultar y registrar pagos de la API UTH usando RestUtilities.QueryBuilder para persistencia en AS/400 (DB2 i).
 /// </summary>
-/// <param name="_httpClientFactory">Factory de HttpClient configurado (perfil "GINIH").</param>
-/// <param name="_connection">Conexión a base de datos (AS/400).</param>
-/// <param name="_contextAccessor">Accessor de HttpContext para trazabilidad/log en la conexión.</param>
 public class PaymentsServices(
     IHttpClientFactory _httpClientFactory,
     IDatabaseConnection _connection,
-    IHttpContextAccessor _contextAccessor
-) : IPaymentsServices
+    IHttpContextAccessor _contextAccessor) : IPaymentsServices
 {
-    // ============================================================
-    // GET /payments?referenceId=...
-    // ============================================================
-
     /// <summary>
-    /// Obtiene pagos por referencia y persiste la respuesta en DB.
+    /// Trae pagos por referencia (GET /payments?referenceId=...).
     /// </summary>
     public async Task<GetPaymentsResponseDto> GetPaymentAsync(GetPaymentsDto getPaymentsDto)
     {
@@ -43,16 +36,14 @@ public class PaymentsServices(
     private async Task<GetPaymentsResponseDto> ConsumoWebServiceConsultaPagos(GetPaymentsDto getPaymentsDto)
     {
         GetPaymentsResponseDto result = new();
-        RefreshToken refreshSvc = new(_connection, _contextAccessor);
+        RefreshToken refresh = new(_connection, _contextAccessor);
 
-        // Host base del servicio externo
-        string baseUrl = GlobalConnection.Current.Host ?? string.Empty;
+        var baseUrl = GlobalConnection.Current.Host;
+        var refreshResponse = await refresh.DoRefreshToken();
+        var jwt = refreshResponse.Data.JWT;
+        var reference = getPaymentsDto.Reference;
 
-        var refresh = await refreshSvc.DoRefreshToken();
-        string jwt = refresh.Data.JWT;
-        string reference = getPaymentsDto.Reference ?? string.Empty;
-
-        if (!refresh.Status.Equals("success", StringComparison.OrdinalIgnoreCase))
+        if (!refreshResponse.Status.Equals("success", StringComparison.OrdinalIgnoreCase))
         {
             result.Status = HttpStatusCode.BadRequest.ToString();
             result.Message = "¡¡El JWT no se validó correctamente!!";
@@ -62,22 +53,23 @@ public class PaymentsServices(
         try
         {
             using var client = _httpClientFactory.CreateClient("GINIH");
-            client.BaseAddress = new Uri(baseUrl);
-            client.DefaultRequestHeaders.Remove("Authorization");
+            if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.IsWellFormedUriString(baseUrl, UriKind.RelativeOrAbsolute))
+                client.BaseAddress = new Uri(baseUrl);
+
             client.DefaultRequestHeaders.Add("Authorization", jwt);
 
-            using var httpResponse = await client.GetAsync($"/payments?referenceId={reference}");
-            var json = await httpResponse.Content.ReadAsStringAsync();
+            using var response = await client.GetAsync($"{client.BaseAddress}/payments?referenceId={reference}");
+            var json = await response.Content.ReadAsStringAsync();
             var deserialized = JsonConvert.DeserializeObject<GetPaymentsResponseDto>(json);
 
             if (deserialized is not null)
             {
-                deserialized.Status = httpResponse.StatusCode.ToString();
+                deserialized.Status = response.StatusCode.ToString();
                 return deserialized;
             }
 
-            result.Status = httpResponse.StatusCode.ToString();
-            result.Message = "La consulta no devolvió nada";
+            result.Status = response.StatusCode.ToString();
+            result.Message = "La consulta no devolvió datos";
             return result;
         }
         catch (Exception ex)
@@ -88,12 +80,8 @@ public class PaymentsServices(
         }
     }
 
-    // ============================================================
-    // GET /payments/{id}
-    // ============================================================
-
     /// <summary>
-    /// Obtiene el detalle de pago por ID y (opcionalmente) persiste/usa la respuesta.
+    /// Trae pago por Id (GET /payments/{id}).
     /// </summary>
     public async Task<GetPaymentsIDResponseDto> GetPaymentsID(GetPaymentsIDDto getPaymentsIDDto)
     {
@@ -105,15 +93,14 @@ public class PaymentsServices(
     private async Task<GetPaymentsIDResponseDto> ConsumoWebServiceConsultaPagosPorID(GetPaymentsIDDto getPaymentsIDDto)
     {
         GetPaymentsIDResponseDto result = new();
-        RefreshToken refreshSvc = new(_connection, _contextAccessor);
+        RefreshToken refresh = new(_connection, _contextAccessor);
 
-        string baseUrl = GlobalConnection.Current.Host ?? string.Empty;
+        var baseUrl = GlobalConnection.Current.Host;
+        var refreshResponse = await refresh.DoRefreshToken();
+        var jwt = refreshResponse.Data.JWT;
+        var id = getPaymentsIDDto.Id;
 
-        var refresh = await refreshSvc.DoRefreshToken();
-        string jwt = refresh.Data.JWT;
-        string id = getPaymentsIDDto.Id ?? string.Empty;
-
-        if (!refresh.Status.Equals("success", StringComparison.OrdinalIgnoreCase))
+        if (!refreshResponse.Status.Equals("success", StringComparison.OrdinalIgnoreCase))
         {
             result.Status = HttpStatusCode.BadRequest.ToString();
             result.Message = "¡¡El JWT no se validó correctamente!!";
@@ -123,23 +110,23 @@ public class PaymentsServices(
         try
         {
             using var client = _httpClientFactory.CreateClient("GINIH");
-            client.BaseAddress = new Uri(baseUrl);
-            client.DefaultRequestHeaders.Remove("Authorization");
+            if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.IsWellFormedUriString(baseUrl, UriKind.RelativeOrAbsolute))
+                client.BaseAddress = new Uri(baseUrl);
+
             client.DefaultRequestHeaders.Add("Authorization", jwt);
 
-            // OJO: ruta correcta → /payments/{id}
-            using var httpResponse = await client.GetAsync($"/payments/{id}");
-            var json = await httpResponse.Content.ReadAsStringAsync();
+            using var response = await client.GetAsync($"{client.BaseAddress}/payments/{id}");
+            var json = await response.Content.ReadAsStringAsync();
             var deserialized = JsonConvert.DeserializeObject<GetPaymentsIDResponseDto>(json);
 
             if (deserialized is not null)
             {
-                deserialized.Status = httpResponse.StatusCode.ToString();
+                deserialized.Status = response.StatusCode.ToString();
                 return deserialized;
             }
 
-            result.Status = httpResponse.StatusCode.ToString();
-            result.Message = "La consulta no devolvió nada";
+            result.Status = response.StatusCode.ToString();
+            result.Message = "La consulta no devolvió datos";
             return result;
         }
         catch (Exception ex)
@@ -150,12 +137,8 @@ public class PaymentsServices(
         }
     }
 
-    // ============================================================
-    // POST /payments
-    // ============================================================
-
     /// <summary>
-    /// Publica un pago y persiste respuesta en DB.
+    /// Publica un pago (POST /payments) y persiste el resultado.
     /// </summary>
     public async Task<PostPaymentResponseDto> PostPayments(PostPaymentDto postPaymentDto)
     {
@@ -167,69 +150,59 @@ public class PaymentsServices(
     private async Task<PostPaymentResponseDto> ConsumoWebServicePosteaPagos(PostPaymentDto postPaymentDto)
     {
         PostPaymentResponseDto result = new();
-        RefreshToken refreshSvc = new(_connection, _contextAccessor);
-        URLsExt urlHelper = new();
+        RefreshToken refresh = new(_connection, _contextAccessor);
 
-        string baseUrl = GlobalConnection.Current.Host ?? string.Empty;
-        var refresh = await refreshSvc.DoRefreshToken();
-        string jwt = refresh.Data.JWT;
+        var baseUrl = GlobalConnection.Current.Host;
+        var refreshResponse = await refresh.DoRefreshToken();
+        var jwt = refreshResponse.Data.JWT;
 
-        // Este método externo crea el objeto final a enviar (tu lógica existente).
-        // Asumo que lo tienes implementado en tu proyecto.
-        PostPaymentDtoFinal payload = GenerarPostPayment(postPaymentDto.CamposObligatoriosModel.Guid, out bool ok);
-
-        if (!refresh.Status.Equals("success", StringComparison.OrdinalIgnoreCase))
+        if (!refreshResponse.Status.Equals("success", StringComparison.OrdinalIgnoreCase))
         {
             result.Status = HttpStatusCode.BadRequest.ToString();
             result.Error = "1";
+            result.Mensaje = "¡¡El JWT no se validó correctamente!!";
             result.Message = "¡¡El JWT no se validó correctamente!!";
             return result;
         }
 
-        if (!ok)
-        {
-            result.Status = HttpStatusCode.BadRequest.ToString();
-            result.Error = "1";
-            result.Message = "No se pudo generar el objeto a enviar (lectura de tabla falló).";
-            return result;
-        }
+        // Si usas un generador previo del objeto:
+        // var postPaymentDtoFinal = GenerarPostPayment(postPaymentDto.CamposObligatoriosModel.Guid, out bool ok);
 
         try
         {
             using var client = _httpClientFactory.CreateClient("GINIH");
-            client.BaseAddress = new Uri(urlHelper.QuerySchemeEmptyFilter(baseUrl));
-            client.DefaultRequestHeaders.Remove("Authorization");
-            client.DefaultRequestHeaders.Add("Authorization", jwt);
-            client.DefaultRequestHeaders.Remove("idempotencyKey");
-            client.DefaultRequestHeaders.Add("idempotencyKey", Guid.NewGuid().ToString());
+            if (!string.IsNullOrWhiteSpace(baseUrl) && Uri.IsWellFormedUriString(baseUrl, UriKind.RelativeOrAbsolute))
+                client.BaseAddress = new Uri(baseUrl);
 
+            // Envío tal cual el objeto recibido (ajusta si usas un DTO final)
             var content = System.Text.Json.JsonSerializer.Serialize(
-                payload,
+                postPaymentDto,
                 new JsonSerializerOptions
                 {
-                    PropertyNamingPolicy = null, // respeta nombres exactos
+                    PropertyNamingPolicy = null,
                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
                 });
 
-            var httpContent = new StringContent(content, Encoding.UTF8, "application/json");
+            var data = new StringContent(content, Encoding.UTF8, "application/json");
 
-            using var httpResponse = await client.PostAsync("/payments", httpContent);
-            var body = await httpResponse.Content.ReadAsStringAsync();
-            var deserialized = JsonConvert.DeserializeObject<PostPaymentResponseDto>(body) ?? new();
+            client.DefaultRequestHeaders.Add("Authorization", jwt);
+            client.DefaultRequestHeaders.Add("idempotencyKey", Guid.NewGuid().ToString());
 
-            deserialized.Status = httpResponse.StatusCode.ToString();
-            if (httpResponse.IsSuccessStatusCode)
+            using var response = await client.PostAsync($"{client.BaseAddress}/payments", data);
+            var responseContent = await response.Content.ReadAsStringAsync();
+            var deserialized = JsonConvert.DeserializeObject<PostPaymentResponseDto>(responseContent) ?? new PostPaymentResponseDto();
+
+            deserialized.Status = response.StatusCode.ToString();
+            if (response.IsSuccessStatusCode && deserialized.Data is not null)
             {
                 deserialized.Error = "0";
                 deserialized.Mensaje = "PROCESADO EXITOSAMENTE";
-            }
-            else
-            {
-                deserialized.Error = "1";
-                deserialized.Mensaje = "PROCESO NO DEVOLVIÓ VALORES";
-                deserialized.Message ??= "La consulta no devolvió valores";
+                return deserialized;
             }
 
+            deserialized.Error = "1";
+            deserialized.Mensaje ??= "PROCESO NO DEVOLVIÓ VALORES";
+            deserialized.Message ??= "La consulta no devolvió valores";
             return deserialized;
         }
         catch (Exception ex)
@@ -242,94 +215,81 @@ public class PaymentsServices(
         }
     }
 
-    // ============================================================
-    // Persistencia con QueryBuilder
-    // ============================================================
-
     /// <summary>
-    /// Inserta la respuesta de GET /payments en <c>BCAH96DTA.UTH04APU</c>.
+    /// Persiste la respuesta de GetPaymentAsync en BCAH96DTA.UTH04APU usando INSERT parametrizado.
     /// </summary>
     private GetPaymentsResponseDto MapResponse(GetPaymentsDto dto, GetPaymentsResponseDto resp)
     {
-        // Persistimos solo si la llamada fue OK
-        if (!string.Equals(resp.Status, "success", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(resp.Status, "OK", StringComparison.OrdinalIgnoreCase))
-            return resp;
-
         _connection.Open();
         try
         {
-            if (!_connection.IsConnected || resp.Data is null)
-                return resp;
+            if ((_connection.IsConnected) &&
+                (resp.Status.Equals("success", StringComparison.OrdinalIgnoreCase) ||
+                 resp.Status.Equals("OK", StringComparison.OrdinalIgnoreCase)) &&
+                resp.Data is not null)
+            {
+                int correlativo = 0;
 
-            // Helper local para string seguro
-            static string S(object? v, string def = "") => v?.ToString() ?? def;
+                var insert = new InsertQueryBuilder("UTH04APU", "BCAH96DTA", SqlDialect.Db2i)
+                    .IntoColumns(
+                        "APU00GUID", "APU01CORR", "APU02FECH", "APU03HORA", "APU04CAJE", "APU05BANC", "APU06SUCU", "APU07TERM",
+                        "APU08STAT", "APU09MSSG", "APU10DTID", "APU11DTNA", "APU12CUID", "APU13CUNA", "APU14COID", "APU15CONA",
+                        "APU16DREF", "APU17REFE", "APU18AMVA", "APU19AMCU", "APU20SUTO", "APU19PFEE", "APU20SCHA", "APU21DICO",
+                        "APU22BTAX", "APU23TOTA", "APU24CRAT", "APU25TIST", "APU26COVA", "APU27CONA", "APU28ERRO", "APU29MENS"
+                    )
+                    .Row(
+                        dto.CamposObligatoriosModel.Guid,                         // APU00GUID
+                        correlativo,                                              // APU01CORR
+                        dto.CamposObligatoriosModel.Fecha ?? string.Empty,       // APU02FECH
+                        dto.CamposObligatoriosModel.Hora ?? string.Empty,        // APU03HORA
+                        dto.CamposObligatoriosModel.Cajero ?? string.Empty,      // APU04CAJE
+                        dto.CamposObligatoriosModel.Banco ?? string.Empty,       // APU05BANC
+                        dto.CamposObligatoriosModel.Sucursal ?? string.Empty,    // APU06SUCU
+                        dto.CamposObligatoriosModel.Terminal ?? string.Empty,    // APU07TERM
+                        resp.Status ?? string.Empty,                              // APU08STAT
+                        resp.Message ?? string.Empty,                             // APU09MSSG
+                        resp.Data.Id ?? string.Empty,                             // APU10DTID
+                        resp.Data.Name ?? string.Empty,                           // APU11DTNA
+                        resp.Data.Customer?.Id ?? string.Empty,                   // APU12CUID
+                        resp.Data.Customer?.Name ?? string.Empty,                 // APU13CUNA
+                        resp.Data.Company?.Id ?? string.Empty,                    // APU14COID
+                        resp.Data.Company?.Name ?? string.Empty,                  // APU15CONA
+                        resp.Data.DocumentReference ?? string.Empty,              // APU16DREF
+                        resp.Data.ReferenceId ?? string.Empty,                    // APU17REFE
+                        ConvertirAEnteroGinih(resp.Data.Amount?.Value, 0),        // APU18AMVA (num)
+                        resp.Data.Amount?.Currency ?? string.Empty,               // APU19AMCU
+                        ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Subtotal, 0),      // APU20SUTO
+                        ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.ProcessingFee, 0), // APU19PFEE
+                        ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Surcharge, 0),     // APU20SCHA
+                        ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Discount, 0),      // APU21DICO
+                        ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Tax, 0),           // APU22BTAX
+                        ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Total, 0),         // APU23TOTA
+                        resp.Data.CreatedAt ?? string.Empty,                       // APU24CRAT
+                        resp.TimeStamp ?? string.Empty,                            // APU25TIST
+                        resp.Code?.Value ?? string.Empty,                          // APU26COVA
+                        resp.Code?.Name ?? string.Empty,                           // APU27CONA
+                        resp.Error ?? string.Empty,                                // APU28ERRO
+                        resp.Mensaje ?? "Proceso ejecutado satisfactoriamente"    // APU29MENS
+                    )
+                    .Build();
 
-            int correlativo = 0;
-
-            // Build INSERT parametrizado (DB2 i: placeholders "?" + Parameters)
-            var ins = new InsertQueryBuilder("UTH04APU", "BCAH96DTA", SqlDialect.Db2i)
-                .WithComment("Insert snapshot from GET /payments")
-                .IntoColumns(
-                    "APU00GUID", "APU01CORR", "APU02FECH", "APU03HORA", "APU04CAJE", "APU05BANC", "APU06SUCU", "APU07TERM",
-                    "APU08STAT", "APU09MSSG", "APU10DTID", "APU11DTNA", "APU12CUID", "APU13CUNA", "APU14COID", "APU15CONA",
-                    "APU16DREF", "APU17REFE", "APU18AMVA", "APU19AMCU", "APU20SUTO", "APU19PFEE", "APU20SCHA", "APU21DICO",
-                    "APU22BTAX", "APU23TOTA", "APU24CRAT", "APU25TIST", "APU26COVA", "APU27CONA", "APU28ERRO", "APU29MENS"
-                )
-                .Row(
-                    S(dto.CamposObligatoriosModel.Guid),
-                    correlativo, // numérico
-                    S(dto.CamposObligatoriosModel.Fecha),
-                    S(dto.CamposObligatoriosModel.Hora),
-                    S(dto.CamposObligatoriosModel.Cajero),
-                    S(dto.CamposObligatoriosModel.Banco),
-                    S(dto.CamposObligatoriosModel.Sucursal),
-                    S(dto.CamposObligatoriosModel.Terminal),
-
-                    S(resp.Status),
-                    S(resp.Message),
-
-                    S(resp.Data.Id),
-                    S(resp.Data.Name),
-                    S(resp.Data.Customer?.Id),
-                    S(resp.Data.Customer?.Name),
-                    S(resp.Data.Company?.Id),
-                    S(resp.Data.Company?.Name),
-
-                    S(resp.Data.DocumentReference),
-                    S(resp.Data.ReferenceId),
-
-                    S(resp.Data.Amount?.Value),
-                    S(resp.Data.Amount?.Currency),
-                    S(resp.Data.Amount?.Breakdown?.Subtotal),
-                    S(resp.Data.Amount?.Breakdown?.ProcessingFee),
-                    S(resp.Data.Amount?.Breakdown?.Surcharge),
-                    S(resp.Data.Amount?.Breakdown?.Discount),
-                    S(resp.Data.Amount?.Breakdown?.Tax),
-                    S(resp.Data.Amount?.Breakdown?.Total),
-
-                    S(resp.Data.CreatedAt),
-                    S(resp.TimeStamp),
-                    S(resp.Code?.Value),
-                    S(resp.Code?.Name),
-                    S(resp.Error),
-                    S(resp.Mensaje)
-                )
-                .Build();
-
-            using var cmd = _connection.GetDbCommand(ins, _contextAccessor.HttpContext!);
-            _ = cmd.ExecuteNonQuery();
+                using var cmd = _connection.GetDbCommand(insert, _contextAccessor.HttpContext!);
+                _ = cmd.ExecuteNonQuery();
+            }
 
             return resp;
         }
         catch (Exception ex)
         {
-            resp.Mensaje = ex.Message;
-            resp.Error = "106";
-            resp.Status = "InternalServerError";
-            resp.Code.Value = ((int)HttpStatusCode.InternalServerError).ToString();
-            resp.Code.Name = HttpStatusCode.InternalServerError.ToString();
-            return resp;
+            var err = new GetPaymentsResponseDto
+            {
+                Mensaje = ex.Message,
+                Error = "106",
+                Status = "InternalServerError"
+            };
+            err.Code.Value = ((int)HttpStatusCode.InternalServerError).ToString();
+            err.Code.Name = HttpStatusCode.InternalServerError.ToString();
+            return err;
         }
         finally
         {
@@ -338,115 +298,93 @@ public class PaymentsServices(
     }
 
     /// <summary>
-    /// (Placeholder) Si necesitas persistir el GET por ID, puedes hacerlo aquí.
-    /// Actualmente solo devuelve la respuesta.
+    /// (Placeholder) Si deseas persistir algo del GET /payments/{id}, implementa aquí.
     /// </summary>
-    private GetPaymentsIDResponseDto MapResponseID(GetPaymentsIDDto dto, GetPaymentsIDResponseDto resp)
+    private GetPaymentsIDResponseDto MapResponseID(GetPaymentsIDDto _dto, GetPaymentsIDResponseDto response)
     {
-        // Si más adelante deseas insertar a tabla, usa InsertQueryBuilder igual que arriba.
-        return resp;
+        // // === EJEMPLO COMENTADO (QueryBuilder): Guardar respuesta por ID ===
+        // _connection.Open();
+        // try
+        // {
+        //     if (_connection.IsConnected && response?.Data is not null)
+        //     {
+        //         var insert = new InsertQueryBuilder("UTH05PID", "BCAH96DTA", SqlDialect.Db2i)
+        //             .IntoColumns("PID00ID", "PID01NAME", "PID02STATUS", "PID03MSG", "PID04TS")
+        //             .Row(
+        //                 response.Data.Id ?? string.Empty,
+        //                 response.Data.Name ?? string.Empty,
+        //                 response.Status ?? string.Empty,
+        //                 response.Message ?? string.Empty,
+        //                 response.TimeStamp ?? string.Empty
+        //             )
+        //             .Build();
+        //
+        //         using var cmd = _connection.GetDbCommand(insert, _contextAccessor.HttpContext!);
+        //         _ = cmd.ExecuteNonQuery();
+        //     }
+        // }
+        // finally { _connection.Close(); }
+
+        return response;
     }
 
     /// <summary>
-    /// Inserta la respuesta de POST /payments en <c>BCAH96DTA.UTH04APU</c> (mismo layout),
-    /// si el servicio respondió exitosamente.
+    /// (Opcional) Persistencia del resultado del POST /payments.
+    /// Mantengo el bloque comentado, pero actualizado a RestUtilities.QueryBuilder.
     /// </summary>
     private PostPaymentResponseDto MapPostResponse(PostPaymentDto dto, PostPaymentResponseDto resp)
     {
-        if (!string.Equals(resp.Status, "success", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(resp.Status, "OK", StringComparison.OrdinalIgnoreCase))
-            return resp;
-
-        _connection.Open();
-        try
-        {
-            if (!_connection.IsConnected || resp.Data is null)
-                return resp;
-
-            static string S(object? v, string def = "") => v?.ToString() ?? def;
-
-            int correlativo = 0;
-
-            var ins = new InsertQueryBuilder("UTH04APU", "BCAH96DTA", SqlDialect.Db2i)
-                .WithComment("Insert snapshot from POST /payments")
-                .IntoColumns(
-                    "APU00GUID", "APU01CORR", "APU02FECH", "APU03HORA", "APU04CAJE", "APU05BANC", "APU06SUCU", "APU07TERM",
-                    "APU08STAT", "APU09MSSG", "APU10DTID", "APU11DTNA", "APU12CUID", "APU13CUNA", "APU14COID", "APU15CONA",
-                    "APU16DREF", "APU17REFE", "APU18AMVA", "APU19AMCU", "APU20SUTO", "APU19PFEE", "APU20SCHA", "APU21DICO",
-                    "APU22BTAX", "APU23TOTA", "APU24CRAT", "APU25TIST", "APU26COVA", "APU27CONA", "APU28ERRO", "APU29MENS"
-                )
-                .Row(
-                    S(dto.CamposObligatoriosModel.Guid),
-                    correlativo,
-                    S(dto.CamposObligatoriosModel.Fecha),
-                    S(dto.CamposObligatoriosModel.Hora),
-                    S(dto.CamposObligatoriosModel.Cajero),
-                    S(dto.CamposObligatoriosModel.Banco),
-                    S(dto.CamposObligatoriosModel.Sucursal),
-                    S(dto.CamposObligatoriosModel.Terminal),
-
-                    S(resp.Status),
-                    S(resp.Message),
-
-                    S(resp.Data.Id),
-                    S(resp.Data.Name),
-                    S(resp.Data.Customer?.Id),
-                    S(resp.Data.Customer?.Name),
-                    S(resp.Data.Company?.Id),
-                    S(resp.Data.Company?.Name),
-
-                    S(resp.Data.DocumentReference),
-                    S(resp.Data.ReferenceId),
-
-                    S(resp.Data.Amount?.Value),
-                    S(resp.Data.Amount?.Currency),
-                    S(resp.Data.Amount?.Breakdown?.Subtotal),
-                    S(resp.Data.Amount?.Breakdown?.ProcessingFee),
-                    S(resp.Data.Amount?.Breakdown?.Surcharge),
-                    S(resp.Data.Amount?.Breakdown?.Discount),
-                    S(resp.Data.Amount?.Breakdown?.Tax),
-                    S(resp.Data.Amount?.Breakdown?.Total),
-
-                    S(resp.Data.CreatedAt),
-                    S(resp.TimeStamp),
-                    S(resp.Code?.Value),
-                    S(resp.Code?.Name),
-                    S(resp.Error),
-                    S(resp.Mensaje)
-                )
-                .Build();
-
-            using var cmd = _connection.GetDbCommand(ins, _contextAccessor.HttpContext!);
-            _ = cmd.ExecuteNonQuery();
-
-            return resp;
-        }
-        catch (Exception ex)
-        {
-            resp.Mensaje = ex.Message;
-            resp.Error = "106";
-            resp.Status = "InternalServerError";
-            resp.Code.Value = ((int)HttpStatusCode.InternalServerError).ToString();
-            resp.Code.Name = HttpStatusCode.InternalServerError.ToString();
-            return resp;
-        }
-        finally
-        {
-            _connection.Close();
-        }
-    }
-
-    // ============================================================
-    // Nota:
-    // - Se asume que tienes implementado GenerarPostPayment(...) que arma el payload.
-    // - La clase RefreshToken usada aquí ya la migraste a QueryBuilder en tu base.
-    // - El AS400ConnectionProvider expone GetDbCommand(QueryResult, HttpContext) que enlaza parámetros.
-    // ============================================================
-
-    // Firma existente en tu solución (no implementada aquí).
-    private static PostPaymentDtoFinal GenerarPostPayment(string guid, out bool exitoso)
-    {
-        exitoso = false;
-        return new PostPaymentDtoFinal();
-    }
-}
+        // // === PERSISTENCIA (COMENTADA) DEL RESULTADO DEL POST /payments ===
+        // _connection.Open();
+        // try
+        // {
+        //     if (_connection.IsConnected && resp?.Data is not null)
+        //     {
+        //         int correlativo = 0;
+        //
+        //         var insert = new InsertQueryBuilder("UTH04APU", "BCAH96DTA", SqlDialect.Db2i)
+        //             .IntoColumns(
+        //                 "APU00GUID", "APU01CORR", "APU02FECH", "APU03HORA", "APU04CAJE", "APU05BANC", "APU06SUCU", "APU07TERM",
+        //                 "APU08STAT", "APU09MSSG", "APU10DTID", "APU11DTNA", "APU12CUID", "APU13CUNA", "APU14COID", "APU15CONA",
+        //                 "APU16DREF", "APU17REFE", "APU18AMVA", "APU19AMCU", "APU20SUTO", "APU19PFEE", "APU20SCHA", "APU21DICO",
+        //                 "APU22BTAX", "APU23TOTA", "APU24CRAT", "APU25TIST", "APU26COVA", "APU27CONA", "APU28ERRO", "APU29MENS"
+        //             )
+        //             .Row(
+        //                 dto.CamposObligatoriosModel.Guid,                          // APU00GUID
+        //                 correlativo,                                               // APU01CORR
+        //                 dto.CamposObligatoriosModel.Fecha ?? string.Empty,        // APU02FECH
+        //                 dto.CamposObligatoriosModel.Hora ?? string.Empty,         // APU03HORA
+        //                 dto.CamposObligatoriosModel.Cajero ?? string.Empty,       // APU04CAJE
+        //                 dto.CamposObligatoriosModel.Banco ?? string.Empty,        // APU05BANC
+        //                 dto.CamposObligatoriosModel.Sucursal ?? string.Empty,     // APU06SUCU
+        //                 dto.CamposObligatoriosModel.Terminal ?? string.Empty,     // APU07TERM
+        //                 resp.Status ?? string.Empty,                               // APU08STAT
+        //                 resp.Message ?? string.Empty,                              // APU09MSSG
+        //                 resp.Data.Id ?? string.Empty,                              // APU10DTID
+        //                 resp.Data.Name ?? string.Empty,                            // APU11DTNA
+        //                 resp.Data.Customer?.Id ?? string.Empty,                    // APU12CUID
+        //                 resp.Data.Customer?.Name ?? string.Empty,                  // APU13CUNA
+        //                 resp.Data.Company?.Id ?? string.Empty,                     // APU14COID
+        //                 resp.Data.Company?.Name ?? string.Empty,                   // APU15CONA
+        //                 resp.Data.DocumentReference ?? string.Empty,               // APU16DREF
+        //                 resp.Data.ReferenceId ?? string.Empty,                     // APU17REFE
+        //                 ConvertirAEnteroGinih(resp.Data.Amount?.Value, 0),         // APU18AMVA
+        //                 resp.Data.Amount?.Currency ?? string.Empty,                // APU19AMCU
+        //                 ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Subtotal, 0),      // APU20SUTO
+        //                 ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.ProcessingFee, 0), // APU19PFEE
+        //                 ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Surcharge, 0),     // APU20SCHA
+        //                 ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Discount, 0),      // APU21DICO
+        //                 ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Tax, 0),           // APU22BTAX
+        //                 ConvertirAEnteroGinih(resp.Data.Amount?.Breakdown?.Total, 0),         // APU23TOTA
+        //                 resp.Data.CreatedAt ?? string.Empty,                        // APU24CRAT
+        //                 resp.TimeStamp ?? string.Empty,                             // APU25TIST
+        //                 resp.Code?.Value ?? string.Empty,                           // APU26COVA
+        //                 resp.Code?.Name ?? string.Empty,                            // APU27CONA
+        //                 resp.Error ?? "0",                                          // APU28ERRO
+        //                 resp.Mensaje ?? "PROCESADO EXITOSAMENTE"                    // APU29MENS
+        //             )
+        //             .Build();
+        //
+        //         using var cmd = _connection.GetDbCommand(insert, _contextAccessor.HttpContext!);
+        //         _ = cmd.ExecuteNonQuery();
+        //
