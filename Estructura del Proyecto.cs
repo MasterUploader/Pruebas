@@ -1,8 +1,2 @@
-GuidToStringSafe(resp.Data.Id)
-
-
-    private static string GuidToStringSafe(Guid id)
-    => id == Guid.Empty ? string.Empty : id.ToString();
-
 private static string GuidToStringSafe(Guid? id)
-    => id?.ToString() ?? string.Empty;
+    => (id.HasValue && id.Value != Guid.Empty) ? id.Value.ToString() : string.Empty;
