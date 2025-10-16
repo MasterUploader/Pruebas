@@ -1,131 +1,104 @@
-using System.ComponentModel.DataAnnotations;
-using System.Globalization;
-using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Models;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Common;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Transacciones.GuardarTransacciones;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Services.Transacciones;
+using System.Net.Mime;
+using Swashbuckle.AspNetCore.Filters;
 
-namespace MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Transacciones.GuardarTransacciones;
+namespace MS_BAN_56_ProcesamientoTransaccionesPOS.Controllers;
 
 /// <summary>
-/// DTO para registrar/procesar una transacción POS.
-/// Incluye campos de identificación, montos y estado para conciliación e idempotencia.
+/// Controlador de endpoints para la <b>gestión de transacciones POS</b>.
+/// Estandariza validación, mapeo de <see cref="BizCodes"/> a HTTP con <see cref="BizHttpMapper"/> y manejo de errores.
 /// </summary>
+/// <param name="_transaccionesService">
+/// Servicio de dominio que aplica reglas de negocio, idempotencia por <c>idTransaccionUnico</c> y persistencia.
+/// </param>
 /// <remarks>
+/// <para><b>Características clave</b>:</para>
 /// <list type="bullet">
-///   <item><description>Montos como <c>string</c>; el backend normaliza coma/punto y valida formato.</description></item>
-///   <item><description><c>idTransaccionUnico</c> debe mantenerse constante en reintentos (idempotencia).</description></item>
-///   <item><description>El JSON <c>descripción</c> mapea a <c>Descripcion</c> en C#.</description></item>
+///   <item><description>Produce <c>application/json</c> en todas las respuestas.</description></item>
+///   <item><description>Valida <see cref="ControllerBase.ModelState"/> previo a la lógica de negocio.</description></item>
+///   <item><description>Documentación enriquecida (XML docs + Examples) para Swagger/NSwag.</description></item>
 /// </list>
-/// </remarks>
-/// <example>
-/// <code language="json">
-/// {
-///   "numeroCuenta": "001234567890",
-///   "montoDebitado": "125.75",
-///   "montoAcreditado": "0.00",
-///   "codigoComercio": "MC123",
-///   "nombreComercio": "COMERCIO XYZ S.A.",
-///   "terminal": "TERM-0001",
-///   "descripción": "Pago POS ticket 98765",
-///   "naturalezaContable": "DB",
-///   "numeroDeCorte": "20251016-01",
-///   "idTransaccionUnico": "6c1b1e00-6a66-4c0b-a4f7-1f77dfb9f9ef",
-///   "estado": "APROBADA",
-///   "descripcionEstado": "Operación aprobada por el emisor"
-/// }
+/// <para><b>Observabilidad</b>:</para>
+/// El middleware agrega/propaga <c>X-Correlation-Id</c>. Se recomienda registrar <i>TraceId</i>, <i>CorrelationId</i>, <c>codigoComercio</c>, <c>terminal</c> y <c>idTransaccionUnico</c>.
+/// <para><b>Mapa referencial BizCodes → HTTP</b> (tu <see cref="BizHttpMapper"/> es la fuente de verdad):</para>
+/// <code>
+/// "000" (Éxito)                         → 200 OK
+/// "400"/SolicitudInvalida               → 400 BadRequest
+/// "409xx"/Duplicado/Conflicto           → 409 Conflict
+/// "500"/ErrorInterno                    → 500 InternalServerError
+/// otros códigos                         → según reglas (BizHttpMapper)
 /// </code>
-/// </example>
-public sealed class GuardarTransaccionesDto : IValidatableObject
+/// </remarks>
+[Route("api/ProcesamientoTransaccionesPOS/[controller]")]
+[ApiController]
+[Produces(MediaTypeNames.Application.Json)]
+public class TransaccionesController(ITransaccionesServices _transaccionesService) : ControllerBase
 {
-    /// <summary> Cuenta asociada (enmascarada o completa según política). </summary>
-    [StringLength(34)]
-    public string? NumeroCuenta { get; set; }
-
-    /// <summary> Importe debitado como <c>string</c>; se normaliza coma/punto. </summary>
-    [StringLength(32)]
-    public string? MontoDebitado { get; set; }
-
-    /// <summary> Importe acreditado como <c>string</c>; se normaliza coma/punto. </summary>
-    [StringLength(32)]
-    public string? MontoAcreditado { get; set; }
-
-    /// <summary> Código único del comercio. </summary>
-    [Required(AllowEmptyStrings = false)]
-    [StringLength(32)]
-    public string? CodigoComercio { get; set; }
-
-    /// <summary> Nombre legible del comercio. </summary>
-    [StringLength(128)]
-    public string? NombreComercio { get; set; }
-
-    /// <summary> Identificador de la terminal POS. </summary>
-    [Required(AllowEmptyStrings = false)]
-    [StringLength(64)]
-    public string? Terminal { get; set; }
-
-    /// <summary> Descripción de la operación (JSON: <c>descripción</c>). </summary>
-    [JsonPropertyName("descripción")]
-    [StringLength(256)]
-    public string? Descripcion { get; set; }
-
-    /// <summary> Clasificación contable (p. ej. <c>DB</c>/<c>CR</c> o código interno). </summary>
-    [Required(AllowEmptyStrings = false)]
-    [StringLength(8)]
-    public string? NaturalezaContable { get; set; }
-
-    /// <summary> Número de corte o batch (cierres/arqueos). </summary>
-    [StringLength(32)]
-    public string? NumeroDeCorte { get; set; }
-
-    /// <summary> Identificador único de idempotencia. </summary>
-    [Required(AllowEmptyStrings = false)]
-    [StringLength(64, MinimumLength = 8)]
-    public string? IdTransaccionUnico { get; set; }
-
-    /// <summary> Estado del proceso de negocio (APROBADA, PENDIENTE, RECHAZADA...). </summary>
-    [Required(AllowEmptyStrings = false)]
-    [StringLength(32)]
-    public string? Estado { get; set; }
-
-    /// <summary> Descripción humana del estado (no sensible). </summary>
-    [StringLength(256)]
-    public string? DescripcionEstado { get; set; }
-
     /// <summary>
-    /// Validaciones semánticas transversales (complementa DataAnnotations).
+    /// Registra/Procesa transacciones POS en el backend.
     /// </summary>
-    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    /// <param name="guardarTransaccionesDto">Ver <see cref="GuardarTransaccionesDto"/> para detalles, ejemplos y validaciones semánticas.</param>
+    /// <returns>200 con <see cref="ApiResultDto"/>; 4xx/5xx con <see cref="RespuestaGuardarTransaccionesDto"/>.</returns>
+    /// <remarks>
+    /// <para><b>Ruta</b>:</para>
+    /// <code>POST api/ProcesamientoTransaccionesPOS/Transacciones/GuardarTransacciones</code>
+    /// </remarks>
+    [HttpPost("GuardarTransacciones")]
+    [Consumes(MediaTypeNames.Application.Json)]
+    [SwaggerRequestExample(typeof(GuardarTransaccionesDto), typeof(Swagger.Examples.Transacciones.GuardarTransaccionesRequestExample))]
+    [SwaggerResponseExample(StatusCodes.Status200OK, typeof(Swagger.Examples.Common.ApiResultDtoExample))]
+    [SwaggerResponseExample(StatusCodes.Status400BadRequest, typeof(Swagger.Examples.Common.RespuestaGuardarTransaccionesDtoExample))]
+    [SwaggerResponseExample(StatusCodes.Status409Conflict, typeof(Swagger.Examples.Common.RespuestaGuardarTransaccionesDtoExample))]
+    [SwaggerResponseExample(StatusCodes.Status500InternalServerError, typeof(Swagger.Examples.Common.RespuestaGuardarTransaccionesDtoExample))]
+    [ProducesResponseType(typeof(ApiResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RespuestaGuardarTransaccionesDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(RespuestaGuardarTransaccionesDto), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(RespuestaGuardarTransaccionesDto), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GuardarTransacciones([FromBody] GuardarTransaccionesDto guardarTransaccionesDto)
     {
-        // Regla opcional: evitar que ambos montos sean > 0 a la vez, y evitar ambos en cero.
-        if (TryParseMoney(MontoDebitado, out var deb) && TryParseMoney(MontoAcreditado, out var cre))
+        // Validación estructural (DataAnnotations + IValidatableObject) antes de negocio
+        if (!ModelState.IsValid)
         {
-            if (deb > 0 && cre > 0)
-                yield return new ValidationResult(
-                    "montoDebitado y montoAcreditado no deben ser ambos mayores a cero.",
-                    new[] { nameof(MontoDebitado), nameof(MontoAcreditado) });
-
-            if (deb == 0 && cre == 0)
-                yield return new ValidationResult(
-                    "Se requiere un monto distinto de cero en montoDebitado o montoAcreditado.",
-                    new[] { nameof(MontoDebitado), nameof(MontoAcreditado) });
+            // Mapeo explícito de "solicitud inválida" a HTTP mediante BizHttpMapper
+            return StatusCode(BizHttpMapper.ToHttpStatusInt("400"), new
+            {
+                BizCodes.SolicitudInvalida,
+                message = "Solicitud inválida, modelo DTO, invalido."
+            });
         }
 
-        if (!string.IsNullOrWhiteSpace(IdTransaccionUnico) && IdTransaccionUnico.Length < 8)
+        try
         {
-            yield return new ValidationResult(
-                "idTransaccionUnico debe tener al menos 8 caracteres.",
-                new[] { nameof(IdTransaccionUnico) });
-        }
-    }
+            // Servicio: reglas, idempotencia por idTransaccionUnico y persistencia
+            var respuesta = await _transaccionesService.GuardarTransaccionesAsync(guardarTransaccionesDto);
 
-    /// <summary> Convierte cadena a decimal invariante aceptando ',' o '.'. </summary>
-    private static bool TryParseMoney(string? value, out decimal amount)
-    {
-        amount = 0m;
-        if (string.IsNullOrWhiteSpace(value)) return true;
-        var normalized = value.Replace(',', '.');
-        return decimal.TryParse(
-            normalized,
-            NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowThousands,
-            CultureInfo.InvariantCulture,
-            out amount);
+            // Normalizar salida: code/message + HTTP vía BizHttpMapper (fuente de verdad)
+            var code = respuesta.CodigoError ?? BizCodes.ErrorDesconocido;
+            var http = BizHttpMapper.ToHttpStatusInt(code);
+
+            ApiResultDto result = new()
+            {
+                Code = code,
+                Message = respuesta.DescripcionError
+            };
+
+            // Observabilidad: el middleware ya coloca X-Correlation-Id en la respuesta
+            return StatusCode(http, result);
+        }
+        catch (Exception ex)
+        {
+            // Manejo controlado: no exponer detalles internos; log en middleware/servicio unificado
+            RespuestaGuardarTransaccionesDto dto = new()
+            {
+                CodigoError = "400",
+                DescripcionError = ex.Message
+            };
+
+            return BadRequest(dto);
+        }
     }
 }
