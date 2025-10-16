@@ -1,7 +1,3 @@
-Mejora todos los comentarios, que esten modernos y no omitas nada util.
-
-
-
 using API_1_TERCEROS_REMESADORAS.Models;
 using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Autenticacion.Request;
 using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.ConfirmacionPago.Request;
@@ -27,27 +23,58 @@ using Microsoft.AspNetCore.Mvc;
 namespace API_1_TERCEROS_REMESADORAS.Controllers;
 
 /// <summary>
-/// Controlador BTS
+/// Controlador BTS (Remesadoras) — Orquesta endpoints para autenticación, consulta,
+/// pago, reverso, confirmaciones, rechazos y reportería (incl. SDEP) contra el backend BTS.
 /// </summary>
 /// <remarks>
-/// Contructor de BTS Controller
+/// <para><b>Versión de API:</b> v1</para>
+/// <para><b>Formato:</b> <c>application/json</c></para>
+/// <para><b>Contratos:</b> Todas las operaciones reciben <see cref="RequestModel{TBody}"/> y devuelven <see cref="ResponseModel"/>.</para>
+/// <para><b>Cabeceras esperadas:</b> el <c>RequestHeader</c> interno del contrato incluye metadatos (p. ej., <c>TraceId</c>, canal, etc.).</para>
+/// <para><b>Seguridad:</b> la autenticación JWT y/o tokens BTS debe configurarse a nivel middleware/servicio.</para>
+/// <para><b>Convenciones de estado:</b> 200 = éxito de negocio; 400 = validación/negocio fallido; 500 = error no controlado.</para>
 /// </remarks>
-/// <param name="authenticateService">Instancia de Authenticate Service.</param>
-/// <param name="consultaService">Instancia de Consulta Service.</param>
-/// <param name="pagoService">Instancia de Pago Service.</param>
-/// <param name="reversoService">Instancia de Reverso Service.</param>
-/// <param name="confirmacionTransaccionDirecta">Instancia de Confirmación Transaccion Directa Service.</param>
-/// <param name="confirmacionPago">Instancia de Confirmación Pago Service.</param>
-/// <param name="rechazoPago">Instancia de Rechazo Pago Service.</param>
-/// <param name="reporteriaService">Instancia de Reporteria Service.</param>
-/// <param name="sEDPService">Instaacia de ISEDPService.</param>
+/// <param name="authenticateService">
+/// Servicio de autenticación BTS. Resuelve el proceso de emisión/validación de credenciales.
+/// </param>
+/// <param name="consultaService">
+/// Servicio de consulta BTS. Recupera información de remesas (remitente/destinatario, estados, etc.).
+/// </param>
+/// <param name="pagoService">
+/// Servicio de pago BTS. Ejecuta la transacción de pago conforme a reglas de negocio vigentes.
+/// </param>
+/// <param name="reversoService">
+/// Servicio de reverso BTS. Gestiona la reversión de transacciones previamente aceptadas.
+/// </param>
+/// <param name="confirmacionTransaccionDirecta">
+/// Servicio de confirmación directa BTS. Confirma transacciones iniciadas en otros frentes.
+/// </param>
+/// <param name="confirmacionPago">
+/// Servicio de confirmación de pago BTS. Confirma la aplicación del pago en BTS.
+/// </param>
+/// <param name="rechazoPago">
+/// Servicio de rechazo de pago BTS. Registra el rechazo de una transacción de pago.
+/// </param>
+/// <param name="reporteriaService">
+/// Servicio de reportería BTS. Expone consultas de reportes parametrizados.
+/// </param>
+/// <param name="sEDPService">
+/// Servicio SDEP (reportería específica). Consulta transacciones por cliente/canales según SDEP.
+/// </param>
 [Route("v1/[controller]")]
 [ApiController]
 #pragma warning disable S6960 // Controllers should not have mixed responsibilities
-public class BtsController(IAuthenticateService authenticateService, IConsultaService consultaService, IPagoService pagoService,
+public class BtsController(
+    IAuthenticateService authenticateService,
+    IConsultaService consultaService,
+    IPagoService pagoService,
 #pragma warning restore S6960 // Controllers should not have mixed responsibilities
-    IReversoService reversoService, IConfirmacionTransaccionDirecta confirmacionTransaccionDirecta, IConfirmacionPago confirmacionPago,
-    IRechazoPago rechazoPago, IReporteriaService reporteriaService, ISEDPService sEDPService) : ControllerBase
+    IReversoService reversoService,
+    IConfirmacionTransaccionDirecta confirmacionTransaccionDirecta,
+    IConfirmacionPago confirmacionPago,
+    IRechazoPago rechazoPago,
+    IReporteriaService reporteriaService,
+    ISEDPService sEDPService) : ControllerBase
 {
     private readonly IAuthenticateService _authenticateService = authenticateService;
     private readonly IConsultaService _consultaService = consultaService;
@@ -60,18 +87,33 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
     private readonly ISEDPService _sEDPService = sEDPService;
 
     /// <summary>
-    /// Authenticates a user or system based on the provided request model. 
+    /// Autenticación BTS.
     /// </summary>
-    /// <remarks>The response includes a header with the status code and message, and a data object containing
-    /// the authentication response details.</remarks>
-    /// <param name="requestModel">The request model containing the authentication details. This includes the request header and the body with
-    /// authentication data.</param>
-    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the authentication result.  Returns
-    /// a 200 OK response if the authentication is successful, or a 400 Bad Request response if the authentication
-    /// fails.</returns>
+    /// <remarks>
+    /// <para>Realiza el flujo de autenticación contra BTS y retorna datos de sesión/token.</para>
+    /// <para><b>Idempotencia:</b> N/A (consulta de estado). Puede repetirse sin efectos colaterales.</para>
+    /// <para><b>Ejemplo (body):</b></para>
+    /// <code language="json">
+    /// {
+    ///   "header": { "traceId": "..." },
+    ///   "body": { "user": "xxxx", "password": "****" }
+    /// }
+    /// </code>
+    /// <para><b>HTTP</b>: 200 (éxito), 400 (credenciales inválidas / política), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo de solicitud con encabezado de rastreo y <see cref="AuthenticateBody"/> para credenciales/parámetros BTS.
+    /// </param>
+    /// <returns>
+    /// <see cref="IActionResult"/> con <see cref="ResponseModel"/>:
+    /// en <c>Header</c> se refleja <c>StatusCode</c>/<c>Message</c> provistos por BTS; <c>Data</c> contiene <c>jsonResponse</c>.
+    /// </returns>
     [HttpPost("Autenticacion/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> AutenticacionBTS([FromBody] RequestModel<AuthenticateBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _authenticateService.AuthenticateServiceRequestAsync();
@@ -84,26 +126,36 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
                 StatusCode = jsonResponse.OpCode,
                 Message = jsonResponse.Process_Msg
             },
-            Data = new
-            {
-                jsonResponse
-            }
+            Data = new { jsonResponse }
         };
         return statusCode == 200 ? Ok(resp) : BadRequest(resp);
     }
 
     /// <summary>
-    /// Consultation of BTS remittance details, including sender and recipient information.
-    /// Employs the model RequestModel with a body of type ConsultaBody for input and returns a ResponseModel containing the consultation results.
+    /// Consulta de remesa en BTS.
     /// </summary>
-    /// <param name="requestModel">The request model containing the remittance details. This includes the request header and the body with
-    /// remittance data.</param>
-    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the remittance result.  Returns
-    /// a 200 OK response if the consultation is successful, or a 400 Bad Request response if the consultation
-    /// fails.</returns>
+    /// <remarks>
+    /// <para>Recupera detalles de la remesa (remitente, destinatario, estado, validaciones).</para>
+    /// <para><b>Idempotencia:</b> Lectura pura.</para>
+    /// <para><b>Ejemplo (body):</b></para>
+    /// <code language="json">
+    /// {
+    ///   "header": { "traceId": "..." },
+    ///   "body": { "remittanceId": "ABC123", "country": "HN" }
+    /// }
+    /// </code>
+    /// <para><b>HTTP</b>: 200 (encontrado), 400 (parámetros inválidos/reglas negocio), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo con encabezado de rastreo y <see cref="ConsultaBody"/> (criterios de consulta).
+    /// </param>
+    /// <returns>Resultado estándar <see cref="ResponseModel"/> con datos de consulta en <c>Data</c>.</returns>
     [HttpPost("Consulta/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> ConsultaBTS([FromBody] RequestModel<ConsultaBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _consultaService.ConsultaServiceRequestAsync(requestModel.Body);
@@ -122,17 +174,24 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
     }
 
     /// <summary>
-    /// Performs a payment transaction through the BTS system using the provided payment details.
+    /// Pago de remesa en BTS.
     /// </summary>
-    /// <param name="requestModel">The request model containing the Payment details. This includes the request header and the body with
-    /// Payment data.</param>
-    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the payment result.  Returns
-    /// a 200 OK response if the payment is successful, or a 400 Bad Request response if the payment
-    /// fails.</returns>
-    /// <remarks>Utilizes the IPagoService to process the payment request and obtain the response data and status code.</remarks>
+    /// <remarks>
+    /// <para>Ejecuta la transacción de pago con validaciones antifraude, disponibilidad y reglas BTS.</para>
+    /// <para><b>Idempotencia:</b> Se recomienda cabecera de idempotencia a nivel arquitectura (no incluida explícitamente en este contrato).</para>
+    /// <para><b>Side-effects:</b> Puede afectar saldos/estados en BTS.</para>
+    /// <para><b>HTTP</b>: 200 (aplicado), 400 (regla de negocio / validación), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo con encabezado de rastreo y <see cref="PagoBody"/> (datos de pago).
+    /// </param>
+    /// <returns>Respuesta estándar con resultado de pago y mensajes de proceso.</returns>
     [HttpPost("Pago/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> PagoBTS([FromBody] RequestModel<PagoBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _pagoService.PagoServiceRequestAsync(requestModel.Body);
@@ -152,17 +211,24 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
     }
 
     /// <summary>
-    /// Performs a reversal transaction through the BTS system using the provided reversal details.
+    /// Reverso de transacción en BTS.
     /// </summary>
-    /// <param name="requestModel">The request model containing the Reverso details. This includes the request header and the body with
-    /// Reverso data.</param>
-    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the reversal result.  Returns
-    /// a 200 OK response if the reversal is successful, or a 400 Bad Request response if the reversal
-    /// fails.</returns>
-    /// <remarks>Utilizes the IReversoService to process the reversal request and obtain the response data and status code.</remarks>
+    /// <remarks>
+    /// <para>Revierte una transacción previamente aceptada bajo condiciones de negocio y ventanas de tiempo.</para>
+    /// <para><b>Idempotencia:</b> Recomendado control externo por <c>TraceId</c>/clave idempotente.</para>
+    /// <para><b>Side-effects:</b> Deshace efectos contables/operativos del pago.</para>
+    /// <para><b>HTTP</b>: 200 (revertido), 400 (no elegible / expirado), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo con <see cref="ReversoBody"/> (identificadores y causal).
+    /// </param>
+    /// <returns>Respuesta estándar con resultado del reverso.</returns>
     [HttpPost("Reverso/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> ReversoBTS([FromBody] RequestModel<ReversoBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _reversoService.ReversoServiceRequestAsync(requestModel.Body);
@@ -181,17 +247,23 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
     }
 
     /// <summary>
-    /// Performs a direct transaction confirmation through the BTS system using the provided confirmation details.
+    /// Confirmación directa de transacción en BTS.
     /// </summary>
-    /// <param name="requestModel">The request model containing the ConfirmacionTransaccionDirecta details. This includes the request header and the body with
-    ///  confirmation data.</param>
-    ///  <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the confirmation result.  Returns
-    ///  a 200 OK response if the confirmation is successful, or a 400 Bad Request response if the confirmation
-    ///  fails.</returns>
-    ///  <remarks>Utilizes the IConfirmacionTransaccionDirecta to process the confirmation request and obtain the response data and status code.</remarks>
+    /// <remarks>
+    /// <para>Confirma una transacción iniciada/registrada por otro frente (p. ej., canal externo).</para>
+    /// <para><b>Idempotencia:</b> Recomendada.</para>
+    /// <para><b>HTTP</b>: 200 (confirmada), 400 (inconsistencia/ya confirmada/no elegible), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo con <see cref="ConfirmacionTransaccionDirectaBody"/>.
+    /// </param>
+    /// <returns>Resultado de confirmación en <see cref="ResponseModel"/>.</returns>
     [HttpPost("ConfirmacionTransaccionDirecta/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> ConfirmacionTransaccionDirectaBTS([FromBody] RequestModel<ConfirmacionTransaccionDirectaBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _confirmacionTransaccionDirecta.ConfirmacionTransaccionDirectaServiceRequestAsync(requestModel.Body);
@@ -210,17 +282,23 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
     }
 
     /// <summary>
-    /// Performs a payment confirmation through the BTS system using the provided confirmation details.
+    /// Confirmación de pago en BTS.
     /// </summary>
-    /// <param name="requestModel">The request model containing the ConfirmacionPago details. This includes the request header and the body with
-    /// data.</param>
-    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the confirmation result.  Returns
-    /// 200 OK response if the confirmation is successful, or a 400 Bad Request response if the confirmation
-    /// fails.</returns>
-    /// <remarks>Utilizes the IConfirmacionPago to process the confirmation request and obtain the response data and status code.</remarks>
+    /// <remarks>
+    /// <para>Registra/valida la confirmación del pago (p. ej., liquidación final).</para>
+    /// <para><b>Idempotencia:</b> Recomendada si el integrador puede reintentar.</para>
+    /// <para><b>HTTP</b>: 200 (confirmado), 400 (no elegible / duplicado / validación), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo con <see cref="ConfirmacionPagoBody"/>.
+    /// </param>
+    /// <returns>Respuesta de confirmación en <see cref="ResponseModel"/>.</returns>
     [HttpPost("ConfirmacionPago/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> ConfirmacionPagoBTS([FromBody] RequestModel<ConfirmacionPagoBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _confirmacionPago.ConfirmacionPagoServiceRequestAsync(requestModel.Body);
@@ -239,17 +317,23 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
     }
 
     /// <summary>
-    /// Performs a payment rejection through the BTS system using the provided rejection details.
+    /// Rechazo de pago en BTS.
     /// </summary>
-    /// <param name="requestModel">The request model containing the RechazoPago details. This includes the request header and the body with
-    ///  rejection data.</param>
-    ///  <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the rejection result.  Returns
-    ///  a 200 OK response if the rejection is successful, or a 400 Bad Request response if the rejection
-    ///  fails.</returns>
-    ///  <remarks>Utilizes the IRechazoPago to process the rejection request and obtain the response data and status code.</remarks>
+    /// <remarks>
+    /// <para>Registra el rechazo de una solicitud de pago con su causal documentada.</para>
+    /// <para><b>Idempotencia:</b> Recomendada para evitar duplicidad de rechazos.</para>
+    /// <para><b>HTTP</b>: 200 (rechazo registrado), 400 (estado no compatible / validación), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo con <see cref="RechazoPagoBody"/> (motivo/causal, referencias).
+    /// </param>
+    /// <returns>Resultado del rechazo en <see cref="ResponseModel"/>.</returns>
     [HttpPost("RechazoPago/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> RechazoPagoBTS([FromBody] RequestModel<RechazoPagoBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _rechazoPago.RechazoPagoServiceRequestAsync(requestModel.Body);
@@ -268,16 +352,23 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
     }
 
     /// <summary>
-    /// Performs a reporting operation through the BTS system using the provided reporting details.
+    /// Reportería BTS (consultas generales).
     /// </summary>
-    /// <param name="requestModel">The request model containing the Reporteria details. This includes the request header and the body with
-    /// reporting data.</param>
-    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the reporting result.  Returns
-    /// a 200 OK response if the reporting is successful, or a 400 Bad Request response if the reporting
-    /// fails.</returns>    
+    /// <remarks>
+    /// <para>Ejecuta reportes parametrizados expuestos por BTS (rangos de fechas, estados, agencias, etc.).</para>
+    /// <para><b>Idempotencia:</b> Lectura.</para>
+    /// <para><b>HTTP</b>: 200 (ok), 400 (parámetros inválidos), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo con <see cref="ReporteriaBody"/> (filtros del reporte).
+    /// </param>
+    /// <returns>Resultado del reporte en <see cref="ResponseModel"/>.</returns>
     [HttpPost("Reporteria/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> ReporteriaBTS([FromBody] RequestModel<ReporteriaBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _reporteriaService.ReporteriaServiceRequestAsync(requestModel.Body);
@@ -295,19 +386,24 @@ public class BtsController(IAuthenticateService authenticateService, IConsultaSe
         return statusCode == 200 ? Ok(resp) : BadRequest(resp);
     }
 
-
     /// <summary>
-    /// Performs a SDEP reporting operation through the BTS system using the provided SDEP reporting details.
+    /// Reportería SDEP (por cliente/transacciones).
     /// </summary>
-    /// <param name="requestModel">The request model containing the ReporteriaSDEP details. This includes the request header and the body with
-    /// a SDEP reporting data.</param>
-    ///  <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the SDEP reporting result.  Returns
-    ///  a 200 OK response if the SDEP reporting is successful, or a 400 Bad Request response if the SDEP reporting
-    ///  fails.</returns>
-    ///  <remarks>Utilizes the ISEDPService to process the SDEP reporting request and obtain the response data and status code.</remarks>
+    /// <remarks>
+    /// <para>Consulta transacciones del cliente bajo el esquema SDEP (según parámetros y políticas BTS).</para>
+    /// <para><b>Idempotencia:</b> Lectura.</para>
+    /// <para><b>HTTP</b>: 200 (ok), 400 (validación), 500 (error interno).</para>
+    /// </remarks>
+    /// <param name="requestModel">
+    /// Modelo con <see cref="SdepBody"/> (parámetros SDEP).
+    /// </param>
+    /// <returns>Resultado SDEP en <see cref="ResponseModel"/>.</returns>
     [HttpPost("ReporteriaSDEP/")]
-    [ProducesResponseType(typeof(ResponseModel), 200)]
-    [ProducesResponseType(typeof(ResponseModel), 400)]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ResponseModel), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> ObtenerTransaccionesClienteBts([FromBody] RequestModel<SdepBody> requestModel)
     {
         var (jsonResponse, statusCode) = await _sEDPService.SDEPServiceRequestAsync(requestModel.Body);
