@@ -1,3 +1,5 @@
+Así va quedando:
+
 using Microsoft.AspNetCore.Mvc;
 using MS_BAN_56_ProcesamientoTransaccionesPOS.Models;
 using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Transacciones.GuardarTransacciones;
@@ -64,11 +66,11 @@ public class TransaccionesController(ITransaccionesServices _transaccionesServic
     ///   </item>
     ///   <item>
     ///     <term><c>descripción</c></term>
-    ///     <description>Descripción libre de la operación (string). Puede incluir referencia externa. (Nota: si tu DTO en C# usa <c>descripcion</c> sin tilde, asegúrate de mapear el nombre JSON.)</description>
+    ///     <description>Descripción libre de la operación (string). Puede incluir referencia externa.</description>
     ///   </item>
     ///   <item>
     ///     <term><c>naturalezaContable</c></term>
-    ///     <description>Clasificación contable de la transacción (string). Ej.: <c>DB</c>/<c>CR</c> o códigos internos.</description>
+    ///     <description>Clasificación contable de la transacción (string). Ej.: <c>D</c>/<c>C</c> o códigos internos.</description>
     ///   </item>
     ///   <item>
     ///     <term><c>numeroDeCorte</c></term>
@@ -195,3 +197,6 @@ public class TransaccionesController(ITransaccionesServices _transaccionesServic
         }
     }
 }
+
+
+Como podriamos mejorarlo, si hay forma hazlo, no se si mejorar la descripción de los dtos, para complementar?
