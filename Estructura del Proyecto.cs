@@ -1,158 +1,327 @@
-using QueryBuilder.Builders;
-using QueryBuilder.Enums;
+Mejora todos los comentarios, que esten modernos y no omitas nada util.
+
+
+
+using API_1_TERCEROS_REMESADORAS.Models;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Autenticacion.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.ConfirmacionPago.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.ConfirmacionTransaccionDirecta.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Consulta.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Pago.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.RechazoPago.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Reporteria.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Reporteria.SDEP.Request;
+using API_1_TERCEROS_REMESADORAS.Models.DTO.BTS.Reverso.Request;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.AuthenticateService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConfirmacionPago;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConfirmacionTransaccionDirectaService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ConsultaService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.PagoService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.RechazoPago;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReporteriaService;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReporteriaService.SEDP;
+using API_1_TERCEROS_REMESADORAS.Services.BTSServices.ReversoServices;
+using API_Terceros.Models;
+using Microsoft.AspNetCore.Mvc;
+
+namespace API_1_TERCEROS_REMESADORAS.Controllers;
 
 /// <summary>
-/// Inserta depósitos en BCAH96DTA.BTSACTA mediante MERGE por lotes.
-/// - Sin Db2ITyped (placeholders "?" sin CAST).
-/// - Evita duplicados por INOCONFIR (solo inserta cuando no existe).
-/// - Parte el envío en bloques para no exceder límites de longitud/params del proveedor.
+/// Controlador BTS
 /// </summary>
-private async Task<bool> InsertarEnIbtSactaAsync(SDEPResponseData response)
+/// <remarks>
+/// Contructor de BTS Controller
+/// </remarks>
+/// <param name="authenticateService">Instancia de Authenticate Service.</param>
+/// <param name="consultaService">Instancia de Consulta Service.</param>
+/// <param name="pagoService">Instancia de Pago Service.</param>
+/// <param name="reversoService">Instancia de Reverso Service.</param>
+/// <param name="confirmacionTransaccionDirecta">Instancia de Confirmación Transaccion Directa Service.</param>
+/// <param name="confirmacionPago">Instancia de Confirmación Pago Service.</param>
+/// <param name="rechazoPago">Instancia de Rechazo Pago Service.</param>
+/// <param name="reporteriaService">Instancia de Reporteria Service.</param>
+/// <param name="sEDPService">Instaacia de ISEDPService.</param>
+[Route("v1/[controller]")]
+[ApiController]
+#pragma warning disable S6960 // Controllers should not have mixed responsibilities
+public class BtsController(IAuthenticateService authenticateService, IConsultaService consultaService, IPagoService pagoService,
+#pragma warning restore S6960 // Controllers should not have mixed responsibilities
+    IReversoService reversoService, IConfirmacionTransaccionDirecta confirmacionTransaccionDirecta, IConfirmacionPago confirmacionPago,
+    IRechazoPago rechazoPago, IReporteriaService reporteriaService, ISEDPService sEDPService) : ControllerBase
 {
-    _databaseConnection.Open();
-    if (!_databaseConnection.IsConnected) return false;
-    if (response?.Deposits == null || response.Deposits.Count == 0) return false;
+    private readonly IAuthenticateService _authenticateService = authenticateService;
+    private readonly IConsultaService _consultaService = consultaService;
+    private readonly IPagoService _pagoService = pagoService;
+    private readonly IReversoService _reversoService = reversoService;
+    private readonly IConfirmacionTransaccionDirecta _confirmacionTransaccionDirecta = confirmacionTransaccionDirecta;
+    private readonly IConfirmacionPago _confirmacionPago = confirmacionPago;
+    private readonly IRechazoPago _rechazoPago = rechazoPago;
+    private readonly IReporteriaService _reporteriaService = reporteriaService;
+    private readonly ISEDPService _sEDPService = sEDPService;
 
-    try
+    /// <summary>
+    /// Authenticates a user or system based on the provided request model. 
+    /// </summary>
+    /// <remarks>The response includes a header with the status code and message, and a data object containing
+    /// the authentication response details.</remarks>
+    /// <param name="requestModel">The request model containing the authentication details. This includes the request header and the body with
+    /// authentication data.</param>
+    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the authentication result.  Returns
+    /// a 200 OK response if the authentication is successful, or a 400 Bad Request response if the authentication
+    /// fails.</returns>
+    [HttpPost("Autenticacion/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> AutenticacionBTS([FromBody] RequestModel<AuthenticateBody> requestModel)
     {
-        // Definición única de columnas (orden consistente entre S y T).
-        string[] cols =
+        var (jsonResponse, statusCode) = await _authenticateService.AuthenticateServiceRequestAsync();
+
+        var resp = new ResponseModel
         {
-            "INOCONFIR","IDATRECI","IHORRECI","IDATCONF","IHORCONF","IDATVAL","IHORVAL",
-            "IDATPAGO","IHORPAGO","IDATACRE","IHORACRE","IDATRECH","IHORRECH",
-            "ITIPPAGO","ISERVICD","IDESPAIS","IDESMONE","ISAGENCD","ISPAISCD","ISTATECD",
-            "IRAGENCD","ITICUENTA","INOCUENTA","INUMREFER","ISTSREM","ISTSPRO","IERR",
-            "IERRDSC","IDSCRECH","ACODPAIS","ACODMONED","AMTOENVIA","AMTOCALCU","AFACTCAMB",
-            "BPRIMNAME","BSECUNAME","BAPELLIDO","BSEGUAPE","BDIRECCIO","BCIUDAD",
-            "BESTADO","BPAIS","BCODPOST","BTELEFONO",
-            "CPRIMNAME","CSECUNAME","CAPELLIDO","CSEGUAPE","CDIRECCIO","CCIUDAD",
-            "CESTADO","CPAIS","CCODPOST","CTELEFONO",
-            "DTIDENT","ESALEDT","EMONREFER","ETASAREFE","EMTOREF"
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.Process_Msg
+            },
+            Data = new
+            {
+                jsonResponse
+            }
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Consultation of BTS remittance details, including sender and recipient information.
+    /// Employs the model RequestModel with a body of type ConsultaBody for input and returns a ResponseModel containing the consultation results.
+    /// </summary>
+    /// <param name="requestModel">The request model containing the remittance details. This includes the request header and the body with
+    /// remittance data.</param>
+    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the remittance result.  Returns
+    /// a 200 OK response if the consultation is successful, or a 400 Bad Request response if the consultation
+    /// fails.</returns>
+    [HttpPost("Consulta/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> ConsultaBTS([FromBody] RequestModel<ConsultaBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _consultaService.ConsultaServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Performs a payment transaction through the BTS system using the provided payment details.
+    /// </summary>
+    /// <param name="requestModel">The request model containing the Payment details. This includes the request header and the body with
+    /// Payment data.</param>
+    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the payment result.  Returns
+    /// a 200 OK response if the payment is successful, or a 400 Bad Request response if the payment
+    /// fails.</returns>
+    /// <remarks>Utilizes the IPagoService to process the payment request and obtain the response data and status code.</remarks>
+    [HttpPost("Pago/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> PagoBTS([FromBody] RequestModel<PagoBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _pagoService.PagoServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
         };
 
-        // Mapeo automático para INSERT NO-MATCH: T.col = S.col
-        var autoMap = cols.Select(c => (c, $"S.{c}")).ToArray();
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
 
-        // Normalizador: DB2 i suele preferir CHAR con al menos un espacio en blanco.
-        static string C(object? v) => string.IsNullOrWhiteSpace(v?.ToString()) ? " " : v!.ToString()!;
+    /// <summary>
+    /// Performs a reversal transaction through the BTS system using the provided reversal details.
+    /// </summary>
+    /// <param name="requestModel">The request model containing the Reverso details. This includes the request header and the body with
+    /// Reverso data.</param>
+    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the reversal result.  Returns
+    /// a 200 OK response if the reversal is successful, or a 400 Bad Request response if the reversal
+    /// fails.</returns>
+    /// <remarks>Utilizes the IReversoService to process the reversal request and obtain the response data and status code.</remarks>
+    [HttpPost("Reverso/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> ReversoBTS([FromBody] RequestModel<ReversoBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _reversoService.ReversoServiceRequestAsync(requestModel.Body);
 
-        // Para evitar SQL gigante y límites de parámetros, procesamos en lotes.
-        const int CHUNK_SIZE = 300; // Ajusta si necesitas menos/más (p.ej. 200–500)
-        List<object?[]> rowsBatch = [];
-        int insertedBatches = 0;
-
-        foreach (var deposit in response.Deposits)
+        var resp = new ResponseModel
         {
-            if (deposit?.Data == null) continue;
-            var d = deposit.Data;
-
-            // Fechas/horas como cadenas
-            string hoyYmd      = DateTime.Now.ToString("yyyyMMdd");
-            string ahoraHmsfff = DateTime.Now.ToString("HHmmssfff");
-
-            // Direcciones (truncadas a 65)
-            string cDir = d.Recipient?.Address?.AddressLine ?? " ";
-            if (cDir.Length > 65) cDir = cDir[..65];
-
-            string bDir = d.Sender?.Address?.AddressLine ?? " ";
-            if (bDir.Length > 65) bDir = bDir[..65];
-
-            // Estado proceso
-            string statusProceso = response.OpCode == "1308" ? "RECIBIDA" : "RECH-DENEG";
-
-            // Construimos la fila (mismo orden que 'cols')
-            rowsBatch.Add(new object?[]
+            Header = new ResponseHeader
             {
-                C(d.ConfirmationNumber),
-                hoyYmd, ahoraHmsfff,
-                " "," "," "," ",          // IDATCONF,IHORCONF,IDATVAL,IHORVAL
-                " "," "," "," ",          // IDATPAGO,IHORPAGO,IDATACRE,IHORACRE
-                " "," ",                  // IDATRECH,IHORRECH
-                C(d.PaymentTypeCode),     // ITIPPAGO
-                C(d.ServiceCode),         // ISERVICD
-                C(d.DestinationCountryCode),   // IDESPAIS
-                C(d.DestinationCurrencyCode),  // IDESMONE
-                C(d.SenderAgentCode),     // ISAGENCD
-                C(d.SenderCountryCode),   // ISPAISCD
-                C(d.SenderStateCode),     // ISTATECD
-                C(d.RecipientAgentCode),  // IRAGENCD
-                C(d.RecipientAccountTypeCode), // ITICUENTA
-                C(d.RecipientAccountNumber),   // INOCUENTA
-                " ",                      // INUMREFER
-                " ",                      // ISTSREM
-                statusProceso,            // ISTSPRO
-                C(response.OpCode),       // IERR
-                C(response.ProcessMsg),   // IERRDSC
-                " ",                      // IDSCRECH
-                C(d.OriginCountryCode),   // ACODPAIS
-                C(d.OriginCurrencyCode),  // ACODMONED
-                C(d.OriginAmount),        // AMTOENVIA
-                C(d.DestinationAmount),   // AMTOCALCU
-                C(d.ExchangeRateFx),      // AFACTCAMB
-                C(d.Sender?.FirstName),   // BPRIMNAME
-                C(d.Sender?.MiddleName),  // BSECUNAME
-                C(d.Sender?.LastName),    // BAPELLIDO
-                C(d.Sender?.MotherMaidenName), // BSEGUAPE
-                bDir,                     // BDIRECCIO
-                C(d.Sender?.Address?.City),     // BCIUDAD
-                C(d.Sender?.Address?.StateCode),// BESTADO
-                C(d.Sender?.Address?.CountryCode), // BPAIS
-                C(d.Sender?.Address?.ZipCode),  // BCODPOST
-                C(d.Sender?.Address?.Phone),    // BTELEFONO
-                C(d.Recipient?.FirstName),      // CPRIMNAME
-                C(d.Recipient?.MiddleName),     // CSECUNAME
-                C(d.Recipient?.LastName),       // CAPELLIDO
-                C(d.Recipient?.MotherMaidenName), // CSEGUAPE
-                cDir,                     // CDIRECCIO
-                C(d.Recipient?.Address?.City),       // CCIUDAD
-                C(d.Recipient?.Address?.StateCode),  // CESTADO
-                C(d.Recipient?.Address?.CountryCode),// CPAIS
-                C(d.Recipient?.Address?.ZipCode),    // CCODPOST
-                C(d.Recipient?.Address?.Phone),      // CTELEFONO
-                " ",                      // DTIDENT
-                C(d.SaleDate),            // ESALEDT
-                C(d.MarketRefCurrencyCode), // EMONREFER
-                C(d.MarketRefCurrencyFx),   // ETASAREFE
-                C(d.MarketRefCurrencyAmount)// EMTOREF
-            });
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
 
-            // Cuando llenamos el lote, ejecutamos MERGE y vaciamos
-            if (rowsBatch.Count >= CHUNK_SIZE)
-            {
-                await EjecutarMergeBatchAsync(cols, autoMap, rowsBatch);
-                rowsBatch.Clear();
-                insertedBatches++;
-            }
-        }
+    /// <summary>
+    /// Performs a direct transaction confirmation through the BTS system using the provided confirmation details.
+    /// </summary>
+    /// <param name="requestModel">The request model containing the ConfirmacionTransaccionDirecta details. This includes the request header and the body with
+    ///  confirmation data.</param>
+    ///  <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the confirmation result.  Returns
+    ///  a 200 OK response if the confirmation is successful, or a 400 Bad Request response if the confirmation
+    ///  fails.</returns>
+    ///  <remarks>Utilizes the IConfirmacionTransaccionDirecta to process the confirmation request and obtain the response data and status code.</remarks>
+    [HttpPost("ConfirmacionTransaccionDirecta/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> ConfirmacionTransaccionDirectaBTS([FromBody] RequestModel<ConfirmacionTransaccionDirectaBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _confirmacionTransaccionDirecta.ConfirmacionTransaccionDirectaServiceRequestAsync(requestModel.Body);
 
-        // Último lote pendiente
-        if (rowsBatch.Count > 0)
+        var resp = new ResponseModel
         {
-            await EjecutarMergeBatchAsync(cols, autoMap, rowsBatch);
-            insertedBatches++;
-        }
-
-        return insertedBatches > 0;
-    }
-    catch
-    {
-        return false;
-    }
-    finally
-    {
-        _databaseConnection.Close();
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
     }
 
-    // Ejecuta un MERGE con USING (VALUES ...) para el lote actual.
-    async Task EjecutarMergeBatchAsync(string[] columns, (string Target, string SrcExpr)[] mapping, List<object?[]> rows)
+    /// <summary>
+    /// Performs a payment confirmation through the BTS system using the provided confirmation details.
+    /// </summary>
+    /// <param name="requestModel">The request model containing the ConfirmacionPago details. This includes the request header and the body with
+    /// data.</param>
+    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the confirmation result.  Returns
+    /// 200 OK response if the confirmation is successful, or a 400 Bad Request response if the confirmation
+    /// fails.</returns>
+    /// <remarks>Utilizes the IConfirmacionPago to process the confirmation request and obtain the response data and status code.</remarks>
+    [HttpPost("ConfirmacionPago/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> ConfirmacionPagoBTS([FromBody] RequestModel<ConfirmacionPagoBody> requestModel)
     {
-        var merge = new MergeQueryBuilder("BTSACTA", "BCAH96DTA", SqlDialect.Db2i)
-            .UsingValues(columns, rows, alias: "S")             // sin tipos explícitos
-            .On("T.INOCONFIR = S.INOCONFIR")                    // clave de existencia
-            .WhenNotMatchedInsert(mapping)                      // T.col = S.col para todas
-            .Build();
+        var (jsonResponse, statusCode) = await _confirmacionPago.ConfirmacionPagoServiceRequestAsync(requestModel.Body);
 
-        using var cmd = _databaseConnection.GetDbCommand(merge, _httpContextAccessor.HttpContext!);
-        await cmd.ExecuteNonQueryAsync();
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Performs a payment rejection through the BTS system using the provided rejection details.
+    /// </summary>
+    /// <param name="requestModel">The request model containing the RechazoPago details. This includes the request header and the body with
+    ///  rejection data.</param>
+    ///  <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the rejection result.  Returns
+    ///  a 200 OK response if the rejection is successful, or a 400 Bad Request response if the rejection
+    ///  fails.</returns>
+    ///  <remarks>Utilizes the IRechazoPago to process the rejection request and obtain the response data and status code.</remarks>
+    [HttpPost("RechazoPago/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> RechazoPagoBTS([FromBody] RequestModel<RechazoPagoBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _rechazoPago.RechazoPagoServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+    /// <summary>
+    /// Performs a reporting operation through the BTS system using the provided reporting details.
+    /// </summary>
+    /// <param name="requestModel">The request model containing the Reporteria details. This includes the request header and the body with
+    /// reporting data.</param>
+    /// <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the reporting result.  Returns
+    /// a 200 OK response if the reporting is successful, or a 400 Bad Request response if the reporting
+    /// fails.</returns>    
+    [HttpPost("Reporteria/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> ReporteriaBTS([FromBody] RequestModel<ReporteriaBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _reporteriaService.ReporteriaServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
+    }
+
+
+    /// <summary>
+    /// Performs a SDEP reporting operation through the BTS system using the provided SDEP reporting details.
+    /// </summary>
+    /// <param name="requestModel">The request model containing the ReporteriaSDEP details. This includes the request header and the body with
+    /// a SDEP reporting data.</param>
+    ///  <returns>An <see cref="IActionResult"/> containing a <see cref="ResponseModel"/> with the SDEP reporting result.  Returns
+    ///  a 200 OK response if the SDEP reporting is successful, or a 400 Bad Request response if the SDEP reporting
+    ///  fails.</returns>
+    ///  <remarks>Utilizes the ISEDPService to process the SDEP reporting request and obtain the response data and status code.</remarks>
+    [HttpPost("ReporteriaSDEP/")]
+    [ProducesResponseType(typeof(ResponseModel), 200)]
+    [ProducesResponseType(typeof(ResponseModel), 400)]
+    public async Task<IActionResult> ObtenerTransaccionesClienteBts([FromBody] RequestModel<SdepBody> requestModel)
+    {
+        var (jsonResponse, statusCode) = await _sEDPService.SDEPServiceRequestAsync(requestModel.Body);
+
+        var resp = new ResponseModel
+        {
+            Header = new ResponseHeader
+            {
+                RequestHeader = requestModel.Header,
+                StatusCode = jsonResponse.OpCode,
+                Message = jsonResponse.ProcessMsg
+            },
+            Data = jsonResponse
+        };
+        return statusCode == 200 ? Ok(resp) : BadRequest(resp);
     }
 }
