@@ -1,78 +1,19 @@
-// ====== AUTORIZACIÓN Y POLÍTICAS PERSONALIZADAS ======
-builder.Services.AddAuthorization(options =>
-{
-    // Política para validar sesión activa en AS400
-    options.AddPolicy("ActiveSession", policy =>
-        policy.RequireAssertion(context =>
-        {
-            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-                         ?? context.User.Identity?.Name;
+System.AggregateException
+  HResult=0x80131500
+  Message=Some services are not able to be constructed (Error while validating the service descriptor 'ServiceType: Microsoft.AspNetCore.Authorization.IAuthorizationService Lifetime: Transient ImplementationType: Microsoft.AspNetCore.Authorization.DefaultAuthorizationService': Cannot consume scoped service 'MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService.ISessionManagerService' from singleton 'Microsoft.AspNetCore.Authorization.IAuthorizationHandler'.) (Error while validating the service descriptor 'ServiceType: Microsoft.AspNetCore.Authorization.IAuthorizationHandlerProvider Lifetime: Transient ImplementationType: Microsoft.AspNetCore.Authorization.DefaultAuthorizationHandlerProvider': Cannot consume scoped service 'MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService.ISessionManagerService' from singleton 'Microsoft.AspNetCore.Authorization.IAuthorizationHandler'.) (Error while validating the service descriptor 'ServiceType: Microsoft.AspNetCore.Authorization.Policy.IPolicyEvaluator Lifetime: Transient ImplementationType: Microsoft.AspNetCore.Authorization.Policy.PolicyEvaluator': Cannot consume scoped service 'MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService.ISessionManagerService' from singleton 'Microsoft.AspNetCore.Authorization.IAuthorizationHandler'.) (Error while validating the service descriptor 'ServiceType: Microsoft.AspNetCore.Authorization.IAuthorizationHandler Lifetime: Singleton ImplementationType: MS_BAN_43_Embosado_Tarjetas_Debito.Authorization.ActiveSessionHandler': Cannot consume scoped service 'MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService.ISessionManagerService' from singleton 'Microsoft.AspNetCore.Authorization.IAuthorizationHandler'.)
+  Source=Microsoft.Extensions.DependencyInjection
+  StackTrace:
+   at Microsoft.Extensions.DependencyInjection.ServiceProvider..ctor(ICollection`1 serviceDescriptors, ServiceProviderOptions options)
+   at Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(IServiceCollection services, ServiceProviderOptions options)
+   at Microsoft.Extensions.Hosting.HostApplicationBuilder.Build()
+   at Microsoft.AspNetCore.Builder.WebApplicationBuilder.Build()
+   at Program.<<Main>$>d__0.MoveNext() in C:\Git\MS_BAN_43_EmbosadoTarjetasDebito\BACKEND\MS_BAN_43_Embosado_Tarjetas_Debito\Program.cs:line 212
 
-            if (string.IsNullOrWhiteSpace(userId))
-                return false;
+  This exception was originally thrown at this call stack:
+    [External Code]
 
-            // ⚠️ No se debe crear un ServiceProvider nuevo aquí (mala práctica)
-            // Por lo tanto, simplemente devolveremos true, y la validación real
-            // se hará con un AuthorizationHandler registrado abajo.
-            return true;
-        })
-    );
-});
+Inner Exception 1:
+InvalidOperationException: Error while validating the service descriptor 'ServiceType: Microsoft.AspNetCore.Authorization.IAuthorizationService Lifetime: Transient ImplementationType: Microsoft.AspNetCore.Authorization.DefaultAuthorizationService': Cannot consume scoped service 'MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService.ISessionManagerService' from singleton 'Microsoft.AspNetCore.Authorization.IAuthorizationHandler'.
 
-// 🔧 Registrar un AuthorizationHandler para hacer la validación real con inyección
-builder.Services.AddSingleton<IAuthorizationHandler, ActiveSessionHandler>();
-
-
-
-
-using Microsoft.AspNetCore.Authorization;
-using System.Security.Claims;
-using MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService;
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Authorization
-{
-    /// <summary>
-    /// Handler que valida si la sesión del usuario sigue activa en AS400.
-    /// Usa ISessionManagerService.IsSessionActiveAsync(userId).
-    /// </summary>
-    public class ActiveSessionHandler : AuthorizationHandler<ActiveSessionRequirement>
-    {
-        private readonly ISessionManagerService _sessionManager;
-
-        public ActiveSessionHandler(ISessionManagerService sessionManager)
-        {
-            _sessionManager = sessionManager;
-        }
-
-        protected override async Task HandleRequirementAsync(
-            AuthorizationHandlerContext context,
-            ActiveSessionRequirement requirement)
-        {
-            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-                         ?? context.User.Identity?.Name;
-
-            if (string.IsNullOrWhiteSpace(userId))
-                return;
-
-            bool isActive = await _sessionManager.IsSessionActiveAsync(userId);
-            if (isActive)
-                context.Succeed(requirement);
-        }
-    }
-
-    /// <summary>
-    /// Requisito vacío para la política "ActiveSession".
-    /// </summary>
-    public class ActiveSessionRequirement : IAuthorizationRequirement { }
-}
-
-
-
-builder.Services.AddControllers(options =>
-{
-    var policy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .AddRequirements(new ActiveSessionRequirement())
-        .Build();
-    options.Filters.Add(new AuthorizeFilter(policy));
-});
+Inner Exception 2:
+InvalidOperationException: Cannot consume scoped service 'MS_BAN_43_Embosado_Tarjetas_Debito.Services.SessionManagerService.ISessionManagerService' from singleton 'Microsoft.AspNetCore.Authorization.IAuthorizationHandler'.
