@@ -1,101 +1,75 @@
-import { Component } from '@angular/core';
-import { Router } from '@angular/router';
-import { CommonModule } from '@angular/common';
-import { FormGroup, FormsModule, FormBuilder, Validators, ReactiveFormsModule } from '@angular/forms';
-import { MatSnackBar } from '@angular/material/snack-bar';
-import { firstValueFrom } from 'rxjs';
+/** Normaliza una fecha (string ISO o Date) a milisegundos epoch, o null si inválida. */
+private toEpochMs(exp: string | Date | null | undefined): number | null {
+  if (!exp) return null;
+  const d = exp instanceof Date ? exp : new Date(exp);
+  const ms = d.getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
 
-// Angular Material
-import { MatInputModule } from '@angular/material/input';
-import { MatCardModule } from '@angular/material/card';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatSelectModule } from '@angular/material/select';
-import { MatIconModule } from '@angular/material/icon';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatButtonModule } from '@angular/material/button';
+/**
+ * Mantiene viva la sesión en el servidor y sincroniza token/expiración locales.
+ * - Acepta que el backend devuelva: { token?, expiration? } o { full: LoginResponse }.
+ * - No navega; sólo actualiza almacenamiento y subjects.
+ */
+keepAlive(): Observable<void> {
+  return this.http.post<{
+    expiration?: string | Date | null;
+    token?: string | null;
+    full?: LoginResponse | null;
+  }>(`${this.apiUrl}/api/Auth/KeepAlive`, {})
+    .pipe(
+      map(resp => {
+        // 1) Caso: el backend devuelve el objeto completo.
+        if (resp?.full) {
+          this.persistSession(resp.full);
+          return;
+        }
 
-// Servicios
-import { AuthService } from '../../../../core/services/auth.service';
-import { SessionIdleService } from '../../../../core/services/session-idle.service';
+        // 2) Token y/o expiración sueltos (posibles undefined/null).
+        const token = resp?.token ?? null;
+        const expirationAny = resp?.expiration ?? null;
 
-@Component({
-  selector: 'app-login',
-  standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    ReactiveFormsModule,
-    MatCardModule,
-    MatFormFieldModule,
-    MatInputModule,
-    MatSelectModule,
-    MatIconModule,
-    MatProgressSpinnerModule,
-    MatButtonModule
-  ],
-  templateUrl: './login.component.html',
-  styleUrl: './login.component.css'
-})
-export class LoginComponent {
-  /** UI */
-  hidePassword = true;
-  isLoading = false;
-  errorMessage = '';
+        // Calcula ms para expiresAt si vino una expiración válida.
+        const expMs = this.toEpochMs(expirationAny);
+        if (expMs !== null) {
+          localStorage.setItem('expiresAt', String(expMs));
+        }
 
-  /** Formulario reactivo */
-  loginForm: FormGroup;
+        // 3) Actualiza el usuario actual en memoria si existe.
+        const current = this.currentUserSubject.value; // LoginResponse | null
+        if (current !== null) {
+          // Token renovado
+          if (token !== null) {
+            current.token.token = token;
+            localStorage.setItem('token', token);
+          }
 
-  constructor(
-    private readonly authService: AuthService,
-    private readonly router: Router,
-    private readonly fb: FormBuilder,
-    private readonly snackBar: MatSnackBar,
-    private readonly idle: SessionIdleService
-  ) {
-    this.loginForm = this.fb.group({
-      userName: ['', [Validators.required, Validators.maxLength(10)]],
-      password: ['', [Validators.required, Validators.minLength(6), Validators.maxLength(100)]]
-    });
-  }
+          // Nueva expiración tipada como Date en el modelo
+          if (expMs !== null) {
+            current.token.expiration = new Date(expMs);
+          }
 
-  /** Mostrar/ocultar contraseña */
-  togglePasswordVisibility(): void {
-    this.hidePassword = !this.hidePassword;
-  }
+          // Persiste una sola vez y emite una sola vez
+          localStorage.setItem('currentUser', JSON.stringify(current));
+          this.currentUserSubject.next({ ...current }); // copia superficial para disparar change detection
+        } else {
+          // No hay usuario cargado en memoria (caso raro). Aún así,
+          // si vino token o expiración, deja al menos el storage consistente.
+          if (token !== null) {
+            localStorage.setItem('token', token);
+          }
+          // expiresAt ya se guardó más arriba si expMs !== null
+        }
 
-  /** Encapsula cambios de estado de carga y bloquea el form */
-  private setLoading(loading: boolean): void {
-    this.isLoading = loading;
-    loading
-      ? this.loginForm.disable({ emitEvent: false })
-      : this.loginForm.enable({ emitEvent: false });
-  }
-
-  /** Normaliza y muestra el error de login */
-  private handleLoginError(error: unknown): void {
-    this.errorMessage = (error as Error)?.message || 'Ocurrió un error durante el inicio de sesión';
-    this.snackBar.open(this.errorMessage, 'Cerrar', { duration: 5000 });
-  }
-
-  /** Enviar formulario: hace login, inicia monitoreo de sesión y navega */
-  async login(): Promise<void> {
-    if (this.loginForm.invalid || this.isLoading) return;
-
-    this.errorMessage = '';
-    this.setLoading(true);
-
-    try {
-      const { userName, password } = this.loginForm.value;
-      await firstValueFrom(this.authService.login(userName, password));
-
-      // Inicia monitoreo de inactividad + verificación periódica de JWT
-      this.idle.startWatching();
-
-      await this.router.navigate(['/tarjetas']);
-    } catch (error) {
-      this.handleLoginError(error);
-    } finally {
-      this.setLoading(false);
-    }
-  }
+        // 4) Recalcula flag de sesión activa.
+        this.sessionActive.next(this.sessionIsActive());
+      }),
+      catchError((err: HttpErrorResponse) => {
+        // Si el keep-alive falla por 401/403, la sesión está muerta en servidor.
+        if (err.status === 401 || err.status === 403) {
+          this.logout();
+        }
+        return throwError(() => err);
+      })
+    );
 }
