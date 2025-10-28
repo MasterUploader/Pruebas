@@ -1,95 +1,24 @@
-using Microsoft.AspNetCore.Mvc;
-
-namespace MS_BAN_43_Embosado_Tarjetas_Debito.Controllers
-{
-    [ApiController]
-    [Route("api/config")]
-    public class ConfigController : ControllerBase
-    {
-        private readonly IConfiguration _config;
-        public ConfigController(IConfiguration config) => _config = config;
-
-        /// <summary>Devuelve la duración de sesión (minutos) desde appsettings.</summary>
-        [HttpGet("session")]
-        [AllowAnonymous]
-        public IActionResult GetSessionConfig()
-        {
-            int minutes = _config.GetValue<int>("JwtSettings:SessionMinutes", 15);
-            return Ok(new { sessionMinutes = minutes });
-        }
-    }
-}
-
-
-
-
-var now = DateTime.UtcNow;
-int sessionMinutes = 15;
-try
-{
-    // lee desde appsettings
-    sessionMinutes = new ConfigurationBuilder()
-        .AddJsonFile("appsettings.json", optional: true)
-        .AddEnvironmentVariables()
-        .Build()
-        .GetValue<int>("JwtSettings:SessionMinutes", 15);
-}
-catch { /* fallback 15 */ }
-
-var expires = now.AddMinutes(sessionMinutes); // ✅ dinámico
-
-
-
-
-
-var newExp = DateTime.UtcNow.AddMinutes(15);
-
-
-int minutes = HttpContext.RequestServices
-    .GetRequiredService<IConfiguration>()
-    .GetValue<int>("JwtSettings:SessionMinutes", 15);
-
-var newExp = DateTime.UtcNow.AddMinutes(minutes);
-
-
-
-
-/** Obtiene desde el backend la duración de la sesión (minutos). */
-public async getSessionDurationFromApi(): Promise<number> {
-  try {
-    const url = `${this.apiUrl}/api/config/session`;
-    const resp = await firstValueFrom(this.http.get<{ sessionMinutes: number }>(url));
-    return resp?.sessionMinutes ?? 15;
-  } catch {
-    return 15;
-  }
-}
-
-
-
-
 import { Injectable, NgZone, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { fromEvent, Subject, merge, timer, Subscription } from 'rxjs';
-import { debounceTime, mapTo, startWith, switchMap, takeUntil } from 'rxjs/operators';
+import { debounceTime, map, startWith, switchMap, takeUntil } from 'rxjs/operators'; // 👈 usamos map, no mapTo
 import { AuthService } from './auth.service';
 import { MatDialog } from '@angular/material/dialog';
 import { IdleWarningComponent } from '../../shared/dialogs/idle-warning/idle-warning.component';
 
 @Injectable({ providedIn: 'root' })
 export class SessionIdleService implements OnDestroy {
-  /** Config dinámica obtenida desde API */
-  private IDLE_TIMEOUT_MS = 15 * 60 * 1000;           // respaldo
-  private WARNING_BEFORE_CLOSE_MS = 60 * 1000;        // aviso por defecto (1 min)
+  private IDLE_TIMEOUT_MS = 15 * 60 * 1000;    // respaldo
+  private WARNING_BEFORE_CLOSE_MS = 60 * 1000; // respaldo
 
   private stop$ = new Subject<void>();
   private subs: Subscription[] = [];
   private watching = false;
 
-  /** Emisor manual de "actividad" (p.ej., al pulsar 'Seguir conectado') */
+  /** Emisor manual de actividad (p.ej., “Seguir conectado”) */
   private manualActivity$ = new Subject<void>();
 
-  /** Referencia al diálogo actual (si está abierto) */
+  /** Ref al diálogo para evitar duplicados */
   private dialogRef: { close: (result?: 'continue' | 'logout') => void } | null = null;
 
   constructor(
@@ -104,10 +33,10 @@ export class SessionIdleService implements OnDestroy {
     this.stopWatching();
     this.watching = true;
 
-    // 1) 🔄 Traer minutos desde API y ajustar tiempos
+    // 1) Lee minutos desde el API y ajusta tiempos
     const minutes = await this.auth.getSessionDurationFromApi();
     this.IDLE_TIMEOUT_MS = minutes * 60 * 1000;
-    this.WARNING_BEFORE_CLOSE_MS = Math.min(60 * 1000, this.IDLE_TIMEOUT_MS / 4); // aviso en el último cuarto (máx 60s)
+    this.WARNING_BEFORE_CLOSE_MS = Math.min(60 * 1000, this.IDLE_TIMEOUT_MS / 4);
 
     // 2) Streams de actividad (DOM + manual)
     const domActivity$ = merge(
@@ -118,21 +47,23 @@ export class SessionIdleService implements OnDestroy {
       fromEvent(window, 'focus')
     ).pipe(
       debounceTime(300),
-      mapTo(Date.now()),
+      map(() => Date.now()),          // 👈 antes: mapTo(Date.now())
       startWith(Date.now())
     );
 
-    const manual$ = this.manualActivity$.pipe(mapTo(Date.now()));
+    const manual$ = this.manualActivity$.pipe(
+      map(() => Date.now())           // 👈 antes: mapTo(Date.now())
+    );
 
-    // 3) Armar lógica de avisos y cierre
+    // 3) Aviso y cierre por inactividad
     this.ngZone.runOutsideAngular(() => {
       const sub = merge(domActivity$, manual$)
         .pipe(
           switchMap(() => {
             const warningAt = this.IDLE_TIMEOUT_MS - this.WARNING_BEFORE_CLOSE_MS;
             return merge(
-              timer(warningAt).pipe(mapTo<'warning'>('warning')),
-              timer(this.IDLE_TIMEOUT_MS).pipe(mapTo<'logout'>('logout'))
+              timer(warningAt).pipe(map(() => 'warning' as const)), // 👈 antes: mapTo('warning')
+              timer(this.IDLE_TIMEOUT_MS).pipe(map(() => 'logout' as const)) // 👈 antes: mapTo('logout')
             );
           }),
           takeUntil(this.stop$)
@@ -165,10 +96,10 @@ export class SessionIdleService implements OnDestroy {
     this.stop$.complete();
   }
 
-  // ---------- Helpers privados ----------
+  // ---------- Privados ----------
 
   private openWarningDialog(): void {
-    this.closeDialogSafe(); // Evita duplicados
+    this.closeDialogSafe();
     const seconds = Math.floor(this.WARNING_BEFORE_CLOSE_MS / 1000);
 
     const ref = this.dialog.open(IdleWarningComponent, {
@@ -180,8 +111,7 @@ export class SessionIdleService implements OnDestroy {
 
     const sub = ref.afterClosed().subscribe(result => {
       if (result === 'continue') {
-        // usuario desea seguir: registrar actividad y opcionalmente llamar keepAlive()
-        this.manualActivity$.next();
+        this.manualActivity$.next(); // reinicia timers
         this.auth.keepAlive().subscribe({ error: () => this.forceLogout('Sesión inválida en servidor.') });
       } else if (result === 'logout') {
         this.forceLogout('Cierre de sesión solicitado.');
@@ -203,7 +133,3 @@ export class SessionIdleService implements OnDestroy {
     this.router.navigate(['/login'], { queryParams: { r: 'expired', msg: reason } });
   }
 }
-
-
-
-
