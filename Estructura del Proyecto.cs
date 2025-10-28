@@ -1,6 +1,3 @@
-Así tengo el angular.json, entregamelo ya con los cambios aplicados:
-
-
 {
   "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
   "version": 1,
@@ -35,6 +32,12 @@ Así tengo el angular.json, entregamelo ya con los cambios aplicados:
           },
           "configurations": {
             "production": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.prod.ts"
+                }
+              ],
               "budgets": [
                 {
                   "type": "initial",
@@ -47,6 +50,33 @@ Así tengo el angular.json, entregamelo ya con los cambios aplicados:
                   "maximumError": "4kb"
                 }
               ],
+              "outputHashing": "all",
+              "optimization": true,
+              "sourceMap": false,
+              "extractLicenses": true
+            },
+            "dev": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.dev.ts"
+                }
+              ],
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "outputHashing": "none"
+            },
+            "uat": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.uat.ts"
+                }
+              ],
+              "optimization": true,
+              "extractLicenses": true,
+              "sourceMap": true,
               "outputHashing": "all"
             },
             "development": {
@@ -62,6 +92,12 @@ Así tengo el angular.json, entregamelo ya con los cambios aplicados:
           "configurations": {
             "production": {
               "buildTarget": "EmbosadoTarjetasDebito:build:production"
+            },
+            "dev": {
+              "buildTarget": "EmbosadoTarjetasDebito:build:dev"
+            },
+            "uat": {
+              "buildTarget": "EmbosadoTarjetasDebito:build:uat"
             },
             "development": {
               "buildTarget": "EmbosadoTarjetasDebito:build:development"
