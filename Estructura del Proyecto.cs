@@ -1,72 +1,48 @@
-.idle-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 460px;
-  padding: 8px 4px;
-}
+<!-- idle-warning.component.html (reemplazar todo el contenido) -->
+<div class="idle-wrapper">
+  <div class="icon-row">
+    <mat-icon aria-hidden="true">hourglass_empty</mat-icon>
+  </div>
 
-.icon-row {
-  display: flex;
-  justify-content: center;
-  margin-top: 4px;
-}
+  <!-- Título accesible gestionado por MatDialog -->
+  <h2 mat-dialog-title id="idle-title" class="title">¿Sigues ahí?</h2>
 
-.icon-row mat-icon {
-  font-size: 40px;
-  width: 40px;
-  height: 40px;
-  opacity: 0.85;
-}
+  <!-- Contenido accesible -->
+  <div mat-dialog-content id="idle-desc">
+    <p class="subtitle">Por seguridad, cerraremos tu sesión si no respondes.</p>
 
-.title {
-  margin: 8px 0 4px;
-  text-align: center;
-  font-weight: 600;
-}
+    <div class="countdown" aria-live="polite">
+      Tu sesión expirará en <strong>{{ seconds }}</strong> segundos.
+    </div>
 
-.subtitle {
-  margin: 0 0 6px;
-  text-align: center;
-  color: rgba(0,0,0,0.7);
-}
+    <mat-progress-bar
+      [value]="progressPercent"
+      mode="determinate"
+      aria-label="Tiempo restante de sesión">
+    </mat-progress-bar>
+  </div>
 
-.countdown {
-  text-align: center;
-  font-size: 14px;
-  margin: 4px 0 8px;
-}
+  <!-- Acciones -->
+  <div mat-dialog-actions class="actions">
+    <button
+      mat-raised-button
+      color="primary"
+      class="btn-continue"
+      (click)="onContinue()"
+      cdkFocusInitial
+      aria-label="Seguir conectado">
+      <mat-icon aria-hidden="true">check_circle</mat-icon>
+      Seguir conectado
+    </button>
 
-mat-progress-bar {
-  height: 6px;
-  border-radius: 3px;
-}
-
-.actions {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 8px;
-}
-
-.btn-continue mat-icon,
-.btn-logout mat-icon {
-  margin-right: 6px;
-}
-
-
-
-const ref = this.dialog.open(IdleWarningComponent, {
-  width: '420px',
-  disableClose: true,
-  data: { seconds: Math.floor(this.WARNING_BEFORE_CLOSE_MS / 1000) }
-});
-
-ref.afterClosed().subscribe(result => {
-  if (result === 'continue') {
-    // reiniciar timers + keepAlive
-  } else if (result === 'logout') {
-    // forzar logout
-  }
-});
+    <button
+      mat-stroked-button
+      color="warn"
+      class="btn-logout"
+      (click)="onLogout()"
+      aria-label="Cerrar sesión ahora">
+      <mat-icon aria-hidden="true">logout</mat-icon>
+      Cerrar sesión
+    </button>
+  </div>
+</div>
