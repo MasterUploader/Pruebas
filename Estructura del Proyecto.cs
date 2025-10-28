@@ -1,158 +1,126 @@
-using System.ComponentModel.DataAnnotations;
-using System.Text.Json.Serialization;
-using Pagos_Davivienda_TNP.Models.Dtos;
+El response quedaria algo así
 
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+using Microsoft.AspNetCore.Mvc;
+using Pagos_Davivienda_TNP.Models.Dtos;
+using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+using Pagos_Davivienda_TNP.Services.Interfaces;
+
+namespace Pagos_Davivienda_TNP.Controllers;
 
 /// <summary>
-/// Request raíz: encabezado + cuerpo de autorización manual.
+/// API de Pagos DaviviendaTNP (v1).
+/// Base URL: /davivienda-tnp/api/v1
 /// </summary>
-public sealed class AuthorizationRequest
+[ApiController]
+[Route("api/v1/davivienda-tnp/[controller]")]
+[Produces("application/json")]
+public class PagosDaviviendaTnpController(IPaymentAuthorizationService paymentService) : ControllerBase
 {
-    /// <summary>Metadatos del request (trazabilidad/canal/usuario).</summary>
-    [Required]
-    [JsonPropertyName("header")]
-    public RequestHeader Header { get; set; } = new();
+    private readonly IPaymentAuthorizationService _paymentService = paymentService;
 
-    /// <summary>Contenido del request (parámetros del negocio).</summary>
-    [Required]
-    [JsonPropertyName("body")]
-    public AuthorizationBody Body { get; set; } = new();
+    /// <summary>Verifica salud del servicio.</summary>
+    /// <returns>Estado UP y nombre de servicio.</returns>
+    [HttpGet("health")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public IActionResult Health()
+    {
+        var response = new
+        {
+            status = "UP",
+            service = "DaviviendaTNP Payment API"
+        };
+        return Ok(response);
+    }
+
+    /// <summary>Procesa una autorización manual.</summary>
+    /// <param name="request">Payload de autorización manual.</param>
+    /// <returns>Envoltura GetAuthorizationManualResponse/GetAuthorizationManualResult.</returns>
+    [HttpPost("authorization/manual")]
+    [Consumes("application/json")]
+    public async Task<IActionResult> GetAuthorizationManual([FromBody] AuthorizationRequest request, CancellationToken ct)
+    {
+        // request.Header → metadatos (si necesitas log/trazabilidad)
+        var input = request.Body.GetAuthorizationManual;
+
+        var result = await _paymentService.AuthorizeManualAsync(new GetauthorizationManualDto
+        {
+            PMerchantID = input.PMerchantID,
+            PTerminalID = input.PTerminalID,
+            PPrimaryAccountNumber = input.PPrimaryAccountNumber,
+            PDateExpiration = input.PDateExpiration,
+            PCVV2 = input.PCVV2,
+            PAmount = input.PAmount,
+            PSystemsTraceAuditNumber = input.PSystemsTraceAuditNumber
+        }, ct);
+
+        var envelope = new GetAuthorizationManualResultEnvelope
+        {
+            Response = new GetAuthorizationManualResponseContainer { Result = result }
+        };
+
+        var response = new ResponseModels
+        {
+            Header = new ResponseHeader
+            {
+                //Faltan datos de header reales
+                ReponseId = "00"
+            },
+            Data = envelope
+        };
+
+        
+
+        return Ok(response);
+    }
+
 }
 
 
 
-
-using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
 namespace Pagos_Davivienda_TNP.Models.Dtos;
 
-/// <summary>Encabezado estándar para trazabilidad y control.</summary>
-public sealed class RequestHeader
+public class ResponseHeader
 {
-    [Required, JsonPropertyName("h-request-id")]
-    public string HRequestId { get; set; } = string.Empty;
+    [JsonPropertyName("responseId")]
+    public string ReponseId { get; set; } = Guid.NewGuid().ToString();
 
-    [Required, JsonPropertyName("h-channel")]
-    public string HChannel { get; set; } = string.Empty;
 
-    [Required, JsonPropertyName("h-terminal")]
-    public string HTerminal { get; set; } = string.Empty;
+    [JsonPropertyName("timestamp")]
+    public string Timestamp { get; set; } = DateTime.UtcNow.ToString("o");
 
-    [Required, JsonPropertyName("h-organization")]
-    public string HOrganization { get; set; } = string.Empty;
 
-    [Required, JsonPropertyName("h-user-id")]
-    public string HUserId { get; set; } = string.Empty;
+    [JsonPropertyName("processingtime")]
+    public string ProcessingTime { get; set; } = string.Empty;
 
-    [Required, JsonPropertyName("h-provider")]
-    public string HProvider { get; set; } = string.Empty;
 
-    [JsonPropertyName("h-session-id")]
-    public string HSessionId { get; set; } = Guid.NewGuid().ToString("N");
+    [JsonPropertyName("statusCode")]
+    public string StatusCode { get; set; } = string.Empty;
 
-    [Required, JsonPropertyName("h-client-ip")]
-    public string HClientIp { get; set; } = string.Empty;
 
-    /// <summary>ISO 8601 UTC (ej.: 2025-10-28T12:34:56Z).</summary>
-    [Required, JsonPropertyName("h-timestamp")]
-    public string HTimestamp { get; set; } = string.Empty;
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+
+    [JsonPropertyName("requestheader")]
+    public RequestHeader RequestHeader { get; set; } = new();
 }
 
 
 
 
-using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+namespace Pagos_Davivienda_TNP.Models.Dtos;
 
-/// <summary>Cuerpo del request para autorización manual.</summary>
-public sealed class AuthorizationBody
+public class ResponseModels
 {
-    /// <summary>
-    /// Envoltura de negocio requerida por el contrato.
-    /// Si el tercero NO la usa, elimina este nivel y mueve las props a AuthorizationBody.
-    /// </summary>
-    [Required]
-    [JsonPropertyName("GetAuthorizationManual")]
-    public AuthorizationPayload GetAuthorizationManual { get; set; } = new();
+    [JsonPropertyName("header")]
+    public ResponseHeader Header { get; set; } = new();
+
+
+    [JsonPropertyName("data")]
+    public object Data { get; set; } = new();
 }
-
-/// <summary>Parámetros de la autorización manual.</summary>
-public sealed class AuthorizationPayload
-{
-    [Required, JsonPropertyName("pMerchantID")]
-    public string PMerchantID { get; set; } = string.Empty;
-
-    [Required, JsonPropertyName("pTerminalID")]
-    public string PTerminalID { get; set; } = string.Empty;
-
-    [Required, JsonPropertyName("pPrimaryAccountNumber")]
-    public string PPrimaryAccountNumber { get; set; } = string.Empty;
-
-    /// <summary>MMAA</summary>
-    [Required, JsonPropertyName("pDateExpiration")]
-    public string PDateExpiration { get; set; } = string.Empty;
-
-    [Required, JsonPropertyName("pCVV2")]
-    public string PCVV2 { get; set; } = string.Empty;
-
-    /// <summary>Entero positivo como string (ej. "10000").</summary>
-    [Required, JsonPropertyName("pAmount")]
-    public string PAmount { get; set; } = string.Empty;
-
-    /// <summary>STAN de 6 dígitos.</summary>
-    [Required, JsonPropertyName("pSystemsTraceAuditNumber")]
-    public string PSystemsTraceAuditNumber { get; set; } = string.Empty;
-}
-
-
-
-[HttpPost("authorization/manual")]
-[Consumes("application/json")]
-public async Task<IActionResult> GetAuthorizationManual([FromBody] AuthorizationRequest request, CancellationToken ct)
-{
-    // request.Header → metadatos (si necesitas log/trazabilidad)
-    var input = request.Body.GetAuthorizationManual;
-
-    var result = await _paymentService.AuthorizeManualAsync(new GetauthorizationManualDto
-    {
-        PMerchantID = input.PMerchantID,
-        PTerminalID = input.PTerminalID,
-        PPrimaryAccountNumber = input.PPrimaryAccountNumber,
-        PDateExpiration = input.PDateExpiration,
-        PCVV2 = input.PCVV2,
-        PAmount = input.PAmount,
-        PSystemsTraceAuditNumber = input.PSystemsTraceAuditNumber
-    }, ct);
-
-    var envelope = new GetAuthorizationManualResultEnvelope
-    {
-        Response = new GetAuthorizationManualResponseContainer { Result = result }
-    };
-
-    return Ok(envelope);
-}
-
-
-
-builder.Services
-    .AddControllers(o => o.Filters.Add<ModelStateToErrorResponseFilter>())
-    .AddJsonOptions(o =>
-    {
-        o.JsonSerializerOptions.PropertyNamingPolicy = null; // respeta nombres exactos (con guiones via JsonPropertyName)
-        o.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
-    });
-
-builder.Services.Configure<ApiBehaviorOptions>(o => o.SuppressModelStateInvalidFilter = true);
-
-
-
-
-
-
-
-
 
