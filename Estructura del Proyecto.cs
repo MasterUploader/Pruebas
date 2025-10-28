@@ -1,142 +1,208 @@
-using System.Text.Json.Serialization;
-
-namespace Pagos_Davivienda_TNP.Models.Dtos;
-
-/// <summary>
-/// Encabezado estándar de la respuesta.
-/// </summary>
-public sealed class ResponseHeader
-{
-    /// <summary>Identificador único de la respuesta.</summary>
-    [JsonPropertyName("responseId")]
-    public string ResponseId { get; set; } = Guid.NewGuid().ToString("N");
-
-    /// <summary>Marca de tiempo en UTC (ISO 8601).</summary>
-    [JsonPropertyName("timestamp")]
-    public string Timestamp { get; set; } = DateTime.UtcNow.ToString("o");
-
-    /// <summary>Tiempo total de procesamiento del request.</summary>
-    [JsonPropertyName("processingTime")]
-    public string ProcessingTime { get; set; } = string.Empty;
-
-    /// <summary>Código de estado propio del negocio (p.ej. "00").</summary>
-    [JsonPropertyName("statusCode")]
-    public string StatusCode { get; set; } = string.Empty;
-
-    /// <summary>Mensaje legible para el consumidor.</summary>
-    [JsonPropertyName("message")]
-    public string Message { get; set; } = string.Empty;
-
-    /// <summary>Header original del request, eco para trazabilidad.</summary>
-    [JsonPropertyName("requestHeader")]
-    public RequestHeader RequestHeader { get; set; } = new();
-}
-
-/// <summary>
-/// Contenedor genérico de respuesta: header + data.
-/// </summary>
-/// <typeparam name="TData">Tipo del payload de datos.</typeparam>
-public sealed class ResponseModel<TData>
-{
-    [JsonPropertyName("header")]
-    public ResponseHeader Header { get; set; } = new();
-
-    [JsonPropertyName("data")]
-    public TData? Data { get; set; }
-}
-
-
-
-
-using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
-using Pagos_Davivienda_TNP.Models.Dtos;
-using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-using Pagos_Davivienda_TNP.Services.Interfaces;
 
-namespace Pagos_Davivienda_TNP.Controllers;
-
-/// <summary>
-/// API de Pagos DaviviendaTNP (v1).
-/// Base URL: /davivienda-tnp/api/v1
-/// </summary>
-[ApiController]
-[Route("davivienda-tnp/api/v1")]
-[Produces("application/json")]
-public class PagosDaviviendaTnpController(IPaymentAuthorizationService paymentService) : ControllerBase
+namespace MS_BAN_43_Embosado_Tarjetas_Debito.Controllers
 {
-    private readonly IPaymentAuthorizationService _paymentService = paymentService;
-
-    /// <summary>Verifica salud del servicio.</summary>
-    [HttpGet("health")]
-    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
-    public IActionResult Health()
-        => Ok(new { status = "UP", service = "DaviviendaTNP Payment API" });
-
-    /// <summary>Procesa una autorización manual.</summary>
-    /// <param name="request">Request con header + body.</param>
-    /// <param name="ct">Token de cancelación.</param>
-    [HttpPost("authorization/manual")]
-    [Consumes("application/json")]
-    [ProducesResponseType(typeof(ResponseModel<GetAuthorizationManualResultEnvelope>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> GetAuthorizationManual([FromBody] AuthorizationRequest request, CancellationToken ct)
+    [ApiController]
+    [Route("api/config")]
+    public class ConfigController : ControllerBase
     {
-        var sw = Stopwatch.StartNew();
+        private readonly IConfiguration _config;
+        public ConfigController(IConfiguration config) => _config = config;
 
-        // 1) Extraer el payload del cuerpo
-        var input = request.Body.GetAuthorizationManual;
-
-        // 2) Invocar servicio de dominio (que a su vez llama al tercero)
-        var result = await _paymentService.AuthorizeManualAsync(new GetauthorizationManualDto
+        /// <summary>Devuelve la duración de sesión (minutos) desde appsettings.</summary>
+        [HttpGet("session")]
+        [AllowAnonymous]
+        public IActionResult GetSessionConfig()
         {
-            PMerchantID = input.PMerchantID,
-            PTerminalID = input.PTerminalID,
-            PPrimaryAccountNumber = input.PPrimaryAccountNumber,
-            PDateExpiration = input.PDateExpiration,
-            PCVV2 = input.PCVV2,
-            PAmount = input.PAmount,
-            PSystemsTraceAuditNumber = input.PSystemsTraceAuditNumber
-        }, ct);
-
-        // 3) Envolver en el contrato de datos solicitado
-        var envelope = new GetAuthorizationManualResultEnvelope
-        {
-            Response = new GetAuthorizationManualResponseContainer { Result = result }
-        };
-
-        sw.Stop();
-
-        // 4) Construir RESPUESTA FINAL: header + data
-        var apiResponse = new ResponseModel<GetAuthorizationManualResultEnvelope>
-        {
-            Header = new ResponseHeader
-            {
-                ResponseId    = Guid.NewGuid().ToString("N"),
-                Timestamp     = DateTime.UtcNow.ToString("o"),
-                ProcessingTime= $"{sw.ElapsedMilliseconds}ms",
-                StatusCode    = result.ResponseCode, // "00" si aprobada
-                Message       = result.Message,
-                RequestHeader = request.Header
-            },
-            Data = envelope
-        };
-
-        return Ok(apiResponse);
+            int minutes = _config.GetValue<int>("JwtSettings:SessionMinutes", 15);
+            return Ok(new { sessionMinutes = minutes });
+        }
     }
 }
 
 
 
-builder.Services
-    .AddControllers(o => o.Filters.Add<ModelStateToErrorResponseFilter>())
-    .AddJsonOptions(o =>
-    {
-        o.JsonSerializerOptions.PropertyNamingPolicy = null; // respeta nombres exactos
-        o.JsonSerializerOptions.DefaultIgnoreCondition =
-            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+
+var now = DateTime.UtcNow;
+int sessionMinutes = 15;
+try
+{
+    // lee desde appsettings
+    sessionMinutes = new ConfigurationBuilder()
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddEnvironmentVariables()
+        .Build()
+        .GetValue<int>("JwtSettings:SessionMinutes", 15);
+}
+catch { /* fallback 15 */ }
+
+var expires = now.AddMinutes(sessionMinutes); // ✅ dinámico
+
+
+
+
+
+var newExp = DateTime.UtcNow.AddMinutes(15);
+
+
+int minutes = HttpContext.RequestServices
+    .GetRequiredService<IConfiguration>()
+    .GetValue<int>("JwtSettings:SessionMinutes", 15);
+
+var newExp = DateTime.UtcNow.AddMinutes(minutes);
+
+
+
+
+/** Obtiene desde el backend la duración de la sesión (minutos). */
+public async getSessionDurationFromApi(): Promise<number> {
+  try {
+    const url = `${this.apiUrl}/api/config/session`;
+    const resp = await firstValueFrom(this.http.get<{ sessionMinutes: number }>(url));
+    return resp?.sessionMinutes ?? 15;
+  } catch {
+    return 15;
+  }
+}
+
+
+
+
+import { Injectable, NgZone, OnDestroy } from '@angular/core';
+import { Router } from '@angular/router';
+import { fromEvent, Subject, merge, timer, Subscription } from 'rxjs';
+import { debounceTime, mapTo, startWith, switchMap, takeUntil } from 'rxjs/operators';
+import { AuthService } from './auth.service';
+import { MatDialog } from '@angular/material/dialog';
+import { IdleWarningComponent } from '../../shared/dialogs/idle-warning/idle-warning.component';
+
+@Injectable({ providedIn: 'root' })
+export class SessionIdleService implements OnDestroy {
+  /** Config dinámica obtenida desde API */
+  private IDLE_TIMEOUT_MS = 15 * 60 * 1000;           // respaldo
+  private WARNING_BEFORE_CLOSE_MS = 60 * 1000;        // aviso por defecto (1 min)
+
+  private stop$ = new Subject<void>();
+  private subs: Subscription[] = [];
+  private watching = false;
+
+  /** Emisor manual de "actividad" (p.ej., al pulsar 'Seguir conectado') */
+  private manualActivity$ = new Subject<void>();
+
+  /** Referencia al diálogo actual (si está abierto) */
+  private dialogRef: { close: (result?: 'continue' | 'logout') => void } | null = null;
+
+  constructor(
+    private readonly ngZone: NgZone,
+    private readonly router: Router,
+    private readonly auth: AuthService,
+    private readonly dialog: MatDialog
+  ) {}
+
+  /** Inicia monitoreo (idempotente) */
+  async startWatching(): Promise<void> {
+    this.stopWatching();
+    this.watching = true;
+
+    // 1) 🔄 Traer minutos desde API y ajustar tiempos
+    const minutes = await this.auth.getSessionDurationFromApi();
+    this.IDLE_TIMEOUT_MS = minutes * 60 * 1000;
+    this.WARNING_BEFORE_CLOSE_MS = Math.min(60 * 1000, this.IDLE_TIMEOUT_MS / 4); // aviso en el último cuarto (máx 60s)
+
+    // 2) Streams de actividad (DOM + manual)
+    const domActivity$ = merge(
+      fromEvent(document, 'mousemove'),
+      fromEvent(document, 'keydown'),
+      fromEvent(document, 'click'),
+      fromEvent(document, 'scroll'),
+      fromEvent(window, 'focus')
+    ).pipe(
+      debounceTime(300),
+      mapTo(Date.now()),
+      startWith(Date.now())
+    );
+
+    const manual$ = this.manualActivity$.pipe(mapTo(Date.now()));
+
+    // 3) Armar lógica de avisos y cierre
+    this.ngZone.runOutsideAngular(() => {
+      const sub = merge(domActivity$, manual$)
+        .pipe(
+          switchMap(() => {
+            const warningAt = this.IDLE_TIMEOUT_MS - this.WARNING_BEFORE_CLOSE_MS;
+            return merge(
+              timer(warningAt).pipe(mapTo<'warning'>('warning')),
+              timer(this.IDLE_TIMEOUT_MS).pipe(mapTo<'logout'>('logout'))
+            );
+          }),
+          takeUntil(this.stop$)
+        )
+        .subscribe(evt => {
+          if (evt === 'warning') {
+            this.ngZone.run(() => this.openWarningDialog());
+          } else {
+            this.ngZone.run(() => this.forceLogout('Tu sesión expiró por inactividad.'));
+          }
+        });
+
+      this.subs.push(sub);
     });
+  }
+
+  /** Detiene monitoreo + cierra diálogo si existiera */
+  stopWatching(): void {
+    this.stop$.next();
+    this.subs.forEach(s => s.unsubscribe());
+    this.subs = [];
+    this.watching = false;
+    this.closeDialogSafe();
+  }
+
+  isWatching(): boolean { return this.watching; }
+
+  ngOnDestroy(): void {
+    this.stopWatching();
+    this.stop$.complete();
+  }
+
+  // ---------- Helpers privados ----------
+
+  private openWarningDialog(): void {
+    this.closeDialogSafe(); // Evita duplicados
+    const seconds = Math.floor(this.WARNING_BEFORE_CLOSE_MS / 1000);
+
+    const ref = this.dialog.open(IdleWarningComponent, {
+      width: '420px',
+      disableClose: true,
+      data: { seconds }
+    });
+    this.dialogRef = { close: (r?: 'continue' | 'logout') => ref.close(r) };
+
+    const sub = ref.afterClosed().subscribe(result => {
+      if (result === 'continue') {
+        // usuario desea seguir: registrar actividad y opcionalmente llamar keepAlive()
+        this.manualActivity$.next();
+        this.auth.keepAlive().subscribe({ error: () => this.forceLogout('Sesión inválida en servidor.') });
+      } else if (result === 'logout') {
+        this.forceLogout('Cierre de sesión solicitado.');
+      }
+    });
+    this.subs.push(sub);
+  }
+
+  private closeDialogSafe(): void {
+    if (this.dialogRef) {
+      try { this.dialogRef.close(); } catch {}
+      this.dialogRef = null;
+    }
+  }
+
+  private forceLogout(reason: string): void {
+    this.stopWatching();
+    this.auth.logout();
+    this.router.navigate(['/login'], { queryParams: { r: 'expired', msg: reason } });
+  }
+}
 
 
 
