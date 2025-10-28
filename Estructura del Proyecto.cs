@@ -1,544 +1,550 @@
-Me piden este APi:
+Pagos_Davivienda_TNP/
+├─ Controllers/
+│  └─ PagosDaviviendaTnpController.cs
+├─ Services/
+│  ├─ Interfaces/
+│  │  └─ IPaymentAuthorizationService.cs
+│  └─ PaymentAuthorizationService.cs
+├─ Models/
+│  └─ Dtos/
+│     └─ GetAuthorizationManual/
+│        ├─ RequestGetauthorizationManual.cs
+│        ├─ ResponseAuthorizationManualDto.cs
+│        └─ ResponseEnvelope.cs
+├─ Validation/
+│  ├─ LuhnAttribute.cs
+│  └─ AmountStringAttribute.cs
+├─ Filters/
+│  └─ ModelStateToErrorResponseFilter.cs
+├─ Middleware/
+│  └─ ExceptionHandlingMiddleware.cs
+├─ Utils/
+│  ├─ CardMasker.cs
+│  └─ TimeUtil.cs
+└─ Program.cs
 
 
-# API de Pagos DaviviendaTNP - Guía del Consumidor
 
-## 📋 **Descripción General**
 
-La API de Pagos DaviviendaTNP es una API REST ligera para procesar transacciones de autorización de pagos. Esta guía proporciona toda la información necesaria para integrar y consumir los servicios de la API.
+using System.ComponentModel.DataAnnotations;
+using Newtonsoft.Json;
+using Pagos_Davivienda_TNP.Validation;
 
-## 🌐 **Información Base de la API**
+namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
 
-### **URLs Base:**
-- **HTTP**: `http://[ip-servidor]:[puerto]/davivienda-tnp/api/v1`
-- **HTTPS**: `https://[ip-servidor]:[puerto]/davivienda-tnp/api/v1`
-
-### **Puertos por Defecto:**
-- **HTTP**: 8080
-- **HTTPS**: 8443
-
-### **Tipo de Contenido:**
-- **Petición**: `application/json`
-- **Respuesta**: `application/json`
-
-### **Autenticación:**
-- Actualmente no requiere autenticación
-- Versiones futuras pueden incluir autenticación basada en API key o tokens
-
----
-
-## 🔍 **Endpoints Disponibles**
-
-### 1. **Verificación de Estado** (GET)
-**Propósito**: Verificar si el servicio de la API está funcionando y saludable.
-
-**Endpoint**: `GET /health`
-
-**Petición**: No requiere cuerpo
-
-**Ejemplo de Respuesta**:
-```json
+/// <summary>
+/// Modelo raíz para la solicitud de autorización manual.
+/// Respeta la forma:
+/// {
+///   "GetAuthorizationManual": { ... }
+/// }
+/// </summary>
+public class RequestGetauthorizationManual
 {
-  "status": "UP",
-  "service": "DaviviendaTNP Payment API"
+    /// <summary>Objeto con los parámetros de autorización manual.</summary>
+    [JsonProperty("GetAuthorizationManual")]
+    [Required]
+    public GetauthorizationManualDto GetAuthorizationManual { get; set; } = new();
 }
-```
 
-**Códigos de Estado HTTP**:
-- `200 OK`: Servicio saludable
-- `5xx`: Error del servicio
-
----
-
-### 2. **Autorización Manual** (POST)
-**Propósito**: Procesar transacciones de autorización de pagos de forma manual.
-
-**Endpoint**: `POST /authorization/manual`
-
-**Cabeceras de Petición**:
-```
-Content-Type: application/json
-```
-
-**Estructura del Cuerpo de Petición**:
-```json
+/// <summary>
+/// Parámetros de entrada para autorización manual.
+/// </summary>
+public class GetauthorizationManualDto
 {
-  "GetAuthorizationManual": {
-    "pMerchantID": "string",
-    "pTerminalID": "string", 
-    "pPrimaryAccountNumber": "string",
-    "pDateExpiration": "string",
-    "pCVV2": "string",
-    "pAmount": "string",
-    "pSystemsTraceAuditNumber": "string"
-  }
+    /// <summary>Identificador del comercio.</summary>
+    [JsonRequired]
+    [JsonProperty("pMerchantID")]
+    [Required, StringLength(32, MinimumLength = 1)]
+    public string PMerchantID { get; set; } = string.Empty;
+
+    /// <summary>Identificador del terminal.</summary>
+    [JsonRequired]
+    [JsonProperty("pTerminalID")]
+    [Required, StringLength(32, MinimumLength = 1)]
+    public string PTerminalID { get; set; } = string.Empty;
+
+    /// <summary>Número de tarjeta (PAN). Se valida Luhn.</summary>
+    [JsonRequired]
+    [JsonProperty("pPrimaryAccountNumber")]
+    [Required, StringLength(19, MinimumLength = 12)]
+    [Luhn] // Validación Luhn personalizada
+    public string PPrimaryAccountNumber { get; set; } = string.Empty;
+
+    /// <summary>Fecha de expiración de la tarjeta en formato MMAA.</summary>
+    [JsonRequired]
+    [JsonProperty("pDateExpiration")]
+    [Required]
+    [RegularExpression(@"^(0[1-9]|1[0-2])\d{2}$", ErrorMessage = "Formato MMAA inválido.")]
+    public string PDateExpiration { get; set; } = string.Empty;
+
+    /// <summary>CVV2 (3 o 4 dígitos).</summary>
+    [JsonRequired]
+    [JsonProperty("pCVV2")]
+    [Required]
+    [RegularExpression(@"^\d{3,4}$", ErrorMessage = "CVV2 inválido.")]
+    public string PCVV2 { get; set; } = string.Empty;
+
+    /// <summary>Monto en centavos/centésimos como string numérico positivo (ej. '10000' = 100.00).</summary>
+    [JsonRequired]
+    [JsonProperty("pAmount")]
+    [Required, AmountString] // Validación numérica positiva
+    public string PAmount { get; set; } = string.Empty;
+
+    /// <summary>Número de traza (STAN) de 6 dígitos.</summary>
+    [JsonRequired]
+    [JsonProperty("pSystemsTraceAuditNumber")]
+    [Required]
+    [RegularExpression(@"^\d{6}$", ErrorMessage = "pSystemsTraceAuditNumber debe tener 6 dígitos.")]
+    public string PSystemsTraceAuditNumber { get; set; } = string.Empty;
 }
-```
 
-**Descripción de Campos**:
-- `pMerchantID`: Identificador del comercio (requerido)
-- `pTerminalID`: Identificador del terminal (requerido)
-- `pPrimaryAccountNumber`: Número de tarjeta de crédito/débito (requerido)
-- `pDateExpiration`: Fecha de expiración de la tarjeta en formato MMAA (requerido)
-- `pCVV2`: Código de verificación de la tarjeta (requerido)
-- `pAmount`: Monto de la transacción (requerido)
-- `pSystemsTraceAuditNumber`: Número único de traza de la transacción (requerido)
 
-**Estructura del Cuerpo de Respuesta**:
-```json
+
+
+using Newtonsoft.Json;
+
+namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+
+/// <summary>
+/// Datos del resultado de autorización manual.
+/// </summary>
+public class ResponseAuthorizationManualDto
 {
-  "GetAuthorizationManualResponse": {
-    "GetAuthorizationManualResult": {
-      "responseCode": "string",
-      "authorizationCode": "string",
-      "transactionId": "string",
-      "message": "string",
-      "timestamp": "string"
-    }
-  }
+    /// <summary>Código de respuesta (00 = aprobada).</summary>
+    [JsonProperty("responseCode")]
+    public string ResponseCode { get; set; } = string.Empty;
+
+    /// <summary>Código de autorización si aplica.</summary>
+    [JsonProperty("authorizationCode")]
+    public string AuthorizationCode { get; set; } = string.Empty;
+
+    /// <summary>Identificador único de la transacción.</summary>
+    [JsonProperty("transactionId")]
+    public string TransactionId { get; set; } = string.Empty;
+
+    /// <summary>Mensaje legible.</summary>
+    [JsonProperty("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Marca de tiempo ISO 8601.</summary>
+    [JsonProperty("timestamp")]
+    public string Timestamp { get; set; } = string.Empty;
 }
-```
 
-**Descripción de Campos de Respuesta**:
-- `responseCode`: Código de respuesta de la transacción (00 = aprobada)
-- `authorizationCode`: Código de autorización si fue aprobada
-- `transactionId`: Identificador único de la transacción
-- `message`: Mensaje de respuesta legible
-- `timestamp`: Marca de tiempo del procesamiento de la transacción
 
----
 
-## 🔧 **Ejemplos de Integración**
+using Newtonsoft.Json;
 
-### **Ejemplos con cURL**
+namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
 
-#### Verificación de Estado:
-```bash
-# HTTP
-curl -X GET "http://localhost:8080/davivienda-tnp/api/v1/health"
-
-# HTTPS (omitir verificación de certificado para certificados auto-firmados)
-curl -X GET "https://localhost:8443/davivienda-tnp/api/v1/health" -k
-```
-
-#### Autorización de Pago:
-```bash
-curl -X POST "http://localhost:8080/davivienda-tnp/api/v1/authorization/manual" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "GetAuthorizationManual": {
-      "pMerchantID": "12345678",
-      "pTerminalID": "TERM001",
-      "pPrimaryAccountNumber": "4111111111111111",
-      "pDateExpiration": "1225",
-      "pCVV2": "123",
-      "pAmount": "10000",
-      "pSystemsTraceAuditNumber": "000001"
-    }
-  }'
-```
-
-### **Ejemplo en JavaScript/Node.js**:
-```javascript
-const axios = require('axios');
-
-async function procesarPago() {
-  try {
-    const response = await axios.post(
-      'http://localhost:8080/davivienda-tnp/api/v1/authorization/manual',
-      {
-        GetAuthorizationManual: {
-          pMerchantID: "12345678",
-          pTerminalID: "TERM001", 
-          pPrimaryAccountNumber: "4111111111111111",
-          pDateExpiration: "1225",
-          pCVV2: "123",
-          pAmount: "10000",
-          pSystemsTraceAuditNumber: "000001"
-        }
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    
-    console.log('Pago procesado:', response.data);
-  } catch (error) {
-    console.error('Pago falló:', error.response?.data || error.message);
-  }
+/// <summary>
+/// Envoltura para cumplir el contrato:
+/// {
+///   "GetAuthorizationManualResponse": {
+///     "GetAuthorizationManualResult": { ... }
+///   }
+/// }
+/// </summary>
+public class GetAuthorizationManualResultEnvelope
+{
+    [JsonProperty("GetAuthorizationManualResponse")]
+    public GetAuthorizationManualResponseContainer Response { get; set; } = new();
 }
-```
 
-### **Ejemplo en Python**:
-```python
-import requests
-import json
+public class GetAuthorizationManualResponseContainer
+{
+    [JsonProperty("GetAuthorizationManualResult")]
+    public ResponseAuthorizationManualDto Result { get; set; } = new();
+}
 
-def procesar_pago():
-    url = "http://localhost:8080/davivienda-tnp/api/v1/authorization/manual"
-    
-    payload = {
-        "GetAuthorizationManual": {
-            "pMerchantID": "12345678",
-            "pTerminalID": "TERM001",
-            "pPrimaryAccountNumber": "4111111111111111", 
-            "pDateExpiration": "1225",
-            "pCVV2": "123",
-            "pAmount": "10000",
-            "pSystemsTraceAuditNumber": "000001"
-        }
-    }
-    
-    headers = {
-        'Content-Type': 'application/json'
-    }
-    
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        
-        result = response.json()
-        print("Pago procesado:", json.dumps(result, indent=2))
-        
-    except requests.exceptions.RequestException as e:
-        print(f"Pago falló: {e}")
-```
 
-### **Ejemplo en Java**:
-```java
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.net.URI;
 
-public class ClientePagos {
-    
-    public void procesarPago() {
-        String url = "http://localhost:8080/davivienda-tnp/api/v1/authorization/manual";
-        
-        String json = """
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
+
+namespace Pagos_Davivienda_TNP.Validation;
+
+/// <summary>Valida PAN por algoritmo de Luhn.</summary>
+public sealed class LuhnAttribute : ValidationAttribute
+{
+    protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
+    {
+        var pan = value as string;
+        if (string.IsNullOrWhiteSpace(pan)) return new ValidationResult("PAN requerido.");
+
+        if (!pan.All(char.IsDigit)) return new ValidationResult("PAN debe ser numérico.");
+
+        int sum = 0;
+        bool alt = false;
+        for (int i = pan.Length - 1; i >= 0; i--)
+        {
+            int n = pan[i] - '0';
+            if (alt)
             {
-              "GetAuthorizationManual": {
-                "pMerchantID": "12345678",
-                "pTerminalID": "TERM001",
-                "pPrimaryAccountNumber": "4111111111111111",
-                "pDateExpiration": "1225",
-                "pCVV2": "123", 
-                "pAmount": "10000",
-                "pSystemsTraceAuditNumber": "000001"
-              }
+                n *= 2;
+                if (n > 9) n -= 9;
             }
-            """;
-        
-        HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(json))
-            .build();
-            
-        try {
-            HttpResponse<String> response = client.send(request, 
-                HttpResponse.BodyHandlers.ofString());
-                
-            System.out.println("Estado: " + response.statusCode());
-            System.out.println("Respuesta: " + response.body());
-            
-        } catch (Exception e) {
-            System.err.println("Pago falló: " + e.getMessage());
+            sum += n;
+            alt = !alt;
         }
+        return (sum % 10 == 0) ? ValidationResult.Success : new ValidationResult("PAN no supera validación Luhn.");
     }
 }
-```
 
----
 
-## ⚠️ **Manejo de Errores**
 
-### **Códigos de Estado HTTP**:
-- `200 OK`: Petición procesada exitosamente
-- `400 Bad Request`: Formato de petición inválido o campos requeridos faltantes
-- `404 Not Found`: Endpoint no encontrado
-- `405 Method Not Allowed`: Método HTTP no soportado para el endpoint
-- `500 Internal Server Error`: Error de procesamiento del servidor
+using System.ComponentModel.DataAnnotations;
 
-### **Formato de Respuesta de Error**:
-```json
+namespace Pagos_Davivienda_TNP.Validation;
+
+/// <summary>
+/// Valida que el monto sea un string numérico positivo sin signo ni separadores, p.ej. "10000".
+/// </summary>
+public sealed class AmountStringAttribute : ValidationAttribute
 {
-  "error": "Descripción del error",
-  "status": 400,
-  "timestamp": 1698765432000
+    protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
+    {
+        var s = value as string;
+        if (string.IsNullOrWhiteSpace(s)) return new ValidationResult("Monto requerido.");
+        foreach (var c in s)
+        {
+            if (c < '0' || c > '9') return new ValidationResult("Monto debe ser numérico positivo en formato string.");
+        }
+        if (s.TrimStart('0').Length == 0) return new ValidationResult("Monto debe ser mayor a cero.");
+        return ValidationResult.Success;
+    }
 }
-```
 
-### **Escenarios Comunes de Error**:
 
-#### Campos Requeridos Faltantes:
-```json
+
+namespace Pagos_Davivienda_TNP.Utils;
+
+/// <summary>Utilidades para ofuscación de datos sensibles.</summary>
+public static class CardMasker
 {
-  "error": "Campo requerido faltante o vacío: pMerchantID",
-  "status": 400,
-  "timestamp": 1698765432000
+    /// <summary>Ej.: 411111******1111</summary>
+    public static string MaskPan(string pan)
+    {
+        if (string.IsNullOrEmpty(pan) || pan.Length < 10) return "************";
+        var prefix = pan[..6];
+        var suffix = pan[^4..];
+        return $"{prefix}{new string('*', pan.Length - 10)}{suffix}";
+    }
 }
-```
 
-#### Formato JSON Inválido:
-```json
+
+using System;
+
+namespace Pagos_Davivienda_TNP.Utils;
+
+public static class TimeUtil
 {
-  "error": "Formato JSON inválido: Carácter inesperado en posición 15",
-  "status": 400, 
-  "timestamp": 1698765432000
+    public static long ToUnixMillis(DateTime utc) => new DateTimeOffset(utc).ToUnixTimeMilliseconds();
+    public static string IsoNowUtc() => DateTime.UtcNow.ToString("O"); // ISO 8601
 }
-```
 
----
 
-## 🔐 **Consideraciones de Seguridad**
 
-### **Uso de HTTPS**:
-- **Producción**: Siempre usar HTTPS en ambientes de producción
-- **Desarrollo**: HTTP aceptable para pruebas locales
-- **Certificados**: Asegurar validación apropiada de certificados SSL en producción
 
-### **Seguridad de Datos**:
-- **Cumplimiento PCI**: Asegurar cumplimiento PCI DSS al manejar datos de tarjetas
-- **Datos Sensibles**: Nunca registrar o almacenar información sensible de pagos
-- **Seguridad de Red**: Usar conexiones de red seguras y VPNs cuando sea aplicable
+using System.Threading;
+using System.Threading.Tasks;
+using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
 
-### **Mejores Prácticas**:
-- Implementar timeouts de petición (recomendado: 30 segundos)
-- Usar manejo apropiado de errores y lógica de reintentos
-- Validar todos los datos de entrada antes de enviar peticiones
-- Monitorear tiempos de respuesta y disponibilidad de la API
+namespace Pagos_Davivienda_TNP.Services.Interfaces;
 
----
+/// <summary>Contrato del servicio de autorización.</summary>
+public interface IPaymentAuthorizationService
+{
+    Task<ResponseAuthorizationManualDto> AuthorizeManualAsync(GetauthorizationManualDto request, CancellationToken ct = default);
+}
 
-## 📊 **Pruebas**
 
-### **Números de Tarjeta de Prueba**:
-Para propósitos de prueba, usar estos números de tarjeta de prueba:
-- **Visa**: 4111111111111111
-- **Mastercard**: 5555555555554444
-- **American Express**: 378282246310005
 
-### **Datos de Prueba**:
-- **CVV2**: Cualquier número de 3 dígitos (123, 456, 789)
-- **Expiración**: Cualquier fecha futura en formato MMAA (1225, 0126)
-- **Monto**: Cualquier número positivo (10000 = $100.00)
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+using Pagos_Davivienda_TNP.Utils;
 
-### **Pruebas de Verificación de Estado**:
-```bash
-# Probar si la API está disponible
-curl -f "http://localhost:8080/davivienda-tnp/api/v1/health" || echo "API está caída"
-```
+namespace Pagos_Davivienda_TNP.Services;
 
----
+/// <summary>
+/// Implementación demo. Sustituir por integración real.
+/// </summary>
+public class PaymentAuthorizationService : Interfaces.IPaymentAuthorizationService
+{
+    public Task<ResponseAuthorizationManualDto> AuthorizeManualAsync(GetauthorizationManualDto request, CancellationToken ct = default)
+    {
+        // TODO: Llamar a conector DaviviendaTNP aquí. Manejar timeouts/reintentos.
+        var txnId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant();
+        var auth = new ResponseAuthorizationManualDto
+        {
+            ResponseCode = "00",
+            AuthorizationCode = "123456",
+            TransactionId = txnId,
+            Message = "Transacción aprobada",
+            Timestamp = TimeUtil.IsoNowUtc()
+        };
+        return Task.FromResult(auth);
+    }
+}
 
-## 🌐 **Configuración de Ambiente**
 
-### **Ambiente de Desarrollo**:
-```
-URL Base: http://localhost:8080/davivienda-tnp/api/v1
-Protocolo: HTTP
-Certificado: No requerido
-```
 
-### **Ambiente de Producción**:
-```
-URL Base: https://[servidor-produccion]/davivienda-tnp/api/v1
-Protocolo: HTTPS
-Certificado: Certificado SSL válido requerido
-```
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Pagos_Davivienda_TNP.Utils;
 
----
+namespace Pagos_Davivienda_TNP.Filters;
 
-## 📞 **Soporte y Contacto**
+/// <summary>
+/// Convierte validaciones fallidas (400) al formato de error requerido.
+/// </summary>
+public sealed class ModelStateToErrorResponseFilter : IActionFilter
+{
+    public void OnActionExecuting(ActionExecutingContext context)
+    {
+        if (!context.ModelState.IsValid)
+        {
+            var firstError = context.ModelState.Values
+                .SelectMany(v => v.Errors)
+                .FirstOrDefault()?.ErrorMessage ?? "Solicitud inválida.";
 
-Para soporte de la API, asistencia de integración, o preguntas técnicas:
+            var payload = new
+            {
+                error = firstError,
+                status = 400,
+                timestamp = TimeUtil.ToUnixMillis(DateTime.UtcNow)
+            };
 
-- **Documentación Técnica**: Este documento
-- **Reporte de Problemas**: Contactar administrador del sistema
-- **Soporte de Integración**: Contactar equipo de desarrollo
+            context.Result = new BadRequestObjectResult(payload);
+        }
+    }
 
----
+    public void OnActionExecuted(ActionExecutedContext context) { }
+}
 
-## 📝 **Registro de Cambios**
 
-### **Versión 1.0**
-- Lanzamiento inicial de la API
-- Endpoint de verificación de estado
-- Endpoint de autorización manual
-- Manejo básico de errores
-- Soporte HTTP y HTTPS
 
----
+using System.Net;
+using System.Text.Json;
+using Pagos_Davivienda_TNP.Utils;
 
-**Última Actualización**: Octubre 2025  
-**Versión de API**: 1.0  
-**Versión del Documento**: 1.0
+namespace Pagos_Davivienda_TNP.Middleware;
 
-Y esto es lo que tengo hasta el momento:
+/// <summary>
+/// Manejo global de excepciones → formato de error estándar.
+/// </summary>
+public sealed class ExceptionHandlingMiddleware
+{
+    private readonly RequestDelegate _next;
+
+    public ExceptionHandlingMiddleware(RequestDelegate next) => _next = next;
+
+    public async Task Invoke(HttpContext context)
+    {
+        try
+        {
+            await _next(context);
+        }
+        catch (OperationCanceledException)
+        {
+            // Timeout/cancelaciones → 504
+            await WriteError(context, HttpStatusCode.GatewayTimeout, "La operación fue cancelada por timeout.");
+        }
+        catch (Exception ex)
+        {
+            // Nunca exponer detalles sensibles en producción
+            await WriteError(context, HttpStatusCode.InternalServerError, "Error interno del servidor.");
+            // TODO: Log interno con detalles (sin PAN/CVV2).
+        }
+    }
+
+    private static Task WriteError(HttpContext ctx, HttpStatusCode code, string message)
+    {
+        ctx.Response.StatusCode = (int)code;
+        ctx.Response.ContentType = "application/json";
+
+        var payload = new
+        {
+            error = message,
+            status = (int)code,
+            timestamp = TimeUtil.ToUnixMillis(DateTime.UtcNow)
+        };
+
+        return ctx.Response.WriteAsync(JsonSerializer.Serialize(payload));
+    }
+}
+
+
 
 
 using Microsoft.AspNetCore.Mvc;
 using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+using Pagos_Davivienda_TNP.Services.Interfaces;
 
 namespace Pagos_Davivienda_TNP.Controllers;
 
 /// <summary>
-/// 
+/// API de Pagos DaviviendaTNP (v1).
+/// Base URL: /davivienda-tnp/api/v1
 /// </summary>
-[Route("davivienda-tnp/api/v1")]
 [ApiController]
+[Route("davivienda-tnp/api/v1")]
+[Produces("application/json")]
 public class PagosDaviviendaTnpController : ControllerBase
 {
-    /// <summary>
-    /// Verificar si el servicio de la API está funcionando y saludable.
-    /// </summary>
-    /// <returns></returns>
+    private readonly IPaymentAuthorizationService _paymentService;
+
+    public PagosDaviviendaTnpController(IPaymentAuthorizationService paymentService)
+    {
+        _paymentService = paymentService;
+    }
+
+    /// <summary>Verifica salud del servicio.</summary>
+    /// <returns>Estado UP y nombre de servicio.</returns>
     [HttpGet("health")]
-    public async Task<IActionResult> Health()
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public IActionResult Health()
     {
         var response = new
         {
             status = "UP",
             service = "DaviviendaTNP Payment API"
         };
-
         return Ok(response);
     }
 
-    /// <summary>
-    /// Procesar transacciones de autorización de pagos de forma manual.
-    /// </summary>
-    /// <param name="requestAuthorizationManualDto"></param>
-    /// <returns></returns>
+    /// <summary>Procesa una autorización manual.</summary>
+    /// <param name="request">Payload de autorización manual.</param>
+    /// <returns>Envoltura GetAuthorizationManualResponse/GetAuthorizationManualResult.</returns>
     [HttpPost("authorization/manual")]
-    public async Task<IActionResult> GetAuthorizationManual([FromBody] RequestGetauthorizationManual requestAuthorizationManualDto )
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(GetAuthorizationManualResultEnvelope), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetAuthorizationManual([FromBody] RequestGetauthorizationManual request, CancellationToken ct)
     {
+        // Validación de modelo: el filtro global convertirá errores a formato {error,status,timestamp}.
+        var dto = request.GetAuthorizationManual;
 
-        var response = new ResponseAuthorizationManualDto
+        // Llamada al dominio/servicio (simulado).
+        var result = await _paymentService.AuthorizeManualAsync(dto, ct);
+
+        // Envolver según contrato del documento.
+        var envelope = new GetAuthorizationManualResultEnvelope
         {
-            ResponseCode = "00",
-            AuthorizationCode = "123456",
-            TransactionId = "TXN789012",
-            Message = "Transacción aprobada",
-            Timestamp = DateTime.UtcNow
+            Response = new GetAuthorizationManualResponseContainer
+            {
+                Result = result
+            }
         };
 
-        return Ok(response);
-
+        return Ok(envelope);
     }
 }
 
 
-using Newtonsoft.Json;
 
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json.Serialization;
+using Pagos_Davivienda_TNP.Filters;
+using Pagos_Davivienda_TNP.Middleware;
+using Pagos_Davivienda_TNP.Services;
+using Pagos_Davivienda_TNP.Services.Interfaces;
 
-/// <summary>
-/// Modelo raíz para la solicitud de autorización manual
-/// </summary>
-public class RequestGetauthorizationManual
+var builder = WebApplication.CreateBuilder(args);
+
+// Controllers + Newtonsoft.Json (para respetar tus atributos)
+builder.Services
+    .AddControllers(options =>
+    {
+        // Usaremos nuestro filtro para uniformar errores 400
+        options.Filters.Add<ModelStateToErrorResponseFilter>();
+    })
+    .AddNewtonsoftJson(o =>
+    {
+        // Mantener nombres exactos según JsonProperty
+        o.SerializerSettings.ContractResolver = new DefaultContractResolver
+        {
+            NamingStrategy = new DefaultNamingStrategy()
+        };
+        o.SerializerSettings.NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore;
+    });
+
+// Desactivar el filtro automático de ModelState para usar el nuestro
+builder.Services.Configure<ApiBehaviorOptions>(o =>
 {
-    public GetauthorizationManualDto GetAuthorizationManual { get; set; } = new();
-}
+    o.SuppressModelStateInvalidFilter = true;
+});
 
-/// <summary>
-/// Modelo de datos para la solicitud de autorización manual
-/// </summary>
-public class GetauthorizationManualDto
+// DI servicios
+builder.Services.AddScoped<IPaymentAuthorizationService, PaymentAuthorizationService>();
+
+// Swagger
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
 {
-    /// <summary>
-    /// Identificador del comercio (requerido)
-    /// </summary>
-    [JsonRequired]
-    [JsonProperty("pMerchantID")]
-    public string PMerchantID { get; set; } = string.Empty;
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    {
+        Title = "API de Pagos DaviviendaTNP",
+        Version = "v1",
+        Description = "API REST ligera para procesar autorizaciones de pago."
+    });
+});
 
-    /// <summary>
-    /// Identificador del terminal (requerido)
-    /// </summary>
-    [JsonRequired]
-    [JsonProperty("pTerminalID")]
-    public string PTerminalID { get; set; } = string.Empty;
+var app = builder.Build();
 
-    /// <summary>
-    /// Número de tarjeta de crédito/débito (requerido)
-    /// </summary>
-    [JsonRequired]
-    [JsonProperty("pPrimaryAccountNumber")]
-    public string PPrimaryAccountNumber { get; set; } = string.Empty;
+// Middleware de excepciones → {error,status,timestamp}
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
-    /// <summary>
-    /// Fecha de expiración de la tarjeta en formato MMAA (requerido)
-    /// </summary>
-    [JsonRequired]
-    [JsonProperty("pDateExpiration")]
-    public string PDateExpiration { get; set; } = string.Empty;
+app.UseRouting();
 
-    /// <summary>
-    /// Código de verificación de la tarjeta (requerido)
-    /// </summary>
-    [JsonRequired]
-    [JsonProperty("pCVV2")]
-    public string PCVV2 { get; set; } = string.Empty;
+// HTTPS recomendado en prod (agrega UseHttpsRedirection si corresponde)
+app.UseAuthorization();
 
-    /// <summary>
-    /// Monto de la transacción (requerido)
-    /// </summary>
-    [JsonRequired]
-    [JsonProperty("pAmount")]
-    public string PAmount { get; set; } = string.Empty;
+app.MapControllers();
 
-    /// <summary>
-    /// Número único de traza de la transacción (requerido)
-    /// </summary>
-    [JsonRequired]
-    [JsonProperty("pSystemsTraceAuditNumber")]
-    public string PSystemsTraceAuditNumber { get; set; } = string.Empty;
-}
-
-
-using Newtonsoft.Json;
-
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-
-/// <summary>
-/// Modelo de datos para la respuesta de autorización manual
-/// </summary>
-public class ResponseAuthorizationManualDto
+// Swagger en DEV/UAT
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    /// <summary>
-    /// Código de respuesta de la transacción (00 = aprobada)
-    /// </summary>
-    [JsonProperty("responseCode")]
-    public string ResponseCode { get; set; } = string.Empty;
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "DaviviendaTNP v1");
+});
 
-    /// <summary>
-    /// Código de autorización si fue aprobada
-    /// </summary>
-    [JsonProperty("authorizationCode")]
-    public string AuthorizationCode { get; set; } = string.Empty;
+app.Run();
 
-    /// <summary>
-    /// Identificador único de la transacción
-    /// </summary>
-    [JsonProperty("transactionId")]
-    public string TransactionId { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Mensaje de respuesta legible
-    /// </summary>
-    [JsonProperty("message")]
-    public string Message { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Marca de tiempo del procesamiento de la transacción
-    /// </summary>
-    [JsonProperty("timestamp")]
-    public DateTime Timestamp { get; set; } 
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
