@@ -1,3 +1,86 @@
+Así va quedando el codigo:
+
+using System.Diagnostics;
+using Microsoft.AspNetCore.Mvc;
+using Pagos_Davivienda_TNP.Models.Dtos;
+using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+using Pagos_Davivienda_TNP.Services.Interfaces;
+
+namespace Pagos_Davivienda_TNP.Controllers;
+
+/// <summary>
+/// API de Pagos DaviviendaTNP (v1).
+/// Base URL: /davivienda-tnp/api/v1
+/// </summary>
+[ApiController]
+[Route("davivienda-tnp/api/v1")]
+[Produces("application/json")]
+public class PagosDaviviendaTnpController(IPaymentAuthorizationService paymentService) : ControllerBase
+{
+    private readonly IPaymentAuthorizationService _paymentService = paymentService;
+
+    /// <summary>Verifica salud del servicio.</summary>
+    [HttpGet("health")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public IActionResult Health()
+        => Ok(new { status = "UP", service = "DaviviendaTNP Payment API" });
+
+    /// <summary>Procesa una autorización manual.</summary>
+    /// <param name="request">Request con header + body.</param>
+    /// <param name="ct">Token de cancelación.</param>
+    [HttpPost("authorization/manual")]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(ResponseModel<GetAuthorizationManualResultEnvelope>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetAuthorizationManual([FromBody] AuthorizationRequest request, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+
+        // 1) Extraer el payload del cuerpo
+        var input = request.Body.GetAuthorizationManual;
+
+        // 2) Invocar servicio de dominio (que a su vez llama al tercero)
+        var result = await _paymentService.AuthorizeManualAsync(new GetauthorizationManualDto
+        {
+            PMerchantID = input.PMerchantID,
+            PTerminalID = input.PTerminalID,
+            PPrimaryAccountNumber = input.PPrimaryAccountNumber,
+            PDateExpiration = input.PDateExpiration,
+            PCVV2 = input.PCVV2,
+            PAmount = input.PAmount,
+            PSystemsTraceAuditNumber = input.PSystemsTraceAuditNumber
+        }, ct);
+
+        // 3) Envolver en el contrato de datos solicitado
+        var envelope = new GetAuthorizationManualResultEnvelope
+        {
+            GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer { GetAuthorizationManualResult = result }
+        };
+
+        sw.Stop();
+
+        // 4) Construir RESPUESTA FINAL: header + data
+        var apiResponse = new ResponseModel<GetAuthorizationManualResultEnvelope>
+        {
+            Header = new ResponseHeader
+            {
+                ResponseId = Guid.NewGuid().ToString("N"),
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                ProcessingTime = $"{sw.ElapsedMilliseconds}ms",
+                StatusCode = result.ResponseCode, // "00" si aprobada
+                Message = result.Message,
+                RequestHeader = request.Header
+            },
+            Data = envelope
+        };
+
+        return Ok(apiResponse);
+    }
+}
+
+
+
 using System.Net;
 using System.Text;
 using Newtonsoft.Json;
@@ -58,19 +141,79 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
         catch (TaskCanceledException)
         {
             // Timeout de HttpClient o cancelación por ct
-            throw new HttpRequestException("Timeout al invocar el servicio TNP.", null, HttpStatusCode.GatewayTimeout);
+            GetAuthorizationManualResultEnvelope resp = new()
+            {
+                GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
+                {
+                    GetAuthorizationManualResult = new ResponseAuthorizationManualDto
+                    {
+                        ResponseCode = ((int)HttpStatusCode.GatewayTimeout).ToString(),
+                        AuthorizationCode = string.Empty,
+                        TransactionId = string.Empty,
+                        Message = "Timeout al invocar el servicio TNP.",
+                        Timestamp = DateTime.UtcNow.ToString("o")
+                    }
+                }
+            };
+            return resp.GetAuthorizationManualResponse.GetAuthorizationManualResult;
         }
         catch (OperationCanceledException)
         {
             // Cancelación “activa” (por ejemplo, desde el caller)
-            throw new HttpRequestException("La operación fue cancelada.", null, HttpStatusCode.GatewayTimeout);
+            GetAuthorizationManualResultEnvelope resp = new()
+            {
+                GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
+                {
+                    GetAuthorizationManualResult = new ResponseAuthorizationManualDto
+                    {
+                        ResponseCode = ((int)HttpStatusCode.GatewayTimeout).ToString(),
+                        AuthorizationCode = string.Empty,
+                        TransactionId = string.Empty,
+                        Message = "La operación fue cancelada.",
+                        Timestamp = DateTime.UtcNow.ToString("o")
+                    }
+                }
+            };
+            return resp.GetAuthorizationManualResponse.GetAuthorizationManualResult;
         }
         // HttpRequestException: la re-lanza el middleware con el status embebido
-        catch (HttpRequestException) { throw; }
-        catch (Exception ex)
+        catch (HttpRequestException)
+        {
+            GetAuthorizationManualResultEnvelope resp = new()
+            {
+                GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
+                {
+                    GetAuthorizationManualResult = new ResponseAuthorizationManualDto
+                    {
+                        ResponseCode = ((int)HttpStatusCode.BadGateway).ToString(),
+                        AuthorizationCode = string.Empty,
+                        TransactionId = string.Empty,
+                        Message = "Error al invocar el servicio TNP.",
+                        Timestamp = DateTime.UtcNow.ToString("o")
+                    }
+                }
+            };
+            return resp.GetAuthorizationManualResponse.GetAuthorizationManualResult;
+
+        }
+        catch (Exception)
         {
             // Cualquier otra falla: 502 Bad Gateway
-            throw new HttpRequestException($"Error inesperado al invocar TNP: {ex.Message}", ex, HttpStatusCode.BadGateway);
+            GetAuthorizationManualResultEnvelope resp = new()
+            {
+                GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
+                {
+                    GetAuthorizationManualResult = new ResponseAuthorizationManualDto
+                    {
+                        ResponseCode = ((int)HttpStatusCode.BadGateway).ToString(),
+                        AuthorizationCode = string.Empty,
+                        TransactionId = string.Empty,
+                        Message = "Error inesperado al invocar el servicio TNP.",
+                        Timestamp = DateTime.UtcNow.ToString("o")
+                    }
+                }
+            };
+            return resp.GetAuthorizationManualResponse.GetAuthorizationManualResult;
         }
     }
 
@@ -90,3 +233,6 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
         }
     }
 }
+
+
+Necesito que cuando llegue al controlado la respuesta corresponda, si es OK es OK, y si es otra pues se devuelva con ese formato.
