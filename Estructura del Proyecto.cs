@@ -1,86 +1,42 @@
-Así va quedando el codigo:
+// Utils/ErrorCodeMapper.cs
+using System.Net;
 
-using System.Diagnostics;
-using Microsoft.AspNetCore.Mvc;
-using Pagos_Davivienda_TNP.Models.Dtos;
-using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-using Pagos_Davivienda_TNP.Services.Interfaces;
-
-namespace Pagos_Davivienda_TNP.Controllers;
+namespace Pagos_Davivienda_TNP.Utils;
 
 /// <summary>
-/// API de Pagos DaviviendaTNP (v1).
-/// Base URL: /davivienda-tnp/api/v1
+/// Mapea códigos HTTP ↔ códigos de negocio ISO-like.
+/// Ajusta si tu matriz oficial difiere.
 /// </summary>
-[ApiController]
-[Route("davivienda-tnp/api/v1")]
-[Produces("application/json")]
-public class PagosDaviviendaTnpController(IPaymentAuthorizationService paymentService) : ControllerBase
+public static class ErrorCodeMapper
 {
-    private readonly IPaymentAuthorizationService _paymentService = paymentService;
-
-    /// <summary>Verifica salud del servicio.</summary>
-    [HttpGet("health")]
-    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
-    public IActionResult Health()
-        => Ok(new { status = "UP", service = "DaviviendaTNP Payment API" });
-
-    /// <summary>Procesa una autorización manual.</summary>
-    /// <param name="request">Request con header + body.</param>
-    /// <param name="ct">Token de cancelación.</param>
-    [HttpPost("authorization/manual")]
-    [Consumes("application/json")]
-    [ProducesResponseType(typeof(ResponseModel<GetAuthorizationManualResultEnvelope>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> GetAuthorizationManual([FromBody] AuthorizationRequest request, CancellationToken ct)
+    // HTTP → Código negocio
+    public static string FromHttpStatus(HttpStatusCode status) => status switch
     {
-        var sw = Stopwatch.StartNew();
+        HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout => "68", // Timeout
+        HttpStatusCode.BadRequest                                     => "12", // Solicitud inválida
+        HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden       => "05", // No autorizado
+        HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable
+        or HttpStatusCode.InternalServerError                         => "96", // Falla del sistema proveedor
+        _                                                             => "96"
+    };
 
-        // 1) Extraer el payload del cuerpo
-        var input = request.Body.GetAuthorizationManual;
-
-        // 2) Invocar servicio de dominio (que a su vez llama al tercero)
-        var result = await _paymentService.AuthorizeManualAsync(new GetauthorizationManualDto
-        {
-            PMerchantID = input.PMerchantID,
-            PTerminalID = input.PTerminalID,
-            PPrimaryAccountNumber = input.PPrimaryAccountNumber,
-            PDateExpiration = input.PDateExpiration,
-            PCVV2 = input.PCVV2,
-            PAmount = input.PAmount,
-            PSystemsTraceAuditNumber = input.PSystemsTraceAuditNumber
-        }, ct);
-
-        // 3) Envolver en el contrato de datos solicitado
-        var envelope = new GetAuthorizationManualResultEnvelope
-        {
-            GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer { GetAuthorizationManualResult = result }
-        };
-
-        sw.Stop();
-
-        // 4) Construir RESPUESTA FINAL: header + data
-        var apiResponse = new ResponseModel<GetAuthorizationManualResultEnvelope>
-        {
-            Header = new ResponseHeader
-            {
-                ResponseId = Guid.NewGuid().ToString("N"),
-                Timestamp = DateTime.UtcNow.ToString("o"),
-                ProcessingTime = $"{sw.ElapsedMilliseconds}ms",
-                StatusCode = result.ResponseCode, // "00" si aprobada
-                Message = result.Message,
-                RequestHeader = request.Header
-            },
-            Data = envelope
-        };
-
-        return Ok(apiResponse);
-    }
+    // Código negocio → HTTP
+    public static HttpStatusCode ToHttpStatus(string responseCode) => responseCode switch
+    {
+        "00" => HttpStatusCode.OK,
+        "68" => HttpStatusCode.GatewayTimeout,
+        "12" => HttpStatusCode.BadRequest,
+        "05" => HttpStatusCode.Unauthorized,   // o 403 si tu política lo exige
+        "91" => HttpStatusCode.ServiceUnavailable, // opcional si lo usas
+        _    => HttpStatusCode.BadGateway
+    };
 }
 
 
 
+
+
+// Services/PaymentAuthorizationService.cs (solo bloques catch ajustados)
 using System.Net;
 using System.Text;
 using Newtonsoft.Json;
@@ -89,7 +45,6 @@ using Pagos_Davivienda_TNP.Utils;
 
 namespace Pagos_Davivienda_TNP.Services;
 
-/// <summary>Implementación que consume el API externo TNP.</summary>
 public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
     : Interfaces.IPaymentAuthorizationService
 {
@@ -110,129 +65,158 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
             using var resp = await client.PostAsync(url, content, ct);
             var status = resp.StatusCode;
 
-            // Leer siempre el cuerpo (si existe) para logging/diagnóstico
             var body = resp.Content is null ? string.Empty : await resp.Content.ReadAsStringAsync(ct);
 
-            // 1) No-2xx → propagar con StatusCode real
             if (!resp.IsSuccessStatusCode)
             {
-                // Limita el tamaño del body para no saturar logs/excepción
                 var snippet = body is { Length: > 4096 } ? body[..4096] + "…(truncado)" : body;
-                throw new HttpRequestException($"TNP respondió {(int)status} {status}: {snippet}", null, status);
+                // Mapea el HTTP del tercero a código negocio y regresa DTO
+                return new ResponseAuthorizationManualDto
+                {
+                    ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
+                    AuthorizationCode = string.Empty,
+                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                    Message = $"TNP respondió {(int)status} {status}: {snippet}",
+                    Timestamp = TimeUtil.IsoNowUtc()
+                };
             }
 
-            // 2) 200/204 pero sin cuerpo → tratar como error de pasarela
             if (string.IsNullOrWhiteSpace(body))
-                throw new HttpRequestException("TNP devolvió una respuesta vacía.", null, HttpStatusCode.BadGateway);
+            {
+                return new ResponseAuthorizationManualDto
+                {
+                    ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
+                    AuthorizationCode = string.Empty,
+                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                    Message = "TNP devolvió una respuesta vacía.",
+                    Timestamp = TimeUtil.IsoNowUtc()
+                };
+            }
 
-            // 3) Intento a) Envelope: { "GetAuthorizationManualResponse": { "GetAuthorizationManualResult": { ... } } }
             var env = SafeDeserialize<GetAuthorizationManualResultEnvelope>(body);
             if (env?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is not null)
                 return env.GetAuthorizationManualResponse.GetAuthorizationManualResult;
 
-            // 4) Intento b) DTO directo: { "responseCode": "...", ... }
             var dto = SafeDeserialize<ResponseAuthorizationManualDto>(body);
             if (dto is not null)
                 return dto;
 
-            // 5) Formato inesperado aun con 2xx → error controlado
-            throw new HttpRequestException("No se pudo interpretar la respuesta del TNP.", null, HttpStatusCode.BadGateway);
+            return new ResponseAuthorizationManualDto
+            {
+                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
+                AuthorizationCode = string.Empty,
+                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                Message = "No se pudo interpretar la respuesta del TNP.",
+                Timestamp = TimeUtil.IsoNowUtc()
+            };
         }
         catch (TaskCanceledException)
         {
-            // Timeout de HttpClient o cancelación por ct
-            GetAuthorizationManualResultEnvelope resp = new()
+            return new ResponseAuthorizationManualDto
             {
-                GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
-                {
-                    GetAuthorizationManualResult = new ResponseAuthorizationManualDto
-                    {
-                        ResponseCode = ((int)HttpStatusCode.GatewayTimeout).ToString(),
-                        AuthorizationCode = string.Empty,
-                        TransactionId = string.Empty,
-                        Message = "Timeout al invocar el servicio TNP.",
-                        Timestamp = DateTime.UtcNow.ToString("o")
-                    }
-                }
+                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout),
+                AuthorizationCode = string.Empty,
+                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                Message = "Timeout al invocar el servicio TNP.",
+                Timestamp = TimeUtil.IsoNowUtc()
             };
-            return resp.GetAuthorizationManualResponse.GetAuthorizationManualResult;
         }
         catch (OperationCanceledException)
         {
-            // Cancelación “activa” (por ejemplo, desde el caller)
-            GetAuthorizationManualResultEnvelope resp = new()
+            return new ResponseAuthorizationManualDto
             {
-                GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
-                {
-                    GetAuthorizationManualResult = new ResponseAuthorizationManualDto
-                    {
-                        ResponseCode = ((int)HttpStatusCode.GatewayTimeout).ToString(),
-                        AuthorizationCode = string.Empty,
-                        TransactionId = string.Empty,
-                        Message = "La operación fue cancelada.",
-                        Timestamp = DateTime.UtcNow.ToString("o")
-                    }
-                }
+                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout),
+                AuthorizationCode = string.Empty,
+                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                Message = "La operación fue cancelada.",
+                Timestamp = TimeUtil.IsoNowUtc()
             };
-            return resp.GetAuthorizationManualResponse.GetAuthorizationManualResult;
         }
-        // HttpRequestException: la re-lanza el middleware con el status embebido
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            GetAuthorizationManualResultEnvelope resp = new()
+            var status = ex.StatusCode ?? HttpStatusCode.BadGateway;
+            return new ResponseAuthorizationManualDto
             {
-                GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
-                {
-                    GetAuthorizationManualResult = new ResponseAuthorizationManualDto
-                    {
-                        ResponseCode = ((int)HttpStatusCode.BadGateway).ToString(),
-                        AuthorizationCode = string.Empty,
-                        TransactionId = string.Empty,
-                        Message = "Error al invocar el servicio TNP.",
-                        Timestamp = DateTime.UtcNow.ToString("o")
-                    }
-                }
+                ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
+                AuthorizationCode = string.Empty,
+                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                Message = $"Error al invocar el servicio TNP: {ex.Message}",
+                Timestamp = TimeUtil.IsoNowUtc()
             };
-            return resp.GetAuthorizationManualResponse.GetAuthorizationManualResult;
-
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Cualquier otra falla: 502 Bad Gateway
-            GetAuthorizationManualResultEnvelope resp = new()
+            return new ResponseAuthorizationManualDto
             {
-                GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
-                {
-                    GetAuthorizationManualResult = new ResponseAuthorizationManualDto
-                    {
-                        ResponseCode = ((int)HttpStatusCode.BadGateway).ToString(),
-                        AuthorizationCode = string.Empty,
-                        TransactionId = string.Empty,
-                        Message = "Error inesperado al invocar el servicio TNP.",
-                        Timestamp = DateTime.UtcNow.ToString("o")
-                    }
-                }
+                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
+                AuthorizationCode = string.Empty,
+                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                Message = $"Error inesperado al invocar TNP: {ex.Message}",
+                Timestamp = TimeUtil.IsoNowUtc()
             };
-            return resp.GetAuthorizationManualResponse.GetAuthorizationManualResult;
         }
     }
 
-    /// <summary>
-    /// Deserializa sin lanzar excepciones; devuelve null si falla.
-    /// Útil para intentar múltiples formatos de respuesta.
-    /// </summary>
     private static T? SafeDeserialize<T>(string json)
     {
-        try
-        {
-            return JsonConvert.DeserializeObject<T>(json);
-        }
-        catch
-        {
-            return default;
-        }
+        try { return JsonConvert.DeserializeObject<T>(json); }
+        catch { return default; }
     }
 }
 
 
-Necesito que cuando llegue al controlado la respuesta corresponda, si es OK es OK, y si es otra pues se devuelva con ese formato.
+
+
+
+// Controllers/PagosDaviviendaTnpController.cs (método actualizado)
+[HttpPost("authorization/manual")]
+[Consumes("application/json")]
+[ProducesResponseType(typeof(ResponseModel<GetAuthorizationManualResultEnvelope>), StatusCodes.Status200OK)]
+[ProducesResponseType(StatusCodes.Status400BadRequest)]
+[ProducesResponseType(StatusCodes.Status500InternalServerError)]
+public async Task<IActionResult> GetAuthorizationManual([FromBody] AuthorizationRequest request, CancellationToken ct)
+{
+    var sw = Stopwatch.StartNew();
+
+    var input = request.Body.GetAuthorizationManual;
+
+    var result = await _paymentService.AuthorizeManualAsync(new GetauthorizationManualDto
+    {
+        PMerchantID = input.PMerchantID,
+        PTerminalID = input.PTerminalID,
+        PPrimaryAccountNumber = input.PPrimaryAccountNumber,
+        PDateExpiration = input.PDateExpiration,
+        PCVV2 = input.PCVV2,
+        PAmount = input.PAmount,
+        PSystemsTraceAuditNumber = input.PSystemsTraceAuditNumber
+    }, ct);
+
+    var envelope = new GetAuthorizationManualResultEnvelope
+    {
+        GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
+        {
+            GetAuthorizationManualResult = result
+        }
+    };
+
+    sw.Stop();
+
+    var apiResponse = new ResponseModel<GetAuthorizationManualResultEnvelope>
+    {
+        Header = new ResponseHeader
+        {
+            ResponseId     = Guid.NewGuid().ToString("N"),
+            Timestamp      = DateTime.UtcNow.ToString("o"),
+            ProcessingTime = $"{sw.ElapsedMilliseconds}ms",
+            StatusCode     = result.ResponseCode, // negocio ("00","68","12",…)
+            Message        = result.Message,
+            RequestHeader  = request.Header
+        },
+        Data = envelope
+    };
+
+    // 200 si "00"; si no, mapear a HTTP error preservando el body estándar
+    var http = ErrorCodeMapper.ToHttpStatus(result.ResponseCode);
+    return StatusCode((int)http, apiResponse);
+}
+
