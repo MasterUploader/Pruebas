@@ -1,20 +1,63 @@
-Tengo esta petición:
+// Program.cs (o en tu módulo de IoC)
+using System.Net;
+using System.Net.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Pagos_Davivienda_TNP.Services.Interfaces;
+// using RestUtilities.Logging; // si tu handler está allí
 
-curl -k -X POST "https://localhost:8443/davivienda-tnp/api/v1/authorization/manual" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "GetAuthorizationManual": {
-      "pMerchantID": "4001021",
-      "pTerminalID": "P0055468",
-      "pPrimaryAccountNumber": "5413330057004039",
-      "pDateExpiration": "2512",
-      "pCVV2": "000",
-      "pAmount": "10000",
-      "pSystemsTraceAuditNumber": "000002"
+builder.Services.AddScoped<IPaymentAuthorizationService, PaymentAuthorizationService>();
+
+builder.Services.AddHttpClient("TNP", (sp, http) =>
+{
+    // Si GlobalConnection.Current.Host ya trae protocolo/base, puedes omitir BaseAddress
+    // http.BaseAddress = new Uri("https://localhost:8443/davivienda-tnp/api/v1/");
+
+    http.Timeout = TimeSpan.FromSeconds(30);
+    http.DefaultRequestHeaders.ExpectContinue = false;
+    // Evita credenciales implícitas
+    http.DefaultRequestHeaders.Authorization = null;
+    http.DefaultRequestHeaders.ConnectionClose = false;
+})
+// Handlers de logging (mantén el orden que use tu librería)
+.AddHttpMessageHandler(sp =>
+{
+    // Ejemplo si tienes un handler propio de logging
+    // return sp.GetRequiredService<LoggingHttpHandler>();
+    return new NoopHandler(); // quita esto si ya inyectas tu handler real
+})
+// Configurar el PrimaryHandler (DEV: aceptar certificado; PROD: validación estricta)
+.ConfigurePrimaryHttpMessageHandler(sp =>
+{
+    var env = sp.GetRequiredService<IHostEnvironment>();
+    var sockets = new SocketsHttpHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+        UseCookies = false,
+        AllowAutoRedirect = false,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        Expect100ContinueTimeout = TimeSpan.FromMilliseconds(1),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        // No usar credenciales por defecto
+        PreAuthenticate = false,
+        Credentials = null
+    };
+
+    if (env.IsDevelopment())
+    {
+        // Equivalente a curl -k (solo DEV)
+        sockets.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+        {
+            RemoteCertificateValidationCallback = (_, _, _, _) => true
+        };
     }
-  }'
 
-La hago con este código:
+    return sockets;
+});
+
+
+
+
 
 using System.Net;
 using System.Text;
@@ -36,13 +79,6 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
 
         try
         {
-
-            HttpClientHandler handler = new()
-            {
-                ServerCertificateCustomValidationCallback = (sender, certificate, chain, SslPolicyErrors) => true
-
-            };
-
             using var client = _httpClientFactory.CreateClient("TNP");
 
             var json = JsonConvert.SerializeObject(request);
@@ -50,13 +86,11 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
 
             using var resp = await client.PostAsync(url, content, ct);
             var status = resp.StatusCode;
-
             var body = resp.Content is null ? string.Empty : await resp.Content.ReadAsStringAsync(ct);
 
             if (!resp.IsSuccessStatusCode)
             {
                 var snippet = body is { Length: > 4096 } ? body[..4096] + "…(truncado)" : body;
-                // Mapea el HTTP del tercero a código negocio y regresa DTO
                 return new ResponseAuthorizationManualDto
                 {
                     ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
@@ -149,5 +183,3 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
         catch { return default; }
     }
 }
-
-Pero la conexión es directa no necesito usuario y contraseña, osea que no ocupo en usuario TNP, como lo hago sin afectar los logs de la librerias RestUtilities.Connections y RestUtilities.Logging
