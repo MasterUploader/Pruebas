@@ -1,185 +1,149 @@
-// Program.cs (o en tu módulo de IoC)
-using System.Net;
-using System.Net.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+Así es mi program.cs
+
+using Connections.Abstractions;
+using Connections.Helpers;
+using Connections.Providers.Database;
+using Connections.Services;
+using Logging.Abstractions;
+using Logging.Filters;
+using Logging.Handlers;
+using Logging.Middleware;
+using Logging.Services;
+using Microsoft.AspNetCore.Mvc;
+using Pagos_Davivienda_TNP.Filters;
+using Pagos_Davivienda_TNP.Middleware;
+using Pagos_Davivienda_TNP.Services;
 using Pagos_Davivienda_TNP.Services.Interfaces;
-// using RestUtilities.Logging; // si tu handler está allí
-
-builder.Services.AddScoped<IPaymentAuthorizationService, PaymentAuthorizationService>();
-
-builder.Services.AddHttpClient("TNP", (sp, http) =>
-{
-    // Si GlobalConnection.Current.Host ya trae protocolo/base, puedes omitir BaseAddress
-    // http.BaseAddress = new Uri("https://localhost:8443/davivienda-tnp/api/v1/");
-
-    http.Timeout = TimeSpan.FromSeconds(30);
-    http.DefaultRequestHeaders.ExpectContinue = false;
-    // Evita credenciales implícitas
-    http.DefaultRequestHeaders.Authorization = null;
-    http.DefaultRequestHeaders.ConnectionClose = false;
-})
-// Handlers de logging (mantén el orden que use tu librería)
-.AddHttpMessageHandler(sp =>
-{
-    // Ejemplo si tienes un handler propio de logging
-    // return sp.GetRequiredService<LoggingHttpHandler>();
-    return new NoopHandler(); // quita esto si ya inyectas tu handler real
-})
-// Configurar el PrimaryHandler (DEV: aceptar certificado; PROD: validación estricta)
-.ConfigurePrimaryHttpMessageHandler(sp =>
-{
-    var env = sp.GetRequiredService<IHostEnvironment>();
-    var sockets = new SocketsHttpHandler
-    {
-        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-        UseCookies = false,
-        AllowAutoRedirect = false,
-        ConnectTimeout = TimeSpan.FromSeconds(10),
-        Expect100ContinueTimeout = TimeSpan.FromMilliseconds(1),
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-        // No usar credenciales por defecto
-        PreAuthenticate = false,
-        Credentials = null
-    };
-
-    if (env.IsDevelopment())
-    {
-        // Equivalente a curl -k (solo DEV)
-        sockets.SslOptions = new System.Net.Security.SslClientAuthenticationOptions
-        {
-            RemoteCertificateValidationCallback = (_, _, _, _) => true
-        };
-    }
-
-    return sockets;
-});
-
-
-
-
-
-using System.Net;
-using System.Text;
-using Newtonsoft.Json;
-using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
 using Pagos_Davivienda_TNP.Utils;
 
-namespace Pagos_Davivienda_TNP.Services;
+var builder = WebApplication.CreateBuilder(args);
 
-public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
-    : Interfaces.IPaymentAuthorizationService
+// ===============================  Conexiones  ===============================
+// Publica la configuración de conexiones y deja disponible un helper global
+// usado por componentes existentes (compatibilidad con código legacy).
+ConnectionSettings connectionSettings = new(builder.Configuration);
+ConnectionManagerHelper.ConnectionConfig = connectionSettings;
+
+// Registrar ConnectionSettings para lectura dinámica en tiempo de ejecución
+builder.Services.AddSingleton<ConnectionSettings>();
+
+// ===============================  Infra Logging  ===============================
+// Accessor del HttpContext para:
+//  - Propagar correlación (ExecutionId, etc.)
+//  - Permitir que SQL/HTTP se encolen en la **misma cola “timed”** y se ordenen por INICIO real.
+builder.Services.AddHttpContextAccessor();
+
+// Filtro que anota Controller/Action y otros metadatos MVC en los bloques fijos del log.
+builder.Services.AddScoped<LoggingActionFilter>();
+
+// Servicio central de logging (singleton: configuración y E/S de archivos compartidos).
+builder.Services.AddSingleton<ILoggingService, LoggingService>();
+
+// Opciones de logging (rutas, switches .txt/.csv) mapeadas desde appsettings.
+builder.Services.Configure<Logging.Configuration.LoggingOptions>(
+    builder.Configuration.GetSection("LoggingOptions"));
+
+// ===============================  BD Provider  ===============================
+// Proveedor AS400 con soporte de logging estructurado y **HttpContext**.
+// Se pasa IHttpContextAccessor para que el wrapper SQL:
+//  - Selle Items["__SqlStartedUtc"] (ancla de orden por INICIO real)
+//  - Encole el bloque en HttpClientLogsTimed (mezcla/orden junto con HTTP).
+builder.Services.AddScoped<IDatabaseConnection>(sp =>
 {
-    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    IConfiguration config = sp.GetRequiredService<IConfiguration>();
+    ConnectionSettings settings = new(config);
+    string connStr = settings.GetAS400ConnectionString("AS400");
 
-    public async Task<ResponseAuthorizationManualDto> AuthorizeManualAsync(GetauthorizationManualDto request, CancellationToken ct = default)
+    return new AS400ConnectionProvider(
+        connStr,
+        sp.GetRequiredService<ILoggingService>(),
+        sp.GetRequiredService<IHttpContextAccessor>()); // ? imprescindible para orden cronológico correcto
+});
+
+// ===============================  HTTP Saliente  ===============================
+// Handler que intercepta TODAS las solicitudes/respuestas HTTP salientes para loguearlas
+// en la cola “timed”. Los servicios deben usar IHttpClientFactory con el cliente **"Embosado"**.
+builder.Services.AddTransient<HttpClientLoggingHandler>();
+
+// Cliente HTTP **nombrado** con el handler de logging encadenado.
+builder.Services.AddHttpClient("TNP").AddHttpMessageHandler<HttpClientLoggingHandler>();
+
+// ===============================  Config general / archivos  ===============================
+// Carga de archivos de configuración de la API.
+builder.Configuration
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddJsonFile("ConnectionData.json", optional: false, reloadOnChange: true);
+
+ConfigurationManager configuration = builder.Configuration;
+
+// Resolver nodo de conexión por ambiente y publicarlo globalmente (compatibilidad).
+string enviroment = configuration["ApiSettings:Enviroment"] ?? "DEV";
+IConfigurationSection connectionSection = configuration.GetSection(enviroment);
+ConnectionConfig? connectionConfig = connectionSection.Get<ConnectionConfig>();
+GlobalConnection.Current = connectionConfig!; // intencional: debe existir configuración válida
+
+
+
+
+
+
+// ===============================  Configuración de la API  ===============================
+
+// Controllers + Newtonsoft.Json (para respetar tus atributos)
+builder.Services
+    .AddControllers(o => o.Filters.Add<ModelStateToErrorResponseFilter>())
+    .AddJsonOptions(o =>
     {
-        var baseHost = (GlobalConnection.Current.Host ?? string.Empty).TrimEnd('/');
-        var url = $"{baseHost}/authorization/manual";
+        o.JsonSerializerOptions.PropertyNamingPolicy = null; // respeta nombres exactos
+        o.JsonSerializerOptions.DefaultIgnoreCondition =
+            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+    });
 
-        try
-        {
-            using var client = _httpClientFactory.CreateClient("TNP");
+// Desactivar el filtro automático de ModelState para usar el nuestro
+builder.Services.Configure<ApiBehaviorOptions>(o =>
+{
+    o.SuppressModelStateInvalidFilter = true;
+});
 
-            var json = JsonConvert.SerializeObject(request);
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+// DI servicios
+builder.Services.AddScoped<IPaymentAuthorizationService, PaymentAuthorizationService>();
+builder.Services.AddScoped<IHealthService, HealthService>();
 
-            using var resp = await client.PostAsync(url, content, ct);
-            var status = resp.StatusCode;
-            var body = resp.Content is null ? string.Empty : await resp.Content.ReadAsStringAsync(ct);
-
-            if (!resp.IsSuccessStatusCode)
-            {
-                var snippet = body is { Length: > 4096 } ? body[..4096] + "…(truncado)" : body;
-                return new ResponseAuthorizationManualDto
-                {
-                    ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
-                    AuthorizationCode = string.Empty,
-                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                    Message = $"TNP respondió {(int)status} {status}: {snippet}",
-                    Timestamp = TimeUtil.IsoNowUtc()
-                };
-            }
-
-            if (string.IsNullOrWhiteSpace(body))
-            {
-                return new ResponseAuthorizationManualDto
-                {
-                    ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
-                    AuthorizationCode = string.Empty,
-                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                    Message = "TNP devolvió una respuesta vacía.",
-                    Timestamp = TimeUtil.IsoNowUtc()
-                };
-            }
-
-            var env = SafeDeserialize<GetAuthorizationManualResultEnvelope>(body);
-            if (env?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is not null)
-                return env.GetAuthorizationManualResponse.GetAuthorizationManualResult;
-
-            var dto = SafeDeserialize<ResponseAuthorizationManualDto>(body);
-            if (dto is not null)
-                return dto;
-
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = "No se pudo interpretar la respuesta del TNP.",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-        catch (TaskCanceledException)
-        {
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout),
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = "Timeout al invocar el servicio TNP.",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-        catch (OperationCanceledException)
-        {
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout),
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = "La operación fue cancelada.",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-        catch (HttpRequestException ex)
-        {
-            var status = ex.StatusCode ?? HttpStatusCode.BadGateway;
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = $"Error al invocar el servicio TNP: {ex.Message}",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-        catch (Exception ex)
-        {
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = $"Error inesperado al invocar TNP: {ex.Message}",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-    }
-
-    private static T? SafeDeserialize<T>(string json)
+// Swagger
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
     {
-        try { return JsonConvert.DeserializeObject<T>(json); }
-        catch { return default; }
-    }
-}
+        Title = "API de Pagos DaviviendaTNP",
+        Version = "v1",
+        Description = "API REST ligera para procesar autorizaciones de pago."
+    });
+});
+
+var app = builder.Build();
+
+// Middleware de excepciones  {error,status,timestamp}
+//app.UseMiddleware<ExceptionHandlingMiddleware>()
+
+app.UseRouting();
+
+// HTTPS recomendado en prod (agrega UseHttpsRedirection si corresponde)
+app.UseAuthorization();
+
+// Middleware de logging central:
+// - Escribe los 7 bloques fijos (Inicio/Env/Controlador/Request/Dinámicos/Errores/Fin).
+// - Mezcla HTTP/SQL entre (4) Request y (5) Response, ordenados por INICIO real (TsUtc) y Seq.
+app.UseMiddleware<LoggingMiddleware>();
+
+app.MapControllers();
+
+// Swagger en DEV/UAT
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "DaviviendaTNP v1");
+});
+
+await app.RunAsync();
