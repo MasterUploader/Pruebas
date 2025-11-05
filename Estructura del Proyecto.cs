@@ -1,5 +1,3 @@
-A esta clase le hacen falta modificaciones, agragalas:
-
 using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
 using Pagos_Davivienda_TNP.Utils;
 using System.Net;
@@ -16,10 +14,11 @@ namespace Pagos_Davivienda_TNP.Services;
 /// <para>
 /// - Usa <see cref="IHttpClientFactory"/> con el cliente nombrado <c>"TNP"</c> para
 ///   conservar handlers de logging y configuración centralizada.
-/// - Serializa y deserializa con <b>System.Text.Json</b> respetando los nombres
-///   exactos exigidos por el tercero (atributos <see cref="JsonPropertyNameAttribute"/>).
+/// - Serializa y deserializa con <b>System.Text.Json</b> respetando los nombres exactos
+///   exigidos por el tercero (atributos <see cref="JsonPropertyNameAttribute"/>).
 /// - Nunca lanza excepciones hacia el controlador: ante errores del tercero o de red,
-///   retorna un <see cref="ResponseAuthorizationManualDto"/> con <c>responseCode</c> ≠ "00".
+///   retorna un <b>resultado normalizado</b> con <c>responseCode</c> ≠ "00" y opcionalmente
+///   el envelope crudo cuando la respuesta HTTP fue 200.
 /// </para>
 /// </summary>
 public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
@@ -32,6 +31,7 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
     /// <summary>
     /// Opciones de escritura: sin políticas de cambio de nombre y sin ignorar nulos,
     /// para respetar exactamente los alias definidos con <c>[JsonPropertyName]</c>.
+    /// Además, se evita el escape de acentos (ó, ñ, …).
     /// </summary>
     private static readonly JsonSerializerOptions StjWriteOptions = new()
     {
@@ -59,10 +59,20 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
     /// </param>
     /// <param name="ct">Token de cancelación cooperativa.</param>
     /// <returns>
-    /// Un <see cref="ResponseAuthorizationManualDto"/> con:
+    /// <see cref="AuthorizationServiceResult"/>:
     /// <list type="bullet">
-    /// <item><description><c>responseCode="00"</c> y datos de autorización cuando la transacción es aprobada.</description></item>
-    /// <item><description>Un código de negocio ≠ "00" cuando ocurre cualquier error (validación, red, timeout, 4xx/5xx, formato inesperado, etc.).</description></item>
+    /// <item>
+    /// <description>
+    /// En éxito HTTP 200, <c>Normalized</c> trae los 5 campos estándar y <c>RawTnpEnvelope</c> el envelope crudo
+    /// por si el controlador decide reenviarlo.
+    /// </description>
+    /// </item>
+    /// <item>
+    /// <description>
+    /// En HTTP ≠ 2xx o formatos inesperados, <c>Normalized</c> contiene el error de negocio mapeado
+    /// y <c>RawTnpEnvelope</c> es <c>null</c>.
+    /// </description>
+    /// </item>
     /// </list>
     /// </returns>
     public async Task<AuthorizationServiceResult> AuthorizeManualAsync(AuthorizationBody request, CancellationToken ct = default)
@@ -82,7 +92,6 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
 
             // 4) Serializar EXACTAMENTE el contrato que espera el tercero (root: GetAuthorizationManual).
             var json = JsonSerializer.Serialize(request, StjWriteOptions);
-
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             // 5) Ejecutar la llamada HTTP (respetando cancelación).
@@ -92,7 +101,7 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
             var status = resp.StatusCode;
             var body = resp.Content is null ? string.Empty : await resp.Content.ReadAsStringAsync(ct);
 
-            // 7) // --- HTTP != 2xx: devolvemos SOLO Normalized ---
+            // 7) HTTP != 2xx → devolver SOLO Normalized (intentar leer error TNP).
             if (!resp.IsSuccessStatusCode)
             {
                 var code = ErrorCodeMapper.FromHttpStatus(status); // 400→"12", 504→"68", 5xx→"96", etc.
@@ -123,7 +132,7 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
                 };
             }
 
-            // 8) 2xx sin cuerpo
+            // 8) 2xx sin cuerpo → tratar como pasarela defectuosa (solo Normalized).
             if (string.IsNullOrWhiteSpace(body))
             {
                 return new AuthorizationServiceResult
@@ -140,18 +149,20 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
                 };
             }
 
-            // 9) Éxito 200: intentamos el envelope TNP (forma oficial)
+            // 9) Éxito 200: intentar envelope TNP (forma oficial).
             if (SafeDeserializeStj<TnpAuthorizationEnvelope>(body, out var tnpEnv) &&
-    tnpEnv?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is TnpAuthorizationResult ok)
+                tnpEnv?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is TnpAuthorizationResult ok)
             {
                 return new AuthorizationServiceResult
                 {
-                    Normalized = TnpAuthorizationMapper.FromSuccess(ok), // llena 5 campos
-                    RawTnpEnvelope = tnpEnv                              // ← guardamos el CRUDO
+                    // Normalizamos a 5 campos (para header y para consumidores que solo esperan ese shape).
+                    Normalized = TnpAuthorizationMapper.FromSuccess(ok),
+                    // Además, conservamos el CRUDO para reenviarlo desde el controlador si ResponseCode == "00".
+                    RawTnpEnvelope = tnpEnv
                 };
             }
 
-            // 10) (Fallback) si alguna vez el tercero retornara tu DTO directo (poco probable)
+            // 10) (Fallback) si alguna vez el tercero retornara el DTO interno directo (poco probable).
             if (SafeDeserializeStj<ResponseAuthorizationManualDto>(body, out var dto) && dto is not null)
             {
                 return new AuthorizationServiceResult
@@ -161,7 +172,7 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
                 };
             }
 
-            // 11) 2xx pero formato inesperado
+            // 11) 2xx pero formato inesperado → error de pasarela (solo Normalized).
             return new AuthorizationServiceResult
             {
                 Normalized = new ResponseAuthorizationManualDto
@@ -174,54 +185,70 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
                 },
                 RawTnpEnvelope = null
             };
-            }
-        // 12) Timeout del HttpClient (o cancelación por tiempo límite de Polly, etc.).
+        }
+        // 12) Timeout del HttpClient (o cancelación por tiempo límite).
         catch (TaskCanceledException)
         {
-            return new ResponseAuthorizationManualDto
+            return new AuthorizationServiceResult
             {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout), // "68"
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = "Timeout al invocar el servicio TNP.",
-                Timestamp = TimeUtil.IsoNowUtc()
+                Normalized = new ResponseAuthorizationManualDto
+                {
+                    ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout), // "68"
+                    AuthorizationCode = string.Empty,
+                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                    Message = "Timeout al invocar el servicio TNP.",
+                    Timestamp = TimeUtil.IsoNowUtc()
+                },
+                RawTnpEnvelope = null
             };
         }
-        // 13) Cancelación explícita iniciada aguas arriba (p. ej. ct.Cancel()).
+        // 13) Cancelación explícita iniciada aguas arriba (ct.Cancel()).
         catch (OperationCanceledException)
         {
-            return new ResponseAuthorizationManualDto
+            return new AuthorizationServiceResult
             {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout), // "68"
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = "La operación fue cancelada.",
-                Timestamp = TimeUtil.IsoNowUtc()
+                Normalized = new ResponseAuthorizationManualDto
+                {
+                    ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout), // "68"
+                    AuthorizationCode = string.Empty,
+                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                    Message = "La operación fue cancelada.",
+                    Timestamp = TimeUtil.IsoNowUtc()
+                },
+                RawTnpEnvelope = null
             };
         }
         // 14) Errores de red/HTTP con StatusCode embebido (DNS, TLS, 502, etc.).
         catch (HttpRequestException ex)
         {
             var status = ex.StatusCode ?? HttpStatusCode.BadGateway; // fallback: 502
-            return new ResponseAuthorizationManualDto
+            return new AuthorizationServiceResult
             {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = $"Error al invocar el servicio TNP: {ex.Message}",
-                Timestamp = TimeUtil.IsoNowUtc()
+                Normalized = new ResponseAuthorizationManualDto
+                {
+                    ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
+                    AuthorizationCode = string.Empty,
+                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                    Message = $"Error al invocar el servicio TNP: {ex.Message}",
+                    Timestamp = TimeUtil.IsoNowUtc()
+                },
+                RawTnpEnvelope = null
             };
         }
         // 15) Cualquier otra excepción no contemplada → falla genérica de pasarela.
         catch (Exception ex)
         {
-            return new ResponseAuthorizationManualDto
+            return new AuthorizationServiceResult
             {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway), // "96"
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = $"Error inesperado al invocar TNP: {ex.Message}",
-                Timestamp = TimeUtil.IsoNowUtc()
+                Normalized = new ResponseAuthorizationManualDto
+                {
+                    ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway), // "96"
+                    AuthorizationCode = string.Empty,
+                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
+                    Message = $"Error inesperado al invocar TNP: {ex.Message}",
+                    Timestamp = TimeUtil.IsoNowUtc()
+                },
+                RawTnpEnvelope = null
             };
         }
     }
@@ -230,9 +257,6 @@ public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFac
     /// Deserializa con <b>System.Text.Json</b> de manera segura (sin excepción);
     /// devuelve <c>true</c> cuando el parseo fue exitoso y <paramref name="value"/> no es <c>null</c>.
     /// </summary>
-    /// <typeparam name="T">Tipo de destino.</typeparam>
-    /// <param name="json">Texto JSON a deserializar.</param>
-    /// <param name="value">Resultado deserializado o <c>default</c> si falla.</param>
     private static bool SafeDeserializeStj<T>(string json, out T? value)
     {
         try
