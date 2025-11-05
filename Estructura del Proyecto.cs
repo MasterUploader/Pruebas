@@ -1,98 +1,138 @@
+Deje la clase así :
+
 using System.Text.Json.Serialization;
 
 namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
 
 /// <summary>
-/// Envelope que devuelve el tercero TNP (nombres tal cual vienen).
+/// Datos del resultado de autorización manual.
 /// </summary>
-public sealed class TnpAuthorizationEnvelope
+public class ResponseAuthorizationManualDto
 {
-    [JsonPropertyName("GetAuthorizationManualResponse")]
-    public TnpAuthorizationResponse? GetAuthorizationManualResponse { get; set; }
-}
+    /// <summary>Código de respuesta (00 = aprobada).</summary>
+    [JsonPropertyName("ResponseCode")]
+    public string ResponseCode { get; set; } = string.Empty;
 
-public sealed class TnpAuthorizationResponse
-{
-    [JsonPropertyName("GetAuthorizationManualResult")]
-    public TnpAuthorizationResult? GetAuthorizationManualResult { get; set; }
-}
+    /// <summary>Código de autorización si aplica.</summary>
+    [JsonPropertyName("AuthorizationCode")]
+    public string AuthorizationCode { get; set; } = string.Empty;
 
-/// <summary>
-/// Resultado del tercero (campos en PascalCase).
-/// </summary>
-public sealed class TnpAuthorizationResult
-{
+    /// <summary>Identificador único de la transacción.</summary>
+    [JsonPropertyName("TransactionId")]
+    public string TransactionId { get; set; } = string.Empty;
+
+    /// <summary>Mensaje legible.</summary>
+    [JsonPropertyName("Message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Marca de tiempo ISO 8601.</summary>
+    [JsonPropertyName("Timestamp")]
+    public string Timestamp { get; set; } = string.Empty;
+
     [JsonPropertyName("ResponseCodeDescription")] public string? ResponseCodeDescription { get; set; }
-    [JsonPropertyName("ResponseCode")]           public string? ResponseCode { get; set; }
-    [JsonPropertyName("AuthorizationCode")]      public string? AuthorizationCode { get; set; } // opcional en error
     [JsonPropertyName("RetrievalReferenceNumber")] public string? RetrievalReferenceNumber { get; set; }
-    [JsonPropertyName("SystemsTraceAuditNumber")]  public string? SystemsTraceAuditNumber { get; set; }
-    [JsonPropertyName("TransactionType")]          public string? TransactionType { get; set; }
-    [JsonPropertyName("TimeLocalTrans")]           public string? TimeLocalTrans { get; set; }
-    [JsonPropertyName("DateLocalTrans")]           public string? DateLocalTrans { get; set; }
-    [JsonPropertyName("Amount")]                   public string? Amount { get; set; }
-    [JsonPropertyName("MerchantID")]               public string? MerchantID { get; set; }
-    [JsonPropertyName("MCC")]                      public string? MCC { get; set; }
-    [JsonPropertyName("CurrencyCode")]             public string? CurrencyCode { get; set; }
-    [JsonPropertyName("PrimaryAccountNumber")]     public string? PrimaryAccountNumber { get; set; }
-    [JsonPropertyName("TerminalID")]               public string? TerminalID { get; set; }
+    [JsonPropertyName("SystemsTraceAuditNumber")] public string? SystemsTraceAuditNumber { get; set; }
+    [JsonPropertyName("TransactionType")] public string? TransactionType { get; set; }
+    [JsonPropertyName("TimeLocalTrans")] public string? TimeLocalTrans { get; set; }
+    [JsonPropertyName("DateLocalTrans")] public string? DateLocalTrans { get; set; }
+    [JsonPropertyName("Amount")] public string? Amount { get; set; }
+    [JsonPropertyName("MerchantID")] public string? MerchantID { get; set; }
+    [JsonPropertyName("MCC")] public string? MCC { get; set; }
+    [JsonPropertyName("CurrencyCode")] public string? CurrencyCode { get; set; }
+    [JsonPropertyName("PrimaryAccountNumber")] public string? PrimaryAccountNumber { get; set; }
+    [JsonPropertyName("TerminalID")] public string? TerminalID { get; set; }
+
 }
 
+Si la respuesta es 200, esto viene en la respuesta:
 
-
-
-
-
-using Pagos_Davivienda_TNP.Utils;
-
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-
-/// <summary>
-/// Adaptador de la respuesta TNP al contrato interno de salida.
-/// </summary>
-public static class TnpAuthorizationMapper
+---- Request Body ----
 {
-    /// <summary>
-    /// - responseCode = ResponseCode
-    /// - message = ResponseCodeDescription
-    /// - transactionId = RetrievalReferenceNumber (fallback: SystemsTraceAuditNumber)
-    /// - authorizationCode = AuthorizationCode (si viene)
-    /// - timestamp = ahora (si TNP no lo manda en ISO)
-    /// </summary>
-    public static ResponseAuthorizationManualDto ToInternal(TnpAuthorizationResult src)
-    {
-        var txn = !string.IsNullOrWhiteSpace(src.RetrievalReferenceNumber)
-                    ? src.RetrievalReferenceNumber!
-                    : (src.SystemsTraceAuditNumber ?? string.Empty);
+  "GetAuthorizationManual": {
+    "pMerchantID": "4001021",
+    "pTerminalID": "P0055468",
+    "pPrimaryAccountNumber": "5413330057004039",
+    "pDateExpiration": "2512",
+    "pCVV2": "000",
+    "pAmount": "10000",
+    "pSystemsTraceAuditNumber": "000002"
+  }
+}
+---- Response ----
+Status Code    : 200 OK
+---- Response Headers ----
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type
 
-        return new ResponseAuthorizationManualDto
-        {
-            ResponseCode      = src.ResponseCode ?? string.Empty,
-            AuthorizationCode = src.AuthorizationCode ?? string.Empty,
-            TransactionId     = txn,
-            Message           = src.ResponseCodeDescription ?? string.Empty,
-            Timestamp         = TimeUtil.IsoNowUtc()
-        };
+---- Response Body ----
+{
+  "GetAuthorizationManualResponse": {
+    "GetAuthorizationManualResult": {
+      "ResponseCodeDescription": "94 - Transacci\u00F3n duplicada",
+      "ResponseCode": "94",
+      "TransactionType": "S",
+      "SystemsTraceAuditNumber": "000002",
+      "TimeLocalTrans": "205748",
+      "Amount": "10,000.00",
+      "MerchantID": "4001021",
+      "MCC": "5999",
+      "CurrencyCode": "340",
+      "PrimaryAccountNumber": "541333******4039",
+      "DateLocalTrans": "1104",
+      "RetrievalReferenceNumber": "530902000002",
+      "TerminalID": "P0055468"
     }
+  }
 }
+Duración (ms)  : 316
+=============== FIN HTTP CLIENT ================
 
 
-// Intento A: envelope TNP (modelos del tercero)
-if (SafeDeserializeStj<TnpAuthorizationEnvelope>(body, out var tnpEnv) &&
-    tnpEnv?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is TnpAuthorizationResult tnpRes)
+
+
+
+si viene otro codigo distinto de 200 viene así la respuesta:
+
+============== INICIO HTTP CLIENT ==============
+TraceId        : 0HNGS35ED4JKT:00000003
+Fecha/Hora     : 2025-11-04 21:17:02.533
+Método         : POST
+URL            : https://192.168.75.10:8443/davivienda-tnp/api/v1/authorization/manual
+---- Request Headers ----
+Accept: application/json
+
+---- Request Body ----
 {
-    // Convertimos al DTO interno estándar
-    return TnpAuthorizationMapper.ToInternal(tnpRes);
+  "GetAuthorizationManual": {
+    "pMerchantID": "",
+    "pTerminalID": "P0055468",
+    "pPrimaryAccountNumber": "5413330057004039",
+    "pDateExpiration": "2512",
+    "pCVV2": "000",
+    "pAmount": "10000",
+    "pSystemsTraceAuditNumber": "000002"
+  }
 }
+---- Response ----
+Status Code    : 400 BadRequest
+---- Response Headers ----
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type
 
-// Intento B: tu DTO directo (por si cambian el formato algún día)
-if (SafeDeserializeStj<ResponseAuthorizationManualDto>(body, out var dto) && dto is not null)
-    return dto;
+---- Response Body ----
+{
+  "error": "Missing or empty required field: pMerchantID",
+  "status": 400,
+  "timestamp": 1762311624199
+}
+Duración (ms)  : 77
+=============== FIN HTTP CLIENT ================
 
-// Formato inesperado…
 
+    Esperemos que al retornar la respuesta devuelva solo los campos que corresponden.
 
+    Ademas de que si vienen acentos estos no se colocan como es debido
 
-
-
-
+    
