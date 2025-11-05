@@ -1,149 +1,178 @@
-using System.Text.Json.Serialization;
+Tengo esta respuesta exitosa 200 y que deberia devolver el formato completo porque fue el que me respondio:
 
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
 
-/// <summary>Envelope que devuelve el tercero TNP (nombres tal cual vienen).</summary>
-public sealed class TnpAuthorizationEnvelope
+============== INICIO HTTP CLIENT ==============
+TraceId        : 0HNGS3F4LHTFU:0000000B
+Fecha/Hora     : 2025-11-04 21:32:46.870
+Método         : POST
+URL            : https://192.168.75.10:8443/davivienda-tnp/api/v1/authorization/manual
+---- Request Headers ----
+Accept: application/json
+
+---- Request Body ----
 {
-    [JsonPropertyName("GetAuthorizationManualResponse")]
-    public TnpAuthorizationResponse? GetAuthorizationManualResponse { get; set; }
+  "GetAuthorizationManual": {
+    "pMerchantID": "4001021",
+    "pTerminalID": "P0055468",
+    "pPrimaryAccountNumber": "5413330057004039",
+    "pDateExpiration": "2512",
+    "pCVV2": "000",
+    "pAmount": "10000",
+    "pSystemsTraceAuditNumber": "000003"
+  }
 }
+---- Response ----
+Status Code    : 200 OK
+---- Response Headers ----
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type
 
-public sealed class TnpAuthorizationResponse
+---- Response Body ----
 {
-    [JsonPropertyName("GetAuthorizationManualResult")]
-    public TnpAuthorizationResult? GetAuthorizationManualResult { get; set; }
-}
-
-/// <summary>Resultado del tercero (PascalCase).</summary>
-public sealed class TnpAuthorizationResult
-{
-    [JsonPropertyName("ResponseCodeDescription")] public string? ResponseCodeDescription { get; set; }
-    [JsonPropertyName("ResponseCode")]           public string? ResponseCode { get; set; }
-    [JsonPropertyName("AuthorizationCode")]      public string? AuthorizationCode { get; set; }
-    [JsonPropertyName("RetrievalReferenceNumber")] public string? RetrievalReferenceNumber { get; set; }
-    [JsonPropertyName("SystemsTraceAuditNumber")]  public string? SystemsTraceAuditNumber { get; set; }
-    [JsonPropertyName("TransactionType")]          public string? TransactionType { get; set; }
-    [JsonPropertyName("TimeLocalTrans")]           public string? TimeLocalTrans { get; set; }
-    [JsonPropertyName("DateLocalTrans")]           public string? DateLocalTrans { get; set; }
-    [JsonPropertyName("Amount")]                   public string? Amount { get; set; }
-    [JsonPropertyName("MerchantID")]               public string? MerchantID { get; set; }
-    [JsonPropertyName("MCC")]                      public string? MCC { get; set; }
-    [JsonPropertyName("CurrencyCode")]             public string? CurrencyCode { get; set; }
-    [JsonPropertyName("PrimaryAccountNumber")]     public string? PrimaryAccountNumber { get; set; }
-    [JsonPropertyName("TerminalID")]               public string? TerminalID { get; set; }
-}
-
-
-using System.Text.Json.Serialization;
-
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-
-/// <summary>Forma de error que devuelve el tercero cuando HTTP ≠ 2xx.</summary>
-public sealed class TnpErrorResponse
-{
-    [JsonPropertyName("error")]     public string? Error { get; set; }
-    [JsonPropertyName("status")]    public int? Status { get; set; }
-    [JsonPropertyName("timestamp")] public long? Timestamp { get; set; } // epoch ms
-}using Pagos_Davivienda_TNP.Utils;
-
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-
-/// <summary>Adaptadores de la respuesta del tercero a tu contrato interno.</summary>
-public static class TnpAuthorizationMapper
-{
-    /// <summary>
-    /// Éxito HTTP 200: mapea el resultado TNP al DTO interno.
-    /// </summary>
-    public static ResponseAuthorizationManualDto FromSuccess(TnpAuthorizationResult src)
-    {
-        // Preferimos el RRN; si no viene, caemos al STAN (número de auditoría).
-        var txnId = !string.IsNullOrWhiteSpace(src.RetrievalReferenceNumber)
-            ? src.RetrievalReferenceNumber!
-            : (src.SystemsTraceAuditNumber ?? string.Empty);
-
-        return new ResponseAuthorizationManualDto
-        {
-            ResponseCode      = src.ResponseCode ?? string.Empty,
-            AuthorizationCode = src.AuthorizationCode ?? string.Empty,
-            TransactionId     = txnId,
-            Message           = src.ResponseCodeDescription ?? string.Empty,
-            Timestamp         = TimeUtil.IsoNowUtc()
-        };
+  "GetAuthorizationManualResponse": {
+    "GetAuthorizationManualResult": {
+      "ResponseCodeDescription": "00 - Aprobada o completada exitosamente",
+      "ResponseCode": "00",
+      "TransactionType": "S",
+      "SystemsTraceAuditNumber": "000003",
+      "TimeLocalTrans": "211603",
+      "Amount": "10,000.00",
+      "MerchantID": "4001021",
+      "MCC": "5999",
+      "AuthorizationIdentificationResponse": "792830",
+      "CurrencyCode": "340",
+      "PrimaryAccountNumber": "541333******4039",
+      "DateLocalTrans": "1104",
+      "RetrievalReferenceNumber": "530903000003",
+      "TerminalID": "P0055468"
     }
+  }
+}
+Duración (ms)  : 4647
+=============== FIN HTTP CLIENT ================
 
-    /// <summary>
-    /// Error HTTP ≠ 2xx: mapea el error TNP a tu DTO interno.
-    /// </summary>
-    public static ResponseAuthorizationManualDto FromError(TnpErrorResponse err, string fallbackResponseCode)
-        => new()
+
+----------------------------------Response Info---------------------------------
+Inicio: 2025-11-04 21:33:59
+-------------------------------------------------------------------------------
+Código Estado: 200
+Headers: [Content-Type, application/json; charset=utf-8]
+Cuerpo:
+
+                              {
+                                "header": {
+                                  "responseId": "5d313c4a55c4499792ebc98df552de00",
+                                  "timestamp": "2025-11-05T03:33:56.4126971Z",
+                                  "processingTime": "81839ms",
+                                  "statusCode": "00",
+                                  "message": "00 - Aprobada o completada exitosamente",
+                                  "requestHeader": {
+                                    "h-request-id": "string",
+                                    "h-channel": "string",
+                                    "h-terminal": "string",
+                                    "h-organization": "string",
+                                    "h-user-id": "string",
+                                    "h-provider": "string",
+                                    "h-session-id": "string",
+                                    "h-client-ip": "string",
+                                    "h-timestamp": "string"
+                                  }
+                                },
+                                "data": {
+                                  "GetAuthorizationManualResponse": {
+                                    "GetAuthorizationManualResult": {
+                                      "responseCode": "00",
+                                      "authorizationCode": "",
+                                      "transactionId": "530903000003",
+                                      "message": "00 - Aprobada o completada exitosamente",
+                                      "timestamp": "2025-11-05T03:33:48.6696319Z"
+                                    }
+                                  }
+                                }
+                              }
+
+
+
+Pero lop devuelvo incompleto, es posible que el problema este en la asignación en el controlador?:
+
+
+
+using Microsoft.AspNetCore.Mvc;
+using Pagos_Davivienda_TNP.Models.Dtos;
+using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+using Pagos_Davivienda_TNP.Services.Interfaces;
+using Pagos_Davivienda_TNP.Utils;
+using System.Diagnostics;
+
+namespace Pagos_Davivienda_TNP.Controllers;
+
+/// <summary>
+/// API de Pagos DaviviendaTNP (v1).
+/// Base URL: /davivienda-tnp/api/v1
+/// </summary>
+[ApiController]
+[Route("v1/[controller]")]
+[Produces("application/json")]
+public class PagosDaviviendaTnpController(IPaymentAuthorizationService paymentService) : ControllerBase
+{
+    private readonly IPaymentAuthorizationService _paymentService = paymentService;
+
+    /// <summary>Procesa una autorización manual.</summary>
+    /// <param name="request">Request con header + body.</param>
+    /// <param name="ct">Token de cancelación.</param>
+    [HttpPost("Authorization/")]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(ResponseModel<GetAuthorizationManualResultEnvelope>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetAuthorizationManual([FromBody] AuthorizationRequest request, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+
+        var input = request.Body.GetAuthorizationManual;
+
+        var result = await _paymentService.AuthorizeManualAsync(new AuthorizationBody
         {
-            ResponseCode      = fallbackResponseCode,              // mapeado desde el HTTP
-            AuthorizationCode = string.Empty,
-            TransactionId     = string.Empty,
-            Message           = err.Error ?? "Error no especificado por TNP.",
-            Timestamp         = TimeUtil.IsoNowUtc()
+            GetAuthorizationManual =
+            {
+                PMerchantID = input.PMerchantID,
+                PTerminalID = input.PTerminalID,
+                PPrimaryAccountNumber = input.PPrimaryAccountNumber,
+                PDateExpiration = input.PDateExpiration,
+                PCVV2 = input.PCVV2,
+                PAmount = input.PAmount,
+                PSystemsTraceAuditNumber = input.PSystemsTraceAuditNumber
+            }
+
+        }, ct);
+
+        var envelope = new GetAuthorizationManualResultEnvelope
+        {
+            GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
+            {
+                GetAuthorizationManualResult = result
+            }
         };
+
+        sw.Stop();
+
+        var apiResponse = new ResponseModel<GetAuthorizationManualResultEnvelope>
+        {
+            Header = new ResponseHeader
+            {
+                ResponseId = Guid.NewGuid().ToString("N"),
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                ProcessingTime = $"{sw.ElapsedMilliseconds}ms",
+                StatusCode = result.ResponseCode, // negocio ("00","68","12",…)
+                Message = result.Message,
+                RequestHeader = request.Header
+            },
+            Data = envelope
+        };
+
+        // 200 si "00"; si no, mapear a HTTP error preservando el body estándar
+        var http = ErrorCodeMapper.ToHttpStatus(result.ResponseCode);
+        return StatusCode((int)http, apiResponse);
+    }
 }
-
-
-
-
-
-// 7) No-2xx → intenta leer el error TNP y mapear a tu DTO
-if (!resp.IsSuccessStatusCode)
-{
-    var code = ErrorCodeMapper.FromHttpStatus(status); // p.ej. 400->"12", 504->"68", 5xx->"96"
-    if (SafeDeserializeStj<TnpErrorResponse>(body, out var tnpErr) && tnpErr is not null)
-        return TnpAuthorizationMapper.FromError(tnpErr, code);
-
-    // Si el cuerpo no es el error esperado, devolvemos DTO de error genérico
-    var snippet = body is { Length: > 4096 } ? body[..4096] + "…(truncado)" : body;
-    return new ResponseAuthorizationManualDto
-    {
-        ResponseCode      = code,
-        AuthorizationCode = string.Empty,
-        TransactionId     = string.Empty,
-        Message           = $"TNP respondió {(int)status} {status}: {snippet}",
-        Timestamp         = TimeUtil.IsoNowUtc()
-    };
-}
-
-// 8) 2xx sin cuerpo
-if (string.IsNullOrWhiteSpace(body))
-{
-    return new ResponseAuthorizationManualDto
-    {
-        ResponseCode      = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway), // "96"
-        AuthorizationCode = string.Empty,
-        TransactionId     = string.Empty,
-        Message           = "TNP devolvió una respuesta vacía.",
-        Timestamp         = TimeUtil.IsoNowUtc()
-    };
-}
-
-// 9) Éxito 200: intentamos el envelope TNP (forma oficial)
-if (SafeDeserializeStj<TnpAuthorizationEnvelope>(body, out var tnpEnv) &&
-    tnpEnv?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is TnpAuthorizationResult ok)
-{
-    return TnpAuthorizationMapper.FromSuccess(ok);
-}
-
-// 10) (Fallback) si alguna vez el tercero retornara tu DTO directo (poco probable)
-if (SafeDeserializeStj<ResponseAuthorizationManualDto>(body, out var dto) && dto is not null)
-    return dto;
-
-// 11) 2xx pero formato inesperado
-return new ResponseAuthorizationManualDto
-{
-    ResponseCode      = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
-    AuthorizationCode = string.Empty,
-    TransactionId     = string.Empty,
-    Message           = "No se pudo interpretar la respuesta del TNP.",
-    Timestamp         = TimeUtil.IsoNowUtc()
-};
-
-
-
-
-
