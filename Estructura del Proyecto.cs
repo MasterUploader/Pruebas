@@ -1,276 +1,143 @@
-// Models/Dtos/GetAuthorizationManual/AuthorizationServiceResult.cs
-using System.Net;
+<# 
+.SYNOPSIS
+  Limpieza segura de cachés de NuGet/npm/Postman/CrashDumps para el USUARIO ACTUAL.
+.DESCRIPTION
+  - No borra perfiles, sesiones ni datos en %AppData%\Roaming.
+  - No toca carpetas "Microsoft", "Google", "GitHubDesktop".
+  - Postman: solo Cache/GPUCache/Code Cache/logs en AppData\Local.
+  - NuGet: usa "dotnet nuget locals all --clear".
+  - npm: usa "npm cache clean --force".
+.PARAMETER Apply
+  Ejecuta la limpieza real. Si se omite, corre en modo simulación (Dry-Run).
+.PARAMETER VerboseMode
+  Muestra más detalle durante la ejecución.
+#>
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Low')]
+param(
+  [switch]$Apply,
+  [switch]$VerboseMode
+)
 
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
+$ErrorActionPreference = 'Stop'
+if ($VerboseMode) { $VerbosePreference = 'Continue' } else { $VerbosePreference = 'SilentlyContinue' }
+$DryRun = -not $Apply
 
-public sealed class AuthorizationServiceResult
-{
-    /// <summary>Salida normalizada (5 campos) que tu header/consumidores esperan.</summary>
-    public ResponseAuthorizationManualDto Normalized { get; set; } = new();
+function Write-Header($text) { Write-Host "`n=== $text ===" }
 
-    /// <summary>Envelope crudo del tercero cuando HTTP 200; null de lo contrario.</summary>
-    public TnpAuthorizationEnvelope? RawTnpEnvelope { get; set; }
-
-    /// <summary>Código HTTP devuelto por el tercero.</summary>
-    public HttpStatusCode UpstreamStatusCode { get; set; }
-
-    /// <summary>Conveniencia: true si el tercero respondió 2xx.</summary>
-    public bool UpstreamWasSuccess => ((int)UpstreamStatusCode >= 200 && (int)UpstreamStatusCode <= 299);
-}
-
-
-
-
-// Models/Dtos/GetAuthorizationManual/TnpAuthorizationResult.cs
-using System.Text.Json.Serialization;
-
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-
-public sealed class TnpAuthorizationEnvelope
-{
-    [JsonPropertyName("GetAuthorizationManualResponse")]
-    public TnpAuthorizationResponse? GetAuthorizationManualResponse { get; set; }
-}
-
-public sealed class TnpAuthorizationResponse
-{
-    [JsonPropertyName("GetAuthorizationManualResult")]
-    public TnpAuthorizationResult? GetAuthorizationManualResult { get; set; }
-}
-
-public sealed class TnpAuthorizationResult
-{
-    [JsonPropertyName("ResponseCodeDescription")] public string? ResponseCodeDescription { get; set; }
-    [JsonPropertyName("ResponseCode")]           public string? ResponseCode { get; set; }
-
-    // Aprobadas suelen traer este nombre:
-    [JsonPropertyName("AuthorizationIdentificationResponse")] 
-    public string? AuthorizationIdentificationResponse { get; set; }
-
-    // Algunas integraciones usan este:
-    [JsonPropertyName("AuthorizationCode")]      public string? AuthorizationCode { get; set; }
-
-    [JsonPropertyName("RetrievalReferenceNumber")] public string? RetrievalReferenceNumber { get; set; }
-    [JsonPropertyName("SystemsTraceAuditNumber")]  public string? SystemsTraceAuditNumber { get; set; }
-    [JsonPropertyName("TransactionType")]          public string? TransactionType { get; set; }
-    [JsonPropertyName("TimeLocalTrans")]           public string? TimeLocalTrans { get; set; }
-    [JsonPropertyName("DateLocalTrans")]           public string? DateLocalTrans { get; set; }
-    [JsonPropertyName("Amount")]                   public string? Amount { get; set; }
-    [JsonPropertyName("MerchantID")]               public string? MerchantID { get; set; }
-    [JsonPropertyName("MCC")]                      public string? MCC { get; set; }
-    [JsonPropertyName("CurrencyCode")]             public string? CurrencyCode { get; set; }
-    [JsonPropertyName("PrimaryAccountNumber")]     public string? PrimaryAccountNumber { get; set; }
-    [JsonPropertyName("TerminalID")]               public string? TerminalID { get; set; }
-}
-
-
-
-
-// Models/Dtos/GetAuthorizationManual/TnpAuthorizationMapper.cs
-using Pagos_Davivienda_TNP.Utils;
-
-namespace Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-
-public static class TnpAuthorizationMapper
-{
-    public static ResponseAuthorizationManualDto FromSuccess(TnpAuthorizationResult src)
-    {
-        // Preferimos el RRN; si no viene, STAN
-        var txnId = !string.IsNullOrWhiteSpace(src.RetrievalReferenceNumber)
-            ? src.RetrievalReferenceNumber!
-            : (src.SystemsTraceAuditNumber ?? string.Empty);
-
-        // Authorization: usa el que venga
-        var auth = !string.IsNullOrWhiteSpace(src.AuthorizationCode)
-            ? src.AuthorizationCode!
-            : (src.AuthorizationIdentificationResponse ?? string.Empty);
-
-        return new ResponseAuthorizationManualDto
-        {
-            ResponseCode      = src.ResponseCode ?? string.Empty,
-            AuthorizationCode = auth,
-            TransactionId     = txnId,
-            Message           = src.ResponseCodeDescription ?? string.Empty,
-            Timestamp         = TimeUtil.IsoNowUtc()
-        };
+function Remove-Safe([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { 
+        Write-Verbose "No existe: $Path"
+        return 
     }
-
-    public static ResponseAuthorizationManualDto FromError(TnpErrorResponse err, string fallbackResponseCode)
-        => new()
-        {
-            ResponseCode      = fallbackResponseCode,
-            AuthorizationCode = string.Empty,
-            TransactionId     = string.Empty,
-            Message           = err.Error ?? "Error no especificado por TNP.",
-            Timestamp         = TimeUtil.IsoNowUtc()
-        };
-}
-
-
-
-// Dentro de AuthorizeManualAsync(...)
-
-// Tras hacer PostAsync:
-var status = resp.StatusCode;
-var body   = resp.Content is null ? string.Empty : await resp.Content.ReadAsStringAsync(ct);
-
-// HTTP != 2xx
-if (!resp.IsSuccessStatusCode)
-{
-    var code = ErrorCodeMapper.FromHttpStatus(status);
-
-    if (SafeDeserializeStj<TnpErrorResponse>(body, out var tnpErr) && tnpErr is not null)
-    {
-        return new AuthorizationServiceResult
-        {
-            Normalized         = TnpAuthorizationMapper.FromError(tnpErr, code),
-            RawTnpEnvelope     = null,
-            UpstreamStatusCode = status
-        };
+    if ($DryRun) { 
+        Write-Host "[SIMULACION] Eliminar: $Path"
+        return 
     }
-
-    var snippet = body is { Length: > 4096 } ? body[..4096] + "…(truncado)" : body;
-    return new AuthorizationServiceResult
-    {
-        Normalized = new ResponseAuthorizationManualDto
-        {
-            ResponseCode      = code,
-            AuthorizationCode = string.Empty,
-            TransactionId     = string.Empty,
-            Message           = $"TNP respondió {(int)status} {status}: {snippet}",
-            Timestamp         = TimeUtil.IsoNowUtc()
-        },
-        RawTnpEnvelope     = null,
-        UpstreamStatusCode = status
-    };
-}
-
-// 2xx sin cuerpo
-if (string.IsNullOrWhiteSpace(body))
-{
-    return new AuthorizationServiceResult
-    {
-        Normalized = new ResponseAuthorizationManualDto
-        {
-            ResponseCode      = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
-            AuthorizationCode = string.Empty,
-            TransactionId     = string.Empty,
-            Message           = "TNP devolvió una respuesta vacía.",
-            Timestamp         = TimeUtil.IsoNowUtc()
-        },
-        RawTnpEnvelope     = null,
-        UpstreamStatusCode = status
-    };
-}
-
-// 2xx con cuerpo → intenta envelope
-if (SafeDeserializeStj<TnpAuthorizationEnvelope>(body, out var tnpEnv) &&
-    tnpEnv?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is TnpAuthorizationResult ok)
-{
-    return new AuthorizationServiceResult
-    {
-        Normalized         = TnpAuthorizationMapper.FromSuccess(ok),
-        RawTnpEnvelope     = tnpEnv,    // ← preserva el crudo SIEMPRE que 200
-        UpstreamStatusCode = status
-    };
-}
-
-// fallback DTO directo…
-if (SafeDeserializeStj<ResponseAuthorizationManualDto>(body, out var dto) && dto is not null)
-{
-    return new AuthorizationServiceResult
-    {
-        Normalized         = dto,
-        RawTnpEnvelope     = null,
-        UpstreamStatusCode = status
-    };
-}
-
-// 2xx pero no interpretable
-return new AuthorizationServiceResult
-{
-    Normalized = new ResponseAuthorizationManualDto
-    {
-        ResponseCode      = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
-        AuthorizationCode = string.Empty,
-        TransactionId     = string.Empty,
-        Message           = "No se pudo interpretar la respuesta del TNP.",
-        Timestamp         = TimeUtil.IsoNowUtc()
-    },
-    RawTnpEnvelope     = null,
-    UpstreamStatusCode = status
-};
-
-
-
-
-
-// Política de HTTP: escoge una
-const bool PreserveUpstream2xx = true; // B: si upstream fue 200 → devuelves 200
-// const bool PreserveUpstream2xx = false; // A: mapeas por responseCode (94→409)
-
-[HttpPost("Authorization/")]
-public async Task<IActionResult> GetAuthorizationManual([FromBody] AuthorizationRequest request, CancellationToken ct)
-{
-    var sw = Stopwatch.StartNew();
-
-    var input = request.Body.GetAuthorizationManual;
-
-    var svc = await _paymentService.AuthorizeManualAsync(new AuthorizationBody
-    {
-        GetAuthorizationManual =
-        {
-            PMerchantID = input.PMerchantID,
-            PTerminalID = input.PTerminalID,
-            PPrimaryAccountNumber = input.PPrimaryAccountNumber,
-            PDateExpiration = input.PDateExpiration,
-            PCVV2 = input.PCVV2,
-            PAmount = input.PAmount,
-            PSystemsTraceAuditNumber = input.PSystemsTraceAuditNumber
+    try {
+        if ($PSCmdlet.ShouldProcess($Path, "Remove-Item")) {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            Write-Host ("OK  {0}" -f $Path)
         }
-    }, ct);
-
-    sw.Stop();
-
-    var header = new ResponseHeader
-    {
-        ResponseId     = Guid.NewGuid().ToString("N"),
-        Timestamp      = DateTime.UtcNow.ToString("o"),
-        ProcessingTime = $"{sw.ElapsedMilliseconds}ms",
-        StatusCode     = svc.Normalized.ResponseCode,                // "00", "94", etc.
-        Message        = svc.Normalized.Message,                     // usa descripción TNP si llegó
-        RequestHeader  = request.Header
-    };
-
-    object data;
-
-    // Si el upstream fue 200, reenvía el envelope COMPLETO del tercero (pediste “formato completo”)
-    if (svc.UpstreamWasSuccess && svc.RawTnpEnvelope is not null)
-    {
-        data = svc.RawTnpEnvelope; // ← TODOS los campos del TNP
+    } catch {
+        Write-Warning ("No se pudo eliminar {0}: {1}" -f $Path, $_.Exception.Message)
     }
-    else
-    {
-        // Caso 4xx/5xx (o no interpretable): usa envelope minimalista (5 campos)
-        data = new GetAuthorizationManualResultEnvelope
-        {
-            GetAuthorizationManualResponse = new GetAuthorizationManualResponseContainer
-            {
-                GetAuthorizationManualResult = svc.Normalized
-            }
-        };
-    }
-
-    var apiResponse = new ResponseModel<object>
-    {
-        Header = header,
-        Data   = data
-    };
-
-    // Selección de StatusCode de salida
-    var http = PreserveUpstream2xx
-        ? (svc.UpstreamWasSuccess ? HttpStatusCode.OK : ErrorCodeMapper.ToHttpStatus(svc.Normalized.ResponseCode))
-        : ErrorCodeMapper.ToHttpStatus(svc.Normalized.ResponseCode);
-
-    return StatusCode((int)http, apiResponse);
 }
+
+Write-Header "Limpieza segura (usuario actual)"
+Write-Host "Dry-Run: $DryRun  |  Verbose: $VerboseMode"
+Write-Host "Acciones: NuGet (oficial), npm cache, CrashDumps, Postman(Local: Cache/GPUCache/Code Cache/logs)"
+Write-Host "Resguardo: NO se tocan perfiles, sesiones, %AppData%\Roaming ni carpetas Microsoft/Google/GitHubDesktop."
+
+# --- NuGet (oficial) --------------------------------------------------------------
+Write-Header "NuGet"
+try {
+    $cmdArgs = @("nuget","locals","all","--clear")
+    if ($DryRun) {
+        Write-Host "[SIMULACION] dotnet $($cmdArgs -join ' ')"
+    } else {
+        & dotnet @cmdArgs | Out-Null
+        Write-Host "OK  NuGet cache limpiada mediante 'dotnet nuget locals all --clear'"
+    }
+} catch {
+    Write-Verbose "dotnet CLI no disponible; intento limpiar directorios de cache NuGet del usuario"
+    $nugetPaths = @(
+        Join-Path -Path $env:USERPROFILE -ChildPath ".nuget\packages",
+        Join-Path -Path $env:LOCALAPPDATA -ChildPath "NuGet\Cache",
+        Join-Path -Path $env:LOCALAPPDATA -ChildPath "NuGet\v3-cache",
+        Join-Path -Path $env:LOCALAPPDATA -ChildPath "NuGet\v2-cache"
+    )
+    $nugetPaths | ForEach-Object { Remove-Safe $_ }
+}
+
+# --- npm cache --------------------------------------------------------------------
+Write-Header "npm cache"
+try {
+    $null = Get-Command npm -ErrorAction Stop
+    if ($DryRun) {
+        Write-Host "[SIMULACION] npm cache clean --force"
+    } else {
+        npm cache clean --force | Out-Null
+        Write-Host "OK  npm cache limpiada."
+    }
+} catch {
+    Write-Host "npm no encontrado; omitido."
+}
+
+# --- CrashDumps -------------------------------------------------------------------
+Write-Header "CrashDumps"
+Remove-Safe (Join-Path -Path $env:LOCALAPPDATA -ChildPath "CrashDumps")
+
+# --- Postman (SOLO cache/logs en Local) ------------------------------------------
+Write-Header "Postman (Local: cache y logs)"
+$postmanLocal = Join-Path -Path $env:LOCALAPPDATA -ChildPath "Postman"
+
+if (Test-Path -LiteralPath $postmanLocal) {
+    # Construye rutas de forma individual para evitar arrays en -ChildPath
+    $pmNames   = @('Cache','GPUCache','Code Cache','logs')
+    $pmTargets = foreach ($n in $pmNames) { Join-Path -Path $postmanLocal -ChildPath $n }
+    $pmTargets | ForEach-Object { Remove-Safe $_ }
+} else {
+    Write-Verbose "Postman local no existe en: $postmanLocal"
+}
+
+Write-Host "`nHecho. Si quieres aplicar cambios reales, ejecuta con -Apply."
+
+
+
+@echo off
+SETLOCAL ENABLEDELAYEDEXPANSION
+rem Ejecuta la simulación (no borra nada). No requiere elevación.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ClearNuGetCaches_SAFE.ps1"
+if errorlevel 1 (
+  echo.
+  echo [!] Ocurrio un error durante la simulacion.
+  pause
+)
+ENDLOCAL
+
+
+
+@echo off
+SETLOCAL ENABLEDELAYEDEXPANSION
+
+:: Elevar a Administrador si no lo somos
+net session >nul 2>&1
+if %errorlevel% NEQ 0 (
+  echo Solicitando privilegios de administrador...
+  powershell -NoProfile -Command "Start-Process -Verb RunAs -FilePath '%~f0'"
+  goto :eof
+)
+
+echo.
+echo Ejecutando LIMPIEZA REAL (usuario actual). No se borran sesiones ni perfiles.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ClearNuGetCaches_SAFE.ps1" -Apply
+
+if errorlevel 1 (
+  echo.
+  echo [!] Ocurrio un error durante la ejecucion.
+  pause
+)
+ENDLOCAL
+
+
+    
