@@ -1,220 +1,149 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using Pagos_Davivienda_TNP.Models.Dtos.GetAuthorizationManual;
-using Pagos_Davivienda_TNP.Utils;
+Así fue la petición, fue exitosa porque respondio, pero dio un mensaje de error de negocios, lo que veo es que la respuesta no se mapeo correctamente:
 
-namespace Pagos_Davivienda_TNP.Services;
+
+============== INICIO HTTP CLIENT ==============
+TraceId        : 0HNGS2RSG0DTF:0000000B
+Fecha/Hora     : 2025-11-04 20:58:23.119
+Método         : POST
+URL            : https://192.168.75.10:8443/davivienda-tnp/api/v1/authorization/manual
+---- Request Headers ----
+Accept: application/json
+
+---- Request Body ----
+{
+  "GetAuthorizationManual": {
+    "pMerchantID": "4001021",
+    "pTerminalID": "P0055468",
+    "pPrimaryAccountNumber": "5413330057004039",
+    "pDateExpiration": "2512",
+    "pCVV2": "000",
+    "pAmount": "10000",
+    "pSystemsTraceAuditNumber": "000002"
+  }
+}
+---- Response ----
+Status Code    : 200 OK
+---- Response Headers ----
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type
+
+---- Response Body ----
+{
+  "GetAuthorizationManualResponse": {
+    "GetAuthorizationManualResult": {
+      "ResponseCodeDescription": "94 - Transacci\u00F3n duplicada",
+      "ResponseCode": "94",
+      "TransactionType": "S",
+      "SystemsTraceAuditNumber": "000002",
+      "TimeLocalTrans": "204144",
+      "Amount": "10,000.00",
+      "MerchantID": "4001021",
+      "MCC": "5999",
+      "CurrencyCode": "340",
+      "PrimaryAccountNumber": "541333******4039",
+      "DateLocalTrans": "1104",
+      "RetrievalReferenceNumber": "530902000002",
+      "TerminalID": "P0055468"
+    }
+  }
+}
+Duración (ms)  : 256
+=============== FIN HTTP CLIENT ================
+
+
+----------------------------------Response Info---------------------------------
+Inicio: 2025-11-04 20:59:53
+-------------------------------------------------------------------------------
+Código Estado: 502
+Headers: [Content-Type, application/json; charset=utf-8]
+Cuerpo:
+
+                              {
+                                "header": {
+                                  "responseId": "5181d7a2118d4e3ca10060b356dd474e",
+                                  "timestamp": "2025-11-05T02:59:28.7628459Z",
+                                  "processingTime": "76198ms",
+                                  "statusCode": "94",
+                                  "message": "",
+                                  "requestHeader": {
+                                    "h-request-id": "string",
+                                    "h-channel": "string",
+                                    "h-terminal": "string",
+                                    "h-organization": "string",
+                                    "h-user-id": "string",
+                                    "h-provider": "string",
+                                    "h-session-id": "string",
+                                    "h-client-ip": "string",
+                                    "h-timestamp": "string"
+                                  }
+                                },
+                                "data": {
+                                  "GetAuthorizationManualResponse": {
+                                    "GetAuthorizationManualResult": {
+                                      "responseCode": "94",
+                                      "authorizationCode": "",
+                                      "transactionId": "",
+                                      "message": "",
+                                      "timestamp": ""
+                                    }
+                                  }
+                                }
+                              }
+----------------------------------Response Info---------------------------------
+Fin: 2025-11-04 20:59:53
+-------------------------------------------------------------------------------
+
+
+    Así tengo las clases de respuesta:
+
+using System.Text.Json.Serialization;
+
+namespace Pagos_Davivienda_TNP.Models.Dtos;
 
 /// <summary>
-/// Servicio que consume el endpoint externo de TNP para la **autorización manual** de pagos.
-/// <para>
-/// - Usa <see cref="IHttpClientFactory"/> con el cliente nombrado <c>"TNP"</c> para
-///   conservar handlers de logging y configuración centralizada.
-/// - Serializa y deserializa con <b>System.Text.Json</b> respetando los nombres
-///   exactos exigidos por el tercero (atributos <see cref="JsonPropertyNameAttribute"/>).
-/// - Nunca lanza excepciones hacia el controlador: ante errores del tercero o de red,
-///   retorna un <see cref="ResponseAuthorizationManualDto"/> con <c>responseCode</c> ≠ "00".
-/// </para>
+/// Encabezado estándar de la respuesta.
 /// </summary>
-public sealed class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
-    : Interfaces.IPaymentAuthorizationService
+public sealed class ResponseHeader
 {
-    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    /// <summary>Identificador único de la respuesta.</summary>
+    [JsonPropertyName("responseId")]
+    public string ResponseId { get; set; } = Guid.NewGuid().ToString("N");
 
-    #region System.Text.Json options compartidas
+    /// <summary>Marca de tiempo en UTC (ISO 8601).</summary>
+    [JsonPropertyName("timestamp")]
+    public string Timestamp { get; set; } = DateTime.UtcNow.ToString("o");
 
-    /// <summary>
-    /// Opciones de escritura: sin políticas de cambio de nombre y sin ignorar nulos,
-    /// para respetar exactamente los alias definidos con <c>[JsonPropertyName]</c>.
-    /// </summary>
-    private static readonly JsonSerializerOptions StjWriteOptions = new()
-    {
-        PropertyNamingPolicy = null,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
-    };
+    /// <summary>Tiempo total de procesamiento del request.</summary>
+    [JsonPropertyName("processingTime")]
+    public string ProcessingTime { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Opciones de lectura: <c>case-insensitive</c> para tolerar mayúsculas/minúsculas
-    /// en respuestas del tercero.
-    /// </summary>
-    private static readonly JsonSerializerOptions StjReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
+    /// <summary>Código de estado propio del negocio (p.ej. "00").</summary>
+    [JsonPropertyName("statusCode")]
+    public string StatusCode { get; set; } = string.Empty;
 
-    #endregion
+    /// <summary>Mensaje legible para el consumidor.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Invoca al endpoint <c>/authorization/manual</c> del proveedor TNP.
-    /// </summary>
-    /// <param name="request">
-    /// Cuerpo de la petición con la raíz <c>GetAuthorizationManual</c> y las propiedades solicitadas por el tercero.
-    /// </param>
-    /// <param name="ct">Token de cancelación cooperativa.</param>
-    /// <returns>
-    /// Un <see cref="ResponseAuthorizationManualDto"/> con:
-    /// <list type="bullet">
-    /// <item><description><c>responseCode="00"</c> y datos de autorización cuando la transacción es aprobada.</description></item>
-    /// <item><description>Un código de negocio ≠ "00" cuando ocurre cualquier error (validación, red, timeout, 4xx/5xx, formato inesperado, etc.).</description></item>
-    /// </list>
-    /// </returns>
-    public async Task<ResponseAuthorizationManualDto> AuthorizeManualAsync(AuthorizationBody request, CancellationToken ct = default)
-    {
-        // 1) Construcción segura de URL base + ruta.
-        var baseHost = (GlobalConnection.Current.Host ?? string.Empty).TrimEnd('/');
-        var url = $"{baseHost}/authorization/manual";
+    /// <summary>Header original del request, eco para trazabilidad.</summary>
+    [JsonPropertyName("requestHeader")]
+    public RequestHeader RequestHeader { get; set; } = new();
+}
 
-        try
-        {
-            // 2) Cliente HTTP centralizado (con logging handler encadenado por DI).
-            using var client = _httpClientFactory.CreateClient("TNP");
+using System.Text.Json.Serialization;
 
-            // 3) Asegurar cabeceras comunes para JSON.
-            client.DefaultRequestHeaders.Accept.Clear();
-            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+namespace Pagos_Davivienda_TNP.Models.Dtos;
 
-            // 4) Serializar EXACTAMENTE el contrato que espera el tercero (root: GetAuthorizationManual).
-            var json = JsonSerializer.Serialize(request, StjWriteOptions);
+/// <summary>
+/// Contenedor genérico de respuesta: header + data.
+/// </summary>
+/// <typeparam name="TData">Tipo del payload de datos.</typeparam>
+public sealed class ResponseModel<TData>
+{
+    [JsonPropertyName("header")]
+    public ResponseHeader Header { get; set; } = new();
 
-            // (Sugerencia de defensa) Valida que el shape sea correcto antes de enviar.
-            // if (!json.Contains("\"GetAuthorizationManual\""))
-            //     throw new InvalidOperationException("Payload inválido: falta 'GetAuthorizationManual'.");
-
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            // 5) Ejecutar la llamada HTTP (respetando cancelación).
-            using var resp = await client.PostAsync(url, content, ct);
-
-            // 6) Leer estado y cuerpo SIEMPRE para diagnóstico (aunque sea error).
-            var status = resp.StatusCode;
-            var body = resp.Content is null ? string.Empty : await resp.Content.ReadAsStringAsync(ct);
-
-            // 7) No-2xx → mapear a código de negocio y devolver DTO de error de negocio.
-            if (!resp.IsSuccessStatusCode)
-            {
-                // Evitar saturar logs; truncar si es muy grande.
-                var snippet = body is { Length: > 4096 } ? body[..4096] + "…(truncado)" : body;
-
-                return new ResponseAuthorizationManualDto
-                {
-                    ResponseCode = ErrorCodeMapper.FromHttpStatus(status),  // p.ej. 400→"12", 504→"68", 5xx→"96"
-                    AuthorizationCode = string.Empty,
-                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                    Message = $"TNP respondió {(int)status} {status}: {snippet}",
-                    Timestamp = TimeUtil.IsoNowUtc()
-                };
-            }
-
-            // 8) 2xx sin cuerpo → tratar como pasarela defectuosa.
-            if (string.IsNullOrWhiteSpace(body))
-            {
-                return new ResponseAuthorizationManualDto
-                {
-                    ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway), // "96"
-                    AuthorizationCode = string.Empty,
-                    TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                    Message = "TNP devolvió una respuesta vacía.",
-                    Timestamp = TimeUtil.IsoNowUtc()
-                };
-            }
-
-            // 9) Intento A: envelope estándar del tercero:
-            //    { "GetAuthorizationManualResponse": { "GetAuthorizationManualResult": { ... } } }
-            if (SafeDeserializeStj<GetAuthorizationManualResultEnvelope>(body, out var env) &&
-                env?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is not null)
-            {
-                return env.GetAuthorizationManualResponse.GetAuthorizationManualResult;
-            }
-
-            // 10) Intento B: DTO directo:
-            //     { "responseCode": "...", "authorizationCode": "...", ... }
-            if (SafeDeserializeStj<ResponseAuthorizationManualDto>(body, out var dto) && dto is not null)
-            {
-                return dto;
-            }
-
-            // 11) 2xx pero formato inesperado → error de pasarela.
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway), // "96"
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = "No se pudo interpretar la respuesta del TNP.",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-        // 12) Timeout del HttpClient (o cancelación por tiempo límite de Polly, etc.).
-        catch (TaskCanceledException)
-        {
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout), // "68"
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = "Timeout al invocar el servicio TNP.",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-        // 13) Cancelación explícita iniciada aguas arriba (p. ej. ct.Cancel()).
-        catch (OperationCanceledException)
-        {
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.GatewayTimeout), // "68"
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = "La operación fue cancelada.",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-        // 14) Errores de red/HTTP con StatusCode embebido (DNS, TLS, 502, etc.).
-        catch (HttpRequestException ex)
-        {
-            var status = ex.StatusCode ?? HttpStatusCode.BadGateway; // fallback: 502
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = $"Error al invocar el servicio TNP: {ex.Message}",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-        // 15) Cualquier otra excepción no contemplada → falla genérica de pasarela.
-        catch (Exception ex)
-        {
-            return new ResponseAuthorizationManualDto
-            {
-                ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway), // "96"
-                AuthorizationCode = string.Empty,
-                TransactionId = $"TXN-{Guid.NewGuid():N}".ToUpperInvariant(),
-                Message = $"Error inesperado al invocar TNP: {ex.Message}",
-                Timestamp = TimeUtil.IsoNowUtc()
-            };
-        }
-    }
-
-    /// <summary>
-    /// Deserializa con <b>System.Text.Json</b> de manera segura (sin excepción);
-    /// devuelve <c>true</c> cuando el parseo fue exitoso y <paramref name="value"/> no es <c>null</c>.
-    /// </summary>
-    /// <typeparam name="T">Tipo de destino.</typeparam>
-    /// <param name="json">Texto JSON a deserializar.</param>
-    /// <param name="value">Resultado deserializado o <c>default</c> si falla.</param>
-    private static bool SafeDeserializeStj<T>(string json, out T? value)
-    {
-        try
-        {
-            value = JsonSerializer.Deserialize<T>(json, StjReadOptions);
-            return value is not null;
-        }
-        catch
-        {
-            value = default;
-            return false;
-        }
-    }
+    [JsonPropertyName("data")]
+    public TData? Data { get; set; }
 }
