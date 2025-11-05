@@ -1,7 +1,9 @@
-<# Limpieza segura de cachés (NuGet, npm, CrashDumps, Postman-cache) en TODOS los perfiles.
-   - Solo AppData\Local y .nuget\packages de cada usuario
-   - NO toca %AppData%\Roaming ni Microsoft/Google/GitHubDesktop
-   - Simulación por defecto; usa -Apply para ejecutar real
+<# 
+  Limpieza segura de cachés (NuGet, npm, CrashDumps, Postman-cache) en TODOS los perfiles.
+  - Solo borra en AppData\Local y .nuget\packages de cada usuario.
+  - NO toca %AppData%\Roaming ni carpetas Microsoft/Google/GitHubDesktop.
+  - Omite carpetas sin AppData\Local o sin permisos.
+  - Por defecto corre en simulación (Dry-Run). Usa -Apply para ejecutar real.
 #>
 
 [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Low')]
@@ -12,44 +14,53 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$VerbosePreference = $VerboseMode ? 'Continue' : 'SilentlyContinue'
+if ($VerboseMode) { $VerbosePreference = 'Continue' } else { $VerbosePreference = 'SilentlyContinue' }
 $DryRun = -not $Apply
 
-function Write-Header([string]$t){ Write-Host "`n=== $t ===" }
+function Write-Header([string]$t) { Write-Host "`n=== $t ===" }
 
-function Remove-Safe([string]$Path){
-  if (-not [System.IO.Directory]::Exists($Path) -and -not [System.IO.File]::Exists($Path)) {
-    Write-Verbose "No existe o no accesible: $Path"; return
-  }
-  if ($DryRun){ Write-Host "[SIMULACION] Eliminar: $Path"; return }
-  try{
-    if ($PSCmdlet.ShouldProcess($Path,"Remove-Item")){
+function Remove-Safe([string]$Path) {
+  # Directory.Exists/File.Exists devuelven False si no hay acceso; no lanzan excepción
+  $exists = [System.IO.Directory]::Exists($Path) -or [System.IO.File]::Exists($Path)
+  if (-not $exists) { Write-Verbose "No existe o sin acceso: $Path"; return }
+
+  if ($DryRun) { Write-Host "[SIMULACION] Eliminar: $Path"; return }
+  try {
+    if ($PSCmdlet.ShouldProcess($Path, 'Remove-Item')) {
       Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
       Write-Host ("OK  {0}" -f $Path)
     }
-  }catch{
+  } catch {
     Write-Warning ("No se pudo eliminar {0}: {1}" -f $Path, $_.Exception.Message)
   }
 }
 
-# Combinar rutas (evita Join-Path con arrays y PS antiguos)
-function Join-Parts{ param([string]$Base,[string[]]$Parts)
-  $p=$Base; foreach($seg in $Parts){ $p=[System.IO.Path]::Combine($p,$seg) }; return $p
+# Combinar rutas (evita Join-Path con arrays; compatible con PS 5.1)
+function Join-Parts {
+  param(
+    [Parameter(Mandatory=$true)][string]$Base,
+    [Parameter(Mandatory=$true)][string[]]$Parts
+  )
+  $p = $Base
+  foreach ($seg in $Parts) { $p = [System.IO.Path]::Combine($p, $seg) }
+  return $p
 }
 
 # ---------- Detección de perfiles reales ----------
-$roots=@('C:\Users'); if($IncludeServiceProfiles){ $roots+='C:\Windows\ServiceProfiles' }
-$ex=@('Default','Default User','Public','All Users')
+$roots = @('C:\Users')
+if ($IncludeServiceProfiles) { $roots += 'C:\Windows\ServiceProfiles' }
 
-$users=@()
-foreach($r in $roots){
-  if(-not [System.IO.Directory]::Exists($r)){ continue }
-  foreach($d in (Get-ChildItem -Path $r -Directory -Force -ErrorAction SilentlyContinue)){
-    if($ex -contains $d.Name){ continue }
+$excludeNames = @('Default','Default User','Public','All Users')
+$userHomes = @()
+
+foreach ($root in $roots) {
+  if (-not [System.IO.Directory]::Exists($root)) { continue }
+  $dirs = Get-ChildItem -Path $root -Directory -Force -ErrorAction SilentlyContinue
+  foreach ($d in $dirs) {
+    if ($excludeNames -contains $d.Name) { continue }
     $local = Join-Parts -Base $d.FullName -Parts @('AppData','Local')
-    # Usa Directory.Exists → devuelve False si no hay acceso o no existe
-    if([System.IO.Directory]::Exists($local)){
-      $users += $d.FullName
+    if ([System.IO.Directory]::Exists($local)) {
+      $userHomes += $d.FullName
     } else {
       Write-Verbose "Omitido (no perfil real o sin acceso): $($d.FullName)"
     }
@@ -58,20 +69,21 @@ foreach($r in $roots){
 
 Write-Header "Limpieza segura (TODOS los usuarios)"
 Write-Host "Dry-Run: $DryRun | Verbose: $VerboseMode | ServiceProfiles: $IncludeServiceProfiles"
-Write-Host "Acciones: NuGet (.nuget\\packages, Local\\NuGet\\*), npm-cache, CrashDumps, Postman(Local cache)"
+Write-Host "Acciones: NuGet (.nuget\packages, Local\NuGet\*), npm-cache, CrashDumps, Postman(Local: Cache/GPUCache/Code Cache/logs)"
 Write-Host "Protegido: NO Roaming ni Microsoft/Google/GitHubDesktop."
 
 # ---------- Limpieza por usuario ----------
-foreach($userPath in $users){
+foreach ($userPath in $userHomes) {
   Write-Header "Perfil: $userPath"
 
   # NuGet
-  $nuget=@(
+  $nuget = @(
     (Join-Parts -Base $userPath -Parts @('.nuget','packages')),
     (Join-Parts -Base $userPath -Parts @('AppData','Local','NuGet','Cache')),
     (Join-Parts -Base $userPath -Parts @('AppData','Local','NuGet','v3-cache')),
     (Join-Parts -Base $userPath -Parts @('AppData','Local','NuGet','v2-cache'))
-  ); $nuget | ForEach-Object { Remove-Safe $_ }
+  )
+  $nuget | ForEach-Object { Remove-Safe $_ }
 
   # npm cache
   Remove-Safe (Join-Parts -Base $userPath -Parts @('AppData','Local','npm-cache'))
@@ -81,8 +93,8 @@ foreach($userPath in $users){
 
   # Postman (solo cache/logs en Local)
   $pmLocal = Join-Parts -Base $userPath -Parts @('AppData','Local','Postman')
-  if([System.IO.Directory]::Exists($pmLocal)){
-    foreach($n in @('Cache','GPUCache','Code Cache','logs')){
+  if ([System.IO.Directory]::Exists($pmLocal)) {
+    foreach ($n in @('Cache','GPUCache','Code Cache','logs')) {
       Remove-Safe (Join-Parts -Base $pmLocal -Parts @($n))
     }
   } else {
@@ -90,4 +102,4 @@ foreach($userPath in $users){
   }
 }
 
-Write-Host "`nHecho. Para ejecutar realmente, usa:  .\ClearNuGetCaches_SAFE.ps1 -Apply  (como Administrador)."
+Write-Host "`nHecho. Para ejecutar realmente: .\ClearNuGetCaches_SAFE.ps1 -Apply   (PowerShell como Administrador)."
