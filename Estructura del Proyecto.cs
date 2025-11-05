@@ -1,5 +1,5 @@
-Este es el codigo:
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -13,6 +13,18 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
 {
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
 
+    // Opciones STJ compartidas (respeta nombres anotados y es case-insensitive al leer)
+    private static readonly JsonSerializerOptions StjWriteOptions = new()
+    {
+        PropertyNamingPolicy = null,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never
+    };
+
+    private static readonly JsonSerializerOptions StjReadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     public async Task<ResponseAuthorizationManualDto> AuthorizeManualAsync(AuthorizationBody request, CancellationToken ct = default)
     {
         var baseHost = (GlobalConnection.Current.Host ?? string.Empty).TrimEnd('/');
@@ -20,18 +32,14 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
 
         try
         {
-            //1. Crear cliente HTTP
             using var client = _httpClientFactory.CreateClient("TNP");
 
-            //2.Headers
+            // Headers
             client.DefaultRequestHeaders.Accept.Clear();
-            client.DefaultRequestHeaders.Accept.Add(new("application/json"));
+            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            var json = JsonSerializer.Serialize(request, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy  = null, //Respeta nombres anotados en DTOs
-                DefaultIgnoreCondition = JsonIgnoreCondition.Never
-            });
+            // Serializar EXACTO lo que el tercero espera (ya viene con GetAuthorizationManual como raíz)
+            var json = JsonSerializer.Serialize(request, StjWriteOptions);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             using var resp = await client.PostAsync(url, content, ct);
@@ -39,10 +47,10 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
 
             var body = resp.Content is null ? string.Empty : await resp.Content.ReadAsStringAsync(ct);
 
+            // No-2xx → mapear a código negocio y devolver DTO de error de negocio
             if (!resp.IsSuccessStatusCode)
             {
                 var snippet = body is { Length: > 4096 } ? body[..4096] + "…(truncado)" : body;
-                // Mapea el HTTP del tercero a código negocio y regresa DTO
                 return new ResponseAuthorizationManualDto
                 {
                     ResponseCode = ErrorCodeMapper.FromHttpStatus(status),
@@ -53,6 +61,7 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
                 };
             }
 
+            // 2xx sin cuerpo
             if (string.IsNullOrWhiteSpace(body))
             {
                 return new ResponseAuthorizationManualDto
@@ -65,14 +74,18 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
                 };
             }
 
-            var env = SafeDeserialize<GetAuthorizationManualResultEnvelope>(body);
-            if (env?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is not null)
+            // Intento A) Envelope esperado del tercero
+            if (SafeDeserializeStj<GetAuthorizationManualResultEnvelope>(body, out var env) &&
+                env?.GetAuthorizationManualResponse?.GetAuthorizationManualResult is not null)
+            {
                 return env.GetAuthorizationManualResponse.GetAuthorizationManualResult;
+            }
 
-            var dto = SafeDeserialize<ResponseAuthorizationManualDto>(body);
-            if (dto is not null)
+            // Intento B) DTO directo
+            if (SafeDeserializeStj<ResponseAuthorizationManualDto>(body, out var dto) && dto is not null)
                 return dto;
 
+            // Formato inesperado aun con 2xx
             return new ResponseAuthorizationManualDto
             {
                 ResponseCode = ErrorCodeMapper.FromHttpStatus(HttpStatusCode.BadGateway),
@@ -129,11 +142,17 @@ public class PaymentAuthorizationService(IHttpClientFactory httpClientFactory)
         }
     }
 
-    private static T? SafeDeserialize<T>(string json)
+    private static bool SafeDeserializeStj<T>(string json, out T? value)
     {
-        try { return JsonConvert.DeserializeObject<T>(json); }
-        catch { return default; }
+        try
+        {
+            value = JsonSerializer.Deserialize<T>(json, StjReadOptions);
+            return value is not null;
+        }
+        catch
+        {
+            value = default;
+            return false;
+        }
     }
 }
-
-Pero ahora no funciona SafeDeserializa, debe usar System.Text ahora.
