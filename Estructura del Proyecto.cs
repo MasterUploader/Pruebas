@@ -4,11 +4,12 @@
 
 .DESCRIPTION
   - Solo borra cachés en AppData\Local y .nuget\packages por cada usuario.
-  - No borra datos de sesión ni perfiles (Roaming), ni carpetas Microsoft/Google/GitHubDesktop.
-  - Requiere elevación para escribir en otros perfiles.
+  - NO borra %AppData%\Roaming (sesiones, colecciones), NI carpetas Microsoft/Google/GitHubDesktop.
+  - Requiere elevación para afectar otros perfiles.
+  - Por defecto corre en simulación (Dry-Run). Usa -Apply para ejecutar.
 
 .PARAMETER Apply
-  Ejecuta la limpieza real (por defecto: simulación).
+  Ejecuta la limpieza real.
 
 .PARAMETER IncludeServiceProfiles
   Incluye C:\Windows\ServiceProfiles (LocalService, NetworkService).
@@ -59,7 +60,7 @@ $roots = @('C:\Users')
 if ($IncludeServiceProfiles) { $roots += 'C:\Windows\ServiceProfiles' }
 
 $exclude = @('Default','Default User','Public','All Users')
-$homes = foreach ($r in $roots) {
+$userHomes = foreach ($r in $roots) {
   if (Test-Path $r) {
     Get-ChildItem -Path $r -Directory -Force -ErrorAction SilentlyContinue |
       Where-Object { $exclude -notcontains $_.Name } |
@@ -68,28 +69,28 @@ $homes = foreach ($r in $roots) {
 }
 
 # --- Limpiar por usuario ----------------------------------------------------------
-foreach ($home in $homes) {
-  Write-Header "Perfil: $home"
+foreach ($userPath in $userHomes) {
+  Write-Header "Perfil: $userPath"
 
   # NuGet (carpetas de cache del usuario)
   $nugetPaths = @(
-    Join-Path -Path $home -ChildPath ".nuget\packages",
-    Join-Path -Path $home -ChildPath "AppData\Local\NuGet\Cache",
-    Join-Path -Path $home -ChildPath "AppData\Local\NuGet\v3-cache",
-    Join-Path -Path $home -ChildPath "AppData\Local\NuGet\v2-cache"
+    Join-Path -Path $userPath -ChildPath ".nuget\packages",
+    Join-Path -Path $userPath -ChildPath "AppData\Local\NuGet\Cache",
+    Join-Path -Path $userPath -ChildPath "AppData\Local\NuGet\v3-cache",
+    Join-Path -Path $userPath -ChildPath "AppData\Local\NuGet\v2-cache"
   )
   $nugetPaths | ForEach-Object { Remove-Safe $_ }
 
   # npm cache
-  $npmCache = Join-Path -Path $home -ChildPath "AppData\Local\npm-cache"
+  $npmCache = Join-Path -Path $userPath -ChildPath "AppData\Local\npm-cache"
   Remove-Safe $npmCache
 
   # CrashDumps
-  $crashDumps = Join-Path -Path $home -ChildPath "AppData\Local\CrashDumps"
+  $crashDumps = Join-Path -Path $userPath -ChildPath "AppData\Local\CrashDumps"
   Remove-Safe $crashDumps
 
   # Postman (solo caches en Local)
-  $postmanLocal = Join-Path -Path $home -ChildPath "AppData\Local\Postman"
+  $postmanLocal = Join-Path -Path $userPath -ChildPath "AppData\Local\Postman"
   if (Test-Path -LiteralPath $postmanLocal) {
     foreach ($n in @('Cache','GPUCache','Code Cache','logs')) {
       $p = Join-Path -Path $postmanLocal -ChildPath $n
@@ -101,10 +102,3 @@ foreach ($home in $homes) {
 }
 
 Write-Host "`nHecho. Para aplicar realmente, ejecuta con -Apply (PowerShell como Administrador)."
-
-
-
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ClearNuGetCaches_SAFE.ps1" -VerboseMode
-
-  
