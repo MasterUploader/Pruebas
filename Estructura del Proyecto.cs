@@ -1,5 +1,5 @@
 <# 
-  Limpieza segura de cachés (NuGet, npm, CrashDumps, Postman-cache) en TODOS los perfiles.
+  Limpieza segura de cachés (NuGet, npm, CrashDumps, Postman-cache, Temp) en TODOS los perfiles.
   - Solo borra en AppData\Local y .nuget\packages de cada usuario.
   - NO toca %AppData%\Roaming ni carpetas Microsoft/Google/GitHubDesktop.
   - Omite carpetas sin AppData\Local o sin permisos.
@@ -20,7 +20,6 @@ $DryRun = -not $Apply
 function Write-Header([string]$t) { Write-Host "`n=== $t ===" }
 
 function Remove-Safe([string]$Path) {
-  # Directory.Exists/File.Exists devuelven False si no hay acceso; no lanzan excepción
   $exists = [System.IO.Directory]::Exists($Path) -or [System.IO.File]::Exists($Path)
   if (-not $exists) { Write-Verbose "No existe o sin acceso: $Path"; return }
 
@@ -35,7 +34,6 @@ function Remove-Safe([string]$Path) {
   }
 }
 
-# Combinar rutas (evita Join-Path con arrays; compatible con PS 5.1)
 function Join-Parts {
   param(
     [Parameter(Mandatory=$true)][string]$Base,
@@ -69,7 +67,7 @@ foreach ($root in $roots) {
 
 Write-Header "Limpieza segura (TODOS los usuarios)"
 Write-Host "Dry-Run: $DryRun | Verbose: $VerboseMode | ServiceProfiles: $IncludeServiceProfiles"
-Write-Host "Acciones: NuGet (.nuget\packages, Local\NuGet\*), npm-cache, CrashDumps, Postman(Local: Cache/GPUCache/Code Cache/logs)"
+Write-Host "Acciones: NuGet (.nuget\\packages, Local\\NuGet\\*), npm-cache, CrashDumps, Postman(Local cache), Temp(Local)"
 Write-Host "Protegido: NO Roaming ni Microsoft/Google/GitHubDesktop."
 
 # ---------- Limpieza por usuario ----------
@@ -99,6 +97,18 @@ foreach ($userPath in $userHomes) {
     }
   } else {
     Write-Verbose "Postman local no existe/accesible: $pmLocal"
+  }
+
+  # Temp (contenido, no la carpeta)
+  $tempLocal = Join-Parts -Base $userPath -Parts @('AppData','Local','Temp')
+  if ([System.IO.Directory]::Exists($tempLocal)) {
+    Write-Verbose "Limpiando contenido de Temp: $tempLocal"
+    $items = Get-ChildItem -Path $tempLocal -Force -ErrorAction SilentlyContinue
+    foreach ($i in $items) {
+      Remove-Safe $i.FullName
+    }
+  } else {
+    Write-Verbose "Temp no existe/accesible: $tempLocal"
   }
 }
 
