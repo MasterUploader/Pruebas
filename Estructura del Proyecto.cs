@@ -3,15 +3,16 @@ using Swashbuckle.AspNetCore.Filters;
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.EnableAnnotations();
-    c.ExampleFilters(); // <-- habilita ejemplos
+    c.ExampleFilters(); // habilita [SwaggerRequestExample]/[SwaggerResponseExample]
 });
 
+// registra el assembly que contiene las clases de ejemplo
 builder.Services.AddSwaggerExamplesFromAssemblyOf<
     MS_BAN_56_ProcesamientoTransaccionesPOS.Swagger.ValidarTransaccionesOkExample>();
 
 
 
+// /Swagger/ValidarTransaccionesExamples.cs
 using Swashbuckle.AspNetCore.Filters;
 using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Transacciones.ValidarTransaccion;
 
@@ -29,7 +30,7 @@ public sealed class ValidarTransaccionesRequestExample : IExamplesProvider<Valid
 
 // ====== Responses ======
 
-// 200 OK -> No existe, se puede continuar (incluye llaves y mensaje)
+// 200 OK -> No existe: se puede continuar
 public sealed class ValidarTransaccionesOkExample : IExamplesProvider<RespuestaValidarTransaccionesDto>
 {
     public RespuestaValidarTransaccionesDto GetExamples() => new()
@@ -41,39 +42,39 @@ public sealed class ValidarTransaccionesOkExample : IExamplesProvider<RespuestaV
     };
 }
 
-// 409 Conflict -> Ya existe: devuelve TODOS los datos del registro
+// 409 Conflict -> Ya existe: devuelve todos los datos
 public sealed class ValidarTransaccionesConflictExample : IExamplesProvider<RespuestaValidarTransaccionesDto>
 {
     public RespuestaValidarTransaccionesDto GetExamples() => new()
     {
-        NumeroCuenta       = "123456789012345",          // 15
-        MontoDebitado      = "000000000000100000",        // 18
-        MontoAcreditado    = "000000000000100000",        // 18
-        CodigoComercio     = "0004010210",                // 10
-        NombreComercio     = "COMERCIO DEMO S.A.",        // 60
-        TerminalComercio   = "P0055468TERM001",           // 15
-        Descripcion        = "Compra manual POS",         // 200
-        NaturalezaContable = "DB",                        // 2
-        NumeroCorte        = "01",                        // 2
-        IdTransaccionUnico = "TX-20251107-000002",        // 100
-        EstadoTransaccion  = "Aprobada",                  // 100
-        DescripcionEstado  = "Transaccion aprobada",      // 100
-        CodigoError        = "40901",                     // BizCode 5 dígitos
+        NumeroCuenta       = "123456789012345",           // 15
+        MontoDebitado      = "000000000000100000",         // 18
+        MontoAcreditado    = "000000000000100000",         // 18
+        CodigoComercio     = "0004010210",                 // 10
+        NombreComercio     = "COMERCIO DEMO S.A.",         // 60
+        TerminalComercio   = "P0055468TERM001",            // 15
+        Descripcion        = "Compra manual POS",          // 200
+        NaturalezaContable = "DB",                         // 2
+        NumeroCorte        = "01",                         // 2
+        IdTransaccionUnico = "TX-20251107-000002",         // 100
+        EstadoTransaccion  = "Aprobada",                   // 100
+        DescripcionEstado  = "Transaccion aprobada",       // 100
+        CodigoError        = "40901",
         DescripcionError   = "La transaccion ya existe (NUMCORTE, IDTRANUNI)."
     };
 }
 
-// 400 BadRequest -> Error de validacion de entrada
+// 400 BadRequest
 public sealed class ValidarTransaccionesBadRequestExample : IExamplesProvider<RespuestaValidarTransaccionesDto>
 {
     public RespuestaValidarTransaccionesDto GetExamples() => new()
     {
         CodigoError      = "40001",
-        DescripcionError = "Solicitud invalida: campos requeridos faltantes o formato incorrecto."
+        DescripcionError = "Solicitud invalida: modelo DTO invalido."
     };
 }
 
-// 500 InternalServerError -> Error no controlado
+// 500 InternalServerError
 public sealed class ValidarTransaccionesErrorExample : IExamplesProvider<RespuestaValidarTransaccionesDto>
 {
     public RespuestaValidarTransaccionesDto GetExamples() => new()
@@ -86,24 +87,32 @@ public sealed class ValidarTransaccionesErrorExample : IExamplesProvider<Respues
 
 
 
-
-using Swashbuckle.AspNetCore.Annotations;
+using Microsoft.AspNetCore.Mvc;
+using System.Net.Mime;
 using Swashbuckle.AspNetCore.Filters;
+using MS_BAN_56_ProcesamientoTransaccionesPOS.Models.Dtos.Transacciones.ValidarTransaccion;
 using MS_BAN_56_ProcesamientoTransaccionesPOS.Swagger;
 
 [HttpPost("ValidarTransacciones")]
 [Consumes(MediaTypeNames.Application.Json)]
+[ProducesResponseType(typeof(RespuestaValidarTransaccionesDto), StatusCodes.Status200OK)]
+[ProducesResponseType(typeof(RespuestaValidarTransaccionesDto), StatusCodes.Status409Conflict)]
+[ProducesResponseType(typeof(RespuestaValidarTransaccionesDto), StatusCodes.Status400BadRequest)]
+[ProducesResponseType(typeof(RespuestaValidarTransaccionesDto), StatusCodes.Status500InternalServerError)]
 [SwaggerRequestExample(typeof(ValidarTransaccionesDto), typeof(ValidarTransaccionesRequestExample))]
-[SwaggerResponse(StatusCodes.Status200OK,    "No existe: puede continuar.", typeof(RespuestaValidarTransaccionesDto))]
-[SwaggerResponseExample(StatusCodes.Status200OK,    typeof(ValidarTransaccionesOkExample))]
-[SwaggerResponse(StatusCodes.Status409Conflict, "Duplicado: ya existe.",     typeof(RespuestaValidarTransaccionesDto))]
+[SwaggerResponseExample(StatusCodes.Status200OK, typeof(ValidarTransaccionesOkExample))]
 [SwaggerResponseExample(StatusCodes.Status409Conflict, typeof(ValidarTransaccionesConflictExample))]
-[SwaggerResponse(StatusCodes.Status400BadRequest, "Solicitud invalida.",     typeof(RespuestaValidarTransaccionesDto))]
 [SwaggerResponseExample(StatusCodes.Status400BadRequest, typeof(ValidarTransaccionesBadRequestExample))]
-[SwaggerResponse(StatusCodes.Status500InternalServerError, "Error interno.", typeof(RespuestaValidarTransaccionesDto))]
 [SwaggerResponseExample(StatusCodes.Status500InternalServerError, typeof(ValidarTransaccionesErrorExample))]
 public async Task<IActionResult> ValidarTransacciones(
-    [FromBody] ValidarTransaccionesDto validarTransaccionesDto, CancellationToken ct = default)
+    [FromBody] ValidarTransaccionesDto validarTransaccionesDto,
+    CancellationToken ct = default)
 {
-    // ... tu logica actual (sin cambios) ...
+    // tu lógica actual (sin cambios)
 }
+
+
+
+
+
+
