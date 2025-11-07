@@ -1,108 +1,207 @@
-Así deje la tabla y el logico 
+public sealed class ValidarTransaccionesRequest
+{
+    public string NumeroDeCorte { get; set; } = "";
+    public string IdTransaccionUnico { get; set; } = "";
+}
 
-     A* ================================================================
-     A*  PF: POSRE01G  (Librería: BCAH96DTA)
-     A*  Proposito : Registrar posteos POS / movimientos contables.
-     A*  Programador: Brayan René Banegas Mejía
-     A*  Fecha: 7 de noviembre de 2025
-     A* ================================================================
-     A                                      UNIQUE
-                R $POSRE01G                 TEXT('Posteos POS / Movimientos')
-     A* -- Clave primaria y metadatos de control ------------------------
-     A            GUID          36A         ALIAS(GUUID)
-     A                                      COLHDG('GUID (UUID)')
-     A                                      TEXT('GUID/UUID clave primaria')
+public sealed class Posre01gRecordDto
+{
+    public string Guid { get; set; } = "";
+    public string FechaPosteo { get; set; } = "";
+    public string HoraPosteo { get; set; } = "";
+    public string NumeroCuenta { get; set; } = "";
+    public string MontoDebitado { get; set; } = "";
+    public string MontoAcreditado { get; set; } = "";
+    public string CodigoComercio { get; set; } = "";
+    public string NombreComercio { get; set; } = "";
+    public string TerminalComercio { get; set; } = "";
+    public string Descripcion { get; set; } = "";
+    public string NaturalezaContable { get; set; } = "";
+    public string NumeroCorte { get; set; } = "";
+    public string IdTransaccionUnico { get; set; } = "";
+    public string EstadoTransaccion { get; set; } = "";
+    public string DescripcionEstado { get; set; } = "";
+    public string CodigoError { get; set; } = "";
+    public string DescripcionError { get; set; } = "";
+}
 
-     A            FECHAPOST      8A         ALIAS(FECHA_POSTEO)
-     A                                      COLHDG('Fecha  AAAAMMDD')
-     A                                      TEXT('Fecha posteo (AAAAMMDD)')
-
-     A            HORAPOST       6A         ALIAS(HORA_POSTEO)
-     A                                      COLHDG('Hora  HHMMSS')
-     A                                      TEXT('Hora posteo (texto HHMMSS)')
-
-     A* -- Datos de la operacion ----------------------------------------
-     A            NUMCUENTA     16A         ALIAS(NUMERO_CUENTA)
-     A                                      COLHDG('Numero cuenta')
-     A                                      TEXT('Número de cuenta/PAN (texto)')
-
-     A            MTODEBITO     18A         ALIAS(MONTO_DEBITADO)
-     A                                      COLHDG('Monto debitado')
-     A                                      TEXT('Monto debitado como CHAR')
-
-     A            MTOACREDI     18A         ALIAS(MONTO_ACREDITADO)
-     A                                      COLHDG('Monto acreditado')
-     A                                      TEXT('Monto acreditado como CHAR')
-
-     A            CODCOMERC      7A         ALIAS(CODIGO_COMERCIO)
-     A                                      COLHDG('Cod comercio')
-     A                                      TEXT('Codigo de comercio (7)')
-
-     A            NOMCOMERC    100A         ALIAS(NOMBRE_COMERCIO)
-     A                                      COLHDG('Nombre comercio')
-     A                                      TEXT('Nombre del comercio')
-
-     A            TERMINAL       8A         ALIAS(TERMINAL_COMERCIO)
-     A                                      COLHDG('Terminal')
-     A                                      TEXT('ID terminal (8)')
-
-     A            DESCRIPC     200A         ALIAS(DESCRIPCION)
-     A                                      COLHDG('Descripcion')
-     A                                      TEXT('Descripcion/leyenda')
-
-     A* -- Naturaleza / control contable --------------------------------
-     A            NATCONTA       1A         ALIAS(NATURALEZA_CONTABLE)
-     A                                      COLHDG('Naturaleza D/C')
-     A                                      TEXT('D=Debito, C=Credito')
-
-     A            NUMCORTE       6A         ALIAS(NUMERO_CORTE)
-     A                                      COLHDG('Numero corte')
-     A                                      TEXT('Numero de corte/lote (6)')
-
-     A            IDTRANUNI      6A         ALIAS(ID_TRANSACCION_UNICO)
-     A                                      COLHDG('Id trans unico')
-     A                                      TEXT('STAN/correlativo externo (6)')
-
-     A* -- Estado y errores ---------------------------------------------
-     A            ESTADO         1A         ALIAS(ESTADO_TRANSACCION)
-     A                                      COLHDG('Estado')
-     A                                      TEXT('Según flujo')
-
-     A            DESCESTADO   100A         ALIAS(DESCRIPCION_ESTADO)
-     A                                      COLHDG('Descripcion estado')
-     A                                      TEXT('Descripcion del estado')
-
-     A            CODERROR       5A         ALIAS(CODIGO_ERROR)
-     A                                      COLHDG('Codigo error(5)')
-     A                                      TEXT('Codigo de error')
-
-     A            DESCERROR    200A         ALIAS(DESCRIPCION_ERROR)
-     A                                      COLHDG('Descripcion error')
-     A                                      TEXT('Descripcion del error')
-
-     A* -- Definicion de la clave primaria -------------------------------
-     A          K IDTRANUNI
+public sealed class ValidarTransaccionesResponse
+{
+    public bool Existe { get; set; }
+    public string Mensaje { get; set; } = "";
+    public Posre01gRecordDto? Registro { get; set; }
+}
 
 
 
 
-     A* ================================================================
-     A*  LF: POSRE01G01  (Librería: BCAH96DTA)
-     A*  Propósito : Índice UNICO para consulta por IDTRANUNI y NUMCORTE
-     A*  Nota      : Usa campos del PF POSRE01G (PFILE).
-     A* ================================================================
-     A                                      UNIQUE
-
-     A          R $POSRE01G                 PFILE(BCAH96DTA/POSRE01G)
-     A                                      TEXT('IDX UNICO DEDUP POS')
-     A          K NUMCORTE
-     A          K IDTRANUNI
 
 
+using System.Text.RegularExpressions;
+using System.Data.Common;
+using Microsoft.AspNetCore.Http;
+using RestUtilities.Connections.Abstractions; // IDatabaseConnection
+// using RestUtilities.QueryBuilder.Core;      // Ajusta a tu namespace real
+// using RestUtilities.QueryBuilder.Builders;
+
+public interface IValidarTransaccionesService
+{
+    Task<ValidarTransaccionesResponse> ValidarAsync(string numeroCorte, string idTransaccionUnico, CancellationToken ct = default);
+}
+
+public sealed class ValidarTransaccionesService : IValidarTransaccionesService
+{
+    private readonly IDatabaseConnection _db;
+    private readonly IHttpContextAccessor _http;
+
+    public ValidarTransaccionesService(IDatabaseConnection db, IHttpContextAccessor http)
+    {
+        _db = db;
+        _http = http;
+    }
+
+    public async Task<ValidarTransaccionesResponse> ValidarAsync(string numeroCorte, string idTransaccionUnico, CancellationToken ct = default)
+    {
+        // Normaliza: ambos campos son CHAR(6) en DDS
+        static string San(string v, int len)
+        {
+            if (string.IsNullOrWhiteSpace(v)) return new string('0', len);
+            v = v.Trim();
+            v = Regex.Replace(v, @"[^A-Za-z0-9_]", "");
+            v = v.Length > len ? v[^len..] : v.PadLeft(len, '0');
+            return v.ToUpperInvariant();
+        }
+
+        var corte = San(numeroCorte, 6);
+        var stan  = San(idTransaccionUnico, 6);
+
+        // ============================
+        // Query con SelectQueryBuilder
+        // ============================
+        var qb = new SelectQueryBuilder("POSRE01G01", "BCAH96DTA", SqlDialect.Db2i)
+            // Selección (usamos alias para mapear limpio al DTO)
+            .Select(
+                ("GUID",                     "GUID"),
+                ("FECHAPOST",               "FECHA_POSTEO"),
+                ("HORAPOST",                "HORA_POSTEO"),
+                ("NUMCUENTA",               "NUMERO_CUENTA"),
+                ("MTODEBITO",               "MONTO_DEBITADO"),
+                ("MTOACREDI",               "MONTO_ACREDITADO"),
+                ("CODCOMERC",               "CODIGO_COMERCIO"),
+                ("NOMCOMERC",               "NOMBRE_COMERCIO"),
+                ("TERMINAL",                "TERMINAL_COMERCIO"),
+                ("DESCRIPC",                "DESCRIPCION"),
+                ("NATCONTA",                "NATURALEZA_CONTABLE"),
+                ("NUMCORTE",                "NUMERO_CORTE"),
+                ("IDTRANUNI",               "ID_TRANSACCION_UNICO"),
+                ("ESTADO",                  "ESTADO_TRANSACCION"),
+                ("DESCESTADO",              "DESCRIPCION_ESTADO"),
+                ("CODERROR",                "CODIGO_ERROR"),
+                ("DESCERROR",               "DESCRIPCION_ERROR")
+            )
+            // Filtrado por la clave del LF
+            .WhereRaw($"NUMCORTE = '{corte}'")
+            .WhereRaw($"IDTRANUNI = '{stan}'")
+            .FetchFirst(1); // AS400: FETCH FIRST N ROWS ONLY
+
+        var qr = qb.Build(); // -> QueryResult con .Sql (y .Parameters vacío en tu versión)
+
+        _db.Open();
+        if (!_db.IsConnected)
+        {
+            return new ValidarTransaccionesResponse
+            {
+                Existe = false,
+                Mensaje = "No se pudo establecer conexion con AS400.",
+                Registro = null
+            };
+        }
+
+        try
+        {
+            // Preferimos el overload que acepta QueryResult (inyecta logging y params si aplica)
+            DbCommand cmd;
+            try
+            {
+                cmd = _db.GetDbCommand(qr, _http?.HttpContext);
+            }
+            catch
+            {
+                cmd = _db.GetDbCommand();
+                cmd.CommandText = qr.Sql;
+            }
+
+            using var rd = await cmd.ExecuteReaderAsync(ct);
+            if (await rd.ReadAsync(ct))
+            {
+                var r = new Posre01gRecordDto
+                {
+                    Guid                = rd["GUID"]?.ToString() ?? "",
+                    FechaPosteo         = rd["FECHA_POSTEO"]?.ToString() ?? "",
+                    HoraPosteo          = rd["HORA_POSTEO"]?.ToString() ?? "",
+                    NumeroCuenta        = rd["NUMERO_CUENTA"]?.ToString() ?? "",
+                    MontoDebitado       = rd["MONTO_DEBITADO"]?.ToString() ?? "",
+                    MontoAcreditado     = rd["MONTO_ACREDITADO"]?.ToString() ?? "",
+                    CodigoComercio      = rd["CODIGO_COMERCIO"]?.ToString() ?? "",
+                    NombreComercio      = rd["NOMBRE_COMERCIO"]?.ToString() ?? "",
+                    TerminalComercio    = rd["TERMINAL_COMERCIO"]?.ToString() ?? "",
+                    Descripcion         = rd["DESCRIPCION"]?.ToString() ?? "",
+                    NaturalezaContable  = rd["NATURALEZA_CONTABLE"]?.ToString() ?? "",
+                    NumeroCorte         = rd["NUMERO_CORTE"]?.ToString() ?? "",
+                    IdTransaccionUnico  = rd["ID_TRANSACCION_UNICO"]?.ToString() ?? "",
+                    EstadoTransaccion   = rd["ESTADO_TRANSACCION"]?.ToString() ?? "",
+                    DescripcionEstado   = rd["DESCRIPCION_ESTADO"]?.ToString() ?? "",
+                    CodigoError         = rd["CODIGO_ERROR"]?.ToString() ?? "",
+                    DescripcionError    = rd["DESCRIPCION_ERROR"]?.ToString() ?? ""
+                };
+
+                return new ValidarTransaccionesResponse
+                {
+                    Existe = true,
+                    Mensaje = "La transaccion ya existe (NUMCORTE, IDTRANUNI).",
+                    Registro = r
+                };
+            }
+
+            return new ValidarTransaccionesResponse
+            {
+                Existe = false,
+                Mensaje = "No existe el registro. Puede continuar.",
+                Registro = null
+            };
+        }
+        finally
+        {
+            _db.Close();
+        }
+    }
+}
 
 
-Necesito ahora que el enpoint ValidarTransacciones, lea esta tabla usando el indice, si existe el registro devuelva error, sino existe el registro devuelva todos los datos.
-          
+
+
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("[controller]")]
+public sealed class TransaccionesController : ControllerBase
+{
+    private readonly IValidarTransaccionesService _svc;
+    public TransaccionesController(IValidarTransaccionesService svc) => _svc = svc;
+
+    [HttpPost("ValidarTransacciones")]
+    public async Task<IActionResult> ValidarTransacciones([FromBody] ValidarTransaccionesRequest req, CancellationToken ct)
+    {
+        var r = await _svc.ValidarAsync(req.NumeroDeCorte, req.IdTransaccionUnico, ct);
+        if (r.Existe) return Conflict(r); // 409
+        return Ok(r);                     // 200
+    }
+}
+
+
+
+
+
 
 
 
