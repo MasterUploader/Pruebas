@@ -1,36 +1,38 @@
 /// <summary>
 /// Registra un log de SQL con error y lo encola con el INICIO real para mantener el orden cronológico.
-/// Completa información de base de datos y biblioteca a partir de la cadena de conexión y del propio comando.
+/// Completa información de base de datos y biblioteca a partir de la cadena de conexión, del DbConnection
+/// y del propio comando SQL.
 /// </summary>
+/// <param name="command">Comando de base de datos que produjo el error.</param>
+/// <param name="ex">Excepción lanzada por el proveedor de datos.</param>
+/// <param name="context">Contexto HTTP actual (si existe) para asociar el log al TraceId de la petición.</param>
 public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null)
 {
     try
     {
-        // Información básica de la conexión (IP, puerto, database, biblioteca si está en el connection string).
+        // Información básica de la conexión (IP, puerto, database, library si está en el connection string).
         var conn = command.Connection;
         var info = LogHelper.ExtractDbConnectionInfo(conn?.ConnectionString);
 
-        // 1) Nombre de base de datos:
-        //    - Preferir lo que venga del connection string.
-        //    - Si no existe, usar la propiedad Database del DbConnection (como en el log de éxito).
-        var databaseName = !string.IsNullOrWhiteSpace(info.Database)
-            ? info.Database
-            : (conn?.Database ?? "Desconocida");
-
-        // 2) Tabla/esquema a partir del SQL.
-        //    ExtractTableName puede devolver "schema.tabla" o solo "tabla".
+        // 1) Tabla/esquema a partir del SQL.
+        //    ExtractTableName puede devolver "bcah96dta.iposre01g1" o solo "iposre01g1".
         var rawTable = LogHelper.ExtractTableName(command.CommandText);
-        string schema = info.Library;   // biblioteca/esquema desde connection string, si existe
-        string tableName = rawTable;
 
-        if (string.IsNullOrWhiteSpace(schema))
+        string schema = info.Library;     // Biblioteca/esquema desde la cadena de conexión (si existe).
+        string tableName = rawTable;      // Nombre de tabla tal cual lo devolvió el helper.
+
+        if (!string.IsNullOrWhiteSpace(rawTable))
         {
-            // Si no vino biblioteca en la cadena de conexión, la inferimos del SQL.
             var parts = rawTable.Split('.', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length > 1)
             {
-                schema = parts[0];      // bcah96dta
-                tableName = parts[1];   // iposre01g1
+                // Si no venía biblioteca en el connection string, la inferimos del SQL.
+                if (string.IsNullOrWhiteSpace(schema))
+                {
+                    schema = parts[0];    // bcah96dta
+                }
+
+                tableName = parts[^1];    // iposre01g1
             }
         }
 
@@ -39,19 +41,33 @@ public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? conte
             schema = "Desconocida";
         }
 
-        // 3) IP y puerto: si no se pudieron resolver desde el connection string,
-        //    al menos rellenar IP con DataSource para tener algo útil en el log.
+        // 2) Nombre de base de datos:
+        //    - Preferir lo que venga del connection string.
+        //    - Si está vacío, usar conn.Database (como en el log de ejecución SQL).
+        //    - Si aún está vacío, usar el esquema como "database lógica".
+        var databaseName = !string.IsNullOrWhiteSpace(info.Database)
+            ? info.Database
+            : (!string.IsNullOrWhiteSpace(conn?.Database)
+                ? conn!.Database
+                : schema);
+
+        if (string.IsNullOrWhiteSpace(databaseName))
+        {
+            databaseName = "Desconocida";
+        }
+
+        // 3) IP:
+        //    - Preferir la IP interpretada desde la cadena de conexión.
+        //    - Si viene vacía, usar DataSource como fallback.
         var ip = !string.IsNullOrWhiteSpace(info.Ip)
             ? info.Ip
             : (conn?.DataSource ?? "Desconocida");
 
-        var port = info.Port; // si no se pudo parsear, estará en 0 que es aceptable como "no definido"
-
-        // 4) Construir el bloque de error estructurado reutilizando el formateador estándar.
+        // 4) Construir el bloque de error reutilizando el formateador estándar.
         var formatted = LogFormatter.FormatDbExecutionError(
             nombreBD: databaseName,
             ip: ip,
-            puerto: port,
+            puerto: info.Port,   // Si no se pudo parsear, será 0 y se muestra tal cual.
             biblioteca: schema,
             tabla: tableName,
             sentenciaSQL: command.CommandText,
@@ -82,15 +98,12 @@ public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? conte
             WriteLog(context, formatted);
         }
 
-        // Mantener también el rastro transversal de la excepción.
+        // Además del bloque estructurado, mantenemos el rastro transversal de la excepción.
         AddExceptionLog(ex);
     }
     catch (Exception fail)
     {
+        // El logging nunca debe romper la aplicación; se registra el fallo interno y se continúa.
         LogInternalError(fail);
     }
 }
-
-
-
-
