@@ -96,3 +96,4 @@ public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? conte
         LogInternalError(fail);
     }
 }
+
