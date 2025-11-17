@@ -1,7 +1,7 @@
-Ahora tengo este error:
+El programa compilo, pero tengo este error:
 
-  3956        // Descripción de código (si existe, suele ser más expresiva).        
-  3957        dcl-s tmpDesc varchar(500);                                           
-======>       aaaaa                                                                 
-*RNF0725 30 a      034000  El tipo de sentencia está fuera de secuencia para el     
-                           subprocedimiento.                                        
+ La longitud o posición de inicio está fuera de rango para la operación de     serie.                                                               
+ Error de función. RNX0100 no supervisado por TNP02POST en la sentencia 
+   0000003815, instrucción X'0000'.                                     
+ La llamada a SBR100 ha finalizado con error (C G D F).                 
+ La llamada a SBR100 ha finalizado con error (C G D F).                 
