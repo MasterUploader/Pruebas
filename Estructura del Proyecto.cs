@@ -1,29 +1,11 @@
-Si la data viene así:
+Como coloco este codigo rpgle
 
-{
-                                "header": {
-                                  "h-request-id": "REQ1234567890",
-                                  "h-channel": "WEB",
-                                  "h-session-id": "SESSION123",
-                                  "h-client-ip": "192.168.1.50",
-                                  "h-user-id": "USRTEST",
-                                  "h-provider": "DaviviendaTNP",
-                                  "h-organization": "ORG01",
-                                  "h-terminal": "P0055468",
-                                  "h-timestamp": "2025-11-17T21:00:00Z"
-                                },
-                                "body": {
-                                  "GetAuthorizationManual": {
-                                    "pMerchantID": "4001021             ",
-                                    "pTerminalID": "P0055468            ",
-                                    "pPrimaryAccountNumber": "5413330057004039    ",
-                                    "pDateExpiration": "2512                ",
-                                    "pCVV2": "000                 ",
-                                    "pAmount": "10000               ",
-                                    "pSystemsTraceAuditNumber": "10000               "
-                                  }
-                                }
-                              }
+          callp yajl_addChar('pMerchantID': %trim(input.MerchantID));
+          callp yajl_addChar('pTerminalID': %trim(input.TerminalID));
+          callp yajl_addChar('pPrimaryAccountNumber' :%trim(input.PrimaryAccNumber));
+          callp yajl_addChar('pDateExpiration': %trim(input.DateExpiration));
+          callp yajl_addChar('pCVV2': %trim(input.CVV2));
+          callp yajl_addChar('pAmount': %trim(input.Amount));
+          callp yajl_addChar('pSystemsTraceAuditNumber':%trim(input.Amount));
 
-
-Porque da error Monto debe ser numérico positivo en formato string.
+Sabiendo que el limite no puede sobrepasar cierta longitud, por ejemplo la linea callp yajl_addChar('pMerchantID': %trim(input.MerchantID));, marca el limite.
