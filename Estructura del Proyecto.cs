@@ -1,99 +1,83 @@
-/// <summary>
-/// Registra un log de SQL con error y lo encola con el INICIO real para mantener el orden cronológico.
-/// Completa información de base de datos y biblioteca a partir de la cadena de conexión, del DbConnection
-/// y del propio comando SQL.
-/// </summary>
-public void LogDatabaseError(DbCommand command, Exception ex, HttpContext? context = null)
-{
-    try
-    {
-        var conn = command.Connection;
-        var info = LogHelper.ExtractDbConnectionInfo(conn?.ConnectionString);
+Tengo esta CLLE, crea una CLLE aparte solo para llamar a esta para realizar pruebas
 
-        // 1) Tabla/esquema a partir del SQL: puede venir "bcah96dta.iposre01g1" o solo "iposre01g1".
-        var rawTable = LogHelper.ExtractTableName(command.CommandText);
 
-        string schema = info.Library;   // Biblioteca desde connection string (si existe).
-        string tableName = rawTable;
+             PGM        PARM(&HREQUESTID &HCHANNEL &HTERMINAL +
+                          &HORGANIZA &HUSERID &HPROVIDER &HSESSION +
+                          &HCLIENTIP &HTIMESTAMP &RESCODDES +
+                          &RESPCODE &AUTIDRESP &RETREFNUMB +
+                          &SYTRAUNUM &TRANTYPE &TILOCTRANS +
+                          &DATLOCTRAN &AMOUNT &MERCHANTID &MCC +
+                          &CURRCODE &PACCNUMB &TERMID &DATEEXP &CVV2)
 
-        if (!string.IsNullOrWhiteSpace(rawTable))
-        {
-            var parts = rawTable.Split('.', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length > 1)
-            {
-                // Si no hay biblioteca en el connection string, la inferimos del SQL.
-                if (string.IsNullOrWhiteSpace(schema))
-                {
-                    schema = parts[0];          // bcah96dta
-                }
 
-                tableName = parts[^1];          // iposre01g1
-            }
-        }
+                              /*GENERALES*/
+             DCL        VAR(&HREQUESTID) TYPE(*CHAR) LEN(100)
+             DCL        VAR(&HCHANNEL) TYPE(*CHAR) LEN(20)
+             DCL        VAR(&HTERMINAL) TYPE(*CHAR) LEN(20)
+             DCL        VAR(&HORGANIZA) TYPE(*CHAR) LEN(20)
+             DCL        VAR(&HUSERID) TYPE(*CHAR) LEN(20)
+             DCL        VAR(&HPROVIDER) TYPE(*CHAR) LEN(100)
+             DCL        VAR(&HSESSION) TYPE(*CHAR) LEN(100)
+             DCL        VAR(&HCLIENTIP) TYPE(*CHAR) LEN(20)
+             DCL        VAR(&HTIMESTAMP) TYPE(*CHAR) LEN(50)
 
-        if (string.IsNullOrWhiteSpace(schema))
-        {
-            schema = "Desconocida";
-        }
+                                /*DATOS CONSULTA*/
+            DCL        VAR(&ResCodDes) TYPE(*CHAR) LEN(500)
+            DCL        VAR(&RespCode) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&AutIdResp) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&RetRefNumb) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&SyTrAuNum) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&TranType) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&TiLocTrans) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&DatLocTran) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&Amount) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&MerchantID) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&MCC) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&CurrCode) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&PAccNumb) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&TermID) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&DateExp      ) TYPE(*CHAR) LEN(20)
+            DCL        VAR(&CVV2        ) TYPE(*CHAR) LEN(20)
 
-        // 2) Base de datos:
-        //    - Primero lo que venga del connection string.
-        //    - Si viene vacío, usar conn.Database (que en tu log es DVHNDEV).
-        //    - Si aún está vacío, usar el propio esquema como "database lógica".
-        var databaseName = !string.IsNullOrWhiteSpace(info.Database)
-            ? info.Database
-            : (!string.IsNullOrWhiteSpace(conn?.Database)
-                ? conn!.Database
-                : schema);
 
-        if (string.IsNullOrWhiteSpace(databaseName))
-        {
-            databaseName = "Desconocida";
-        }
 
-        // 3) IP: si no está en info.Ip, usamos DataSource como fallback.
-        var ip = !string.IsNullOrWhiteSpace(info.Ip)
-            ? info.Ip
-            : (conn?.DataSource ?? "Desconocida");
+             /*LIBRERIA*/
+             ADDLIBLE   LIB(BCAH96)
+                  MONMSG     MSGID(CPF2103)
+             ADDLIBLE   LIB(BCAH96DTA)
+                  MONMSG     MSGID(CPF2103)
+             ADDLIBLE   LIB(LIBHTTP)
+                  MONMSG     MSGID(CPF2103)
+             ADDLIBLE   LIB(GX)
+                  MONMSG     MSGID(CPF2103)
+             ADDLIBLE   LIB(YAJL)
+                  MONMSG     MSGID(CPF2103)
 
-        // 4) Construimos el bloque de error usando los valores reforzados.
-        var formatted = LogFormatter.FormatDbExecutionError(
-            nombreBD: databaseName,
-            ip: ip,
-            puerto: info.Port,
-            biblioteca: schema,
-            tabla: tableName,
-            sentenciaSQL: command.CommandText,
-            exception: ex,
-            horaError: DateTime.Now
-        );
+             /*ACÁ LLAMAREMOS AL POST*/
+              CALL PGM(BCAH96/TNP02POST) PARM(&HREQUESTID +
+                &HCHANNEL +
+                &HTERMINAL +
+                &HORGANIZA +
+                &HUSERID +
+                &HPROVIDER +
+                &HSESSION +
+                &HCLIENTIP +
+                &HTIMESTAMP +
+                &ResCodDes +
+                &RespCode +
+                &AutIdResp +
+                &RetRefNumb +
+                &SyTrAuNum +
+                &TranType +
+                &TiLocTrans +
+                &DatLocTran +
+                &Amount +
+                &MerchantID +
+                &MCC +
+                &CurrCode +
+                &PAccNumb +
+                &TermID +
+                &DateExp +
+                &CVV2 )
 
-        if (context is not null)
-        {
-            var startedUtc = context.Items.TryGetValue("__SqlStartedUtc", out var o) && o is DateTime dt
-                ? dt
-                : DateTime.UtcNow;
-
-            if (!context.Items.ContainsKey("HttpClientLogsTimed"))
-            {
-                context.Items["HttpClientLogsTimed"] = new List<object>();
-            }
-
-            if (context.Items["HttpClientLogsTimed"] is List<object> timed)
-            {
-                timed.Add(new { TsUtc = startedUtc, Seq = NextSeq(context), Content = formatted });
-            }
-        }
-        else
-        {
-            WriteLog(context, formatted);
-        }
-
-        AddExceptionLog(ex);
-    }
-    catch (Exception fail)
-    {
-        LogInternalError(fail);
-    }
-}
-
+     ENDPGM
