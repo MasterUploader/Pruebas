@@ -1,38 +1,12 @@
-/* === Definir el mixin a NIVEL RAÍZ (exportable para otros módulos) === */
-@mixin btn-base {
-  display: inline-flex;
-  gap: .5rem;
-  padding: .375rem .75rem;
-  border-radius: .375rem;
-  background: var(--primary-500);
-  color: #fff;
-  border: 1px solid transparent;
-  cursor: pointer;
-}
+/* Importa el módulo de botones con namespace */
+@use './button' as button;
 
-/* === Reglas del componente dentro de la capa === */
 @layer components {
-  .btn { @include btn-base; }
+  .pagination { display: flex; gap: .25rem; align-items: center; }
 
-  .btn:disabled {
-    opacity: .6;
-    cursor: not-allowed;
+  /* Aplica el mismo estilo base del botón sin usar @extend */
+  .page {
+    @include button.btn-base();
+    padding: .25rem .5rem; /* ajuste propio de la paginación */
   }
 }
-
-
-
-
-/* Importa el módulo y usa su mixin con namespace */
-@use '../components/button' as button;
-
-@layer legacy {
-  /* Clase legacy que reutiliza el mixin del botón moderno */
-  .btn-imprimir { @include button.btn-base; }
-
-  .contenedor { padding: var(--space-6); }
-  .titulo { font-weight: 600; }
-}
-
-
-
