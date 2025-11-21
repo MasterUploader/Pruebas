@@ -1,41 +1,44 @@
-using System.Linq;
-using System.Web.Http;
-using System.Web.Http.Cors;
-using System.Web.Http.Filters;           // <-- necesario para HostAuthenticationFilter
-using Microsoft.Owin.Security.OAuth;     // <-- OAuthDefaults
+SELECT
+    wo.WORKORDERID AS "Request id",
+    wo.TITLE AS "Subject",
+    wo.CREATEDTIME AS "Created time",
+    gd_main.QUEUENAME AS "Grupo",
 
-namespace Presentation.RestService
-{
-    public static class WebApiConfig
-    {
-        public static void Register(HttpConfiguration config)
-        {
-            // ===== Autenticación global: sólo OAuth bearer =====
-            config.SuppressDefaultHostAuthentication();
-            config.Filters.Add(new HostAuthenticationFilter(OAuthDefaults.AuthenticationType));
+    (
+        -- Subconsulta para columna "Grupos pasados"
+        SELECT STRING_AGG(gd_sub.QUEUENAME, ', ') AS assessindex
+        FROM WO_Assessment wa
+        JOIN WO_Group_Info wfi
+            ON wa.ASSESSMENTID = wfi.ASSESSMENTID
+        LEFT JOIN QueueDefinition gd_sub
+            ON wfi.NEXTGROUPID = gd_sub.QUEUEID
+        WHERE wa.WORKORDERID = wo.WORKORDERID
+          AND wfi.NEXTGROUPID IS NOT NULL
+    ) AS "Grupos pasados"
 
-            // Rutas por atributo y fallback
-            config.MapHttpAttributeRoutes();
-            config.Routes.MapHttpRoute(
-                name: "DefaultApi",
-                routeTemplate: "api/{controller}/{id}",
-                defaults: new { id = RouteParameter.Optional }
-            );
+FROM workorder wo
 
-            // CORS
-            var cors = new EnableCorsAttribute("*", "*", "*");
-            config.EnableCors(cors);
+LEFT JOIN workorder_queue wo_main
+    ON wo.WORKORDERID = wo_main.WORKORDERID
 
-            // Forzar JSON
-            var appXml = config.Formatters.XmlFormatter.SupportedMediaTypes
-                .FirstOrDefault(t => t.MediaType == "application/xml");
-            if (appXml != null)
-                config.Formatters.XmlFormatter.SupportedMediaTypes.Remove(appXml);
+LEFT JOIN QueueDefinition gd_main
+    ON wo_main.QUEUEID = gd_main.QUEUEID
 
-            config.EnableSystemDiagnosticsTracing();
-        }
-    }
-}
+WHERE
 
+    EXISTS (
+        SELECT 1
+        FROM WO_Assessment wa_hist
+        JOIN WO_Group_Info wfi_hist
+            ON wa_hist.ASSESSMENTID = wfi_hist.ASSESSMENTID
+        JOIN QueueDefinition gd_hist
+            ON wfi_hist.NEXTGROUPID = gd_hist.QUEUEID
+        WHERE
+            wa_hist.WORKORDERID = wo.WORKORDERID
+            AND gd_hist.QUEUENAME IN ('Receptoría SPS', 'Receptoría TGU')
+    )
 
-
+    -- 🔥 FILTRO AÑO 2025
+    AND wo.CREATEDTIME >= '2025-01-01 00:00:00'
+    AND wo.CREATEDTIME <  '2026-01-01 00:00:00'
+;
