@@ -1,88 +1,17 @@
- <runtime>
-   <assemblyBinding xmlns="urn:schemas-microsoft-com:asm.v1">
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Owin.Security" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="0.0.0.0-4.2.3.0" newVersion="4.2.3.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Owin.Security.OAuth" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="0.0.0.0-4.2.3.0" newVersion="4.2.3.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Owin.Security.Cookies" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="0.0.0.0-4.2.3.0" newVersion="4.2.3.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Owin" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="0.0.0.0-4.2.3.0" newVersion="4.2.3.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Newtonsoft.Json" culture="neutral" publicKeyToken="30ad4fe6b2a6aeed" />
-       <bindingRedirect oldVersion="0.0.0.0-13.0.0.0" newVersion="13.0.0.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Web.Optimization" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="1.0.0.0-1.1.0.0" newVersion="1.1.0.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="WebGrease" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="0.0.0.0-1.5.2.14234" newVersion="1.5.2.14234" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Web.Http" publicKeyToken="31bf3856ad364e35" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-5.3.0.0" newVersion="5.3.0.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Net.Http.Formatting" publicKeyToken="31bf3856ad364e35" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-6.0.0.0" newVersion="6.0.0.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Runtime.CompilerServices.Unsafe" publicKeyToken="b03f5f7f11d50a3a" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-6.0.0.0" newVersion="6.0.0.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Buffers" publicKeyToken="cc7b13ffcd2ddd51" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-4.0.4.0" newVersion="4.0.4.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Extensions.DependencyInjection.Abstractions" publicKeyToken="adb9793829ddae60" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-8.0.0.2" newVersion="8.0.0.2" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Extensions.Logging.Abstractions" publicKeyToken="adb9793829ddae60" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-8.0.0.2" newVersion="8.0.0.2" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Extensions.Options" publicKeyToken="adb9793829ddae60" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-8.0.0.2" newVersion="8.0.0.2" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Web.Cors" publicKeyToken="31bf3856ad364e35" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-5.3.0.0" newVersion="5.3.0.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Extensions.ObjectPool" publicKeyToken="adb9793829ddae60" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-8.0.11.0" newVersion="8.0.11.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Security.Cryptography.Xml" publicKeyToken="cc7b13ffcd2ddd51" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-8.0.0.2" newVersion="8.0.0.2" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="Microsoft.Extensions.WebEncoders" publicKeyToken="adb9793829ddae60" culture="neutral" />
-       <bindingRedirect oldVersion="0.0.0.0-8.0.11.0" newVersion="8.0.11.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Web.Helpers" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="1.0.0.0-3.0.0.0" newVersion="3.0.0.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Web.WebPages" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="1.0.0.0-3.0.0.0" newVersion="3.0.0.0" />
-     </dependentAssembly>
-     <dependentAssembly>
-       <assemblyIdentity name="System.Web.Mvc" publicKeyToken="31bf3856ad364e35" />
-       <bindingRedirect oldVersion="1.0.0.0-5.3.0.0" newVersion="5.3.0.0" />
-     </dependentAssembly>
-   </assemblyBinding>
- </runtime>
+# Web API 2.2 – 5.3.0
+Install-Package Microsoft.AspNet.WebApi -Version 5.3.0
+Install-Package Microsoft.AspNet.WebApi.Core -Version 5.3.0
+Install-Package Microsoft.AspNet.WebApi.Owin -Version 5.3.0
+Install-Package Microsoft.AspNet.WebApi.Client -Version 5.3.0
+Install-Package Microsoft.AspNet.WebApi.Cors -Version 5.3.0
+
+# OWIN (toda la familia en 4.2.3, como ya tienes los redirects)
+Install-Package Microsoft.Owin -Version 4.2.3
+Install-Package Microsoft.Owin.Host.SystemWeb -Version 4.2.3
+Install-Package Microsoft.Owin.Security -Version 4.2.3
+Install-Package Microsoft.Owin.Security.Cookies -Version 4.2.3
+Install-Package Microsoft.Owin.Security.OAuth -Version 4.2.3
+Install-Package Microsoft.Owin.Cors -Version 4.2.3
+
+# (Opcional pero recomendado) Quita paquetes ASP.NET Core que no uses en WebApi clásico
+Get-Package Microsoft.AspNetCore.* | % { Uninstall-Package $_.Id -Force -RemoveDependencies }
